@@ -7,3 +7,4 @@ test-results/
 .vite/
 .DS_Store
 *.log
+.claude/worktrees/
