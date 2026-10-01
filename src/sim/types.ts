@@ -1,5 +1,6 @@
 /** Types shared by the simulation worker, its client and the UI. */
 import type { GpuOceanData } from '../ocean/gpuData';
+import type { SampleBlock } from './recorder';
 import type { Experiment } from '../schema/experiment';
 import type { VesselCommand, VesselDefinition, VesselTelemetry } from '../vessel/api';
 
@@ -17,7 +18,11 @@ export interface SimFrame {
   stepMs: number;
   /** True when the simulation cannot keep up with the requested time scale. */
   lagging: boolean;
+  /** Fixed-rate recordings since the previous frame (channel names: `<id>:<quantity>`). */
+  samples: SampleBlock | null;
 }
+
+export type { SampleBlock };
 
 export interface SeaDiagnostics {
   /** Expected H_s of everything represented (all cascades + regular waves) [m]. */
