@@ -6,6 +6,30 @@ Status: Draft v1 · Owner: TBD · Last updated: 2026-10-01
 
 ---
 
+## 0. Implementation status (v0.1)
+
+The first build implements the core of Phases 0–4 and part of Phase 7:
+
+| Area                                                                                                                     | Status                 |
+| ------------------------------------------------------------------------------------------------------------------------ | ---------------------- |
+| Tooling, CI, schema, deterministic core                                                                                  | ✅ Done                |
+| Spectral ocean (JONSWAP/PM/Bretschneider, TMA, wind-sea growth, spreading, 4 cascades, choppy)                           | ✅ CPU reference + GPU |
+| Regular (Airy) waves                                                                                                     | ✅                     |
+| Vessel dynamics: pressure integration with waterline clipping, L0 radiation, viscous drag, propulsion, rudder, autopilot | ✅                     |
+| Instruments: wave gauges, motion recorders, Welch PSD, statistics, MSI, CSV export                                       | ✅                     |
+| Sandbox UI with presets, save/open/share, undo/redo, accessibility checks                                                | ✅                     |
+| Stokes/cnoidal/focused waves, grid (SWE/Boussinesq) solvers, scripting API, L1/L2 radiation                              | ⏳ Later phases        |
+
+**Deviation from §2:** the renderer uses **WebGL 2 through Three.js**, not raw WebGPU. Every
+current desktop and mobile browser supports WebGL 2, which maximises compatibility, and it runs
+in headless CI (SwiftShader), so GPU↔CPU consistency is tested on every change. The renderer is
+isolated behind `src/render/api.ts`, so a WebGPU backend can be added later without touching
+the rest of the app.
+
+**Deviation from §3.3:** vessels do not read the GPU surface back. They sample a CPU evaluation
+of _the same_ spectral components (`src/ocean/oceanField.ts`) in the simulation worker. This
+keeps the physics deterministic, testable in Node, and free of GPU read-back latency.
+
 ## 1. Vision
 
 Wave Laboratory is an interactive "ocean lab." A user can:
@@ -18,13 +42,13 @@ Wave Laboratory is an interactive "ocean lab." A user can:
 
 ### Guiding principles
 
-| Principle | What it means in practice |
-|---|---|
-| **Scientifically sound** | Each model rests on published theory, has a stated validity range, and is checked against analytic or published benchmark results in CI. The UI warns when the user leaves a model's validity range. |
-| **High speed** | 60 fps minimum and a 120 fps target at 1440p on a mid-range GPU. Physics runs at a fixed timestep, decoupled from rendering. |
-| **High definition** | Physically based water shading, multi-scale wave detail from 1 cm ripples up to 1 km swells, foam, spray and underwater views. |
-| **Honest about fidelity** | Two run modes: **Real-time** (GPU, float32, interactive) and **Reference** (CPU, float64, can run slower than real time and is used for validation and exports). |
-| **Customizable** | Every parameter can be edited in the UI and through a scripting API. Nothing important is hard-coded. |
+| Principle                 | What it means in practice                                                                                                                                                                            |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Scientifically sound**  | Each model rests on published theory, has a stated validity range, and is checked against analytic or published benchmark results in CI. The UI warns when the user leaves a model's validity range. |
+| **High speed**            | 60 fps minimum and a 120 fps target at 1440p on a mid-range GPU. Physics runs at a fixed timestep, decoupled from rendering.                                                                         |
+| **High definition**       | Physically based water shading, multi-scale wave detail from 1 cm ripples up to 1 km swells, foam, spray and underwater views.                                                                       |
+| **Honest about fidelity** | Two run modes: **Real-time** (GPU, float32, interactive) and **Reference** (CPU, float64, can run slower than real time and is used for validation and exports).                                     |
+| **Customizable**          | Every parameter can be edited in the UI and through a scripting API. Nothing important is hard-coded.                                                                                                |
 
 ---
 
@@ -32,11 +56,11 @@ Wave Laboratory is an interactive "ocean lab." A user can:
 
 ### Recommendation: TypeScript + WebGPU, running in the browser (desktop wrapper optional later)
 
-| Option | Pros | Cons | Verdict |
-|---|---|---|---|
-| **TypeScript + WebGPU (WGSL compute)** | Zero-install sharing by URL; compute shaders for FFT and PDE solvers; fast iteration; one codebase | WebGPU still maturing on some browsers/OSes; float32 only on GPU | ✅ **Chosen** |
-| Rust + wgpu (native + WASM) | Excellent performance, float64 on CPU, same WGSL shaders | Slower UI iteration; heavier toolchain | Keep as an **escape hatch**: hot CPU kernels can move to Rust→WASM later behind the same interfaces |
-| Unreal / Unity | Good-looking renderers out of the box | Little control over the numerics, hard to validate, licensing, heavy downloads, poor shareability | ❌ |
+| Option                                 | Pros                                                                                               | Cons                                                                                              | Verdict                                                                                             |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| **TypeScript + WebGPU (WGSL compute)** | Zero-install sharing by URL; compute shaders for FFT and PDE solvers; fast iteration; one codebase | WebGPU still maturing on some browsers/OSes; float32 only on GPU                                  | ✅ **Chosen**                                                                                       |
+| Rust + wgpu (native + WASM)            | Excellent performance, float64 on CPU, same WGSL shaders                                           | Slower UI iteration; heavier toolchain                                                            | Keep as an **escape hatch**: hot CPU kernels can move to Rust→WASM later behind the same interfaces |
+| Unreal / Unity                         | Good-looking renderers out of the box                                                              | Little control over the numerics, hard to validate, licensing, heavy downloads, poor shareability | ❌                                                                                                  |
 
 ### Stack
 
@@ -170,17 +194,17 @@ This gravity–capillary relation with finite depth covers deep water (tanh → 
 
 These can be layered on top of, or used instead of, the random sea:
 
-| Model | Use | Notes |
-|---|---|---|
-| Linear Airy wave | Teaching, RAO tests | Exact linear kinematics |
-| Stokes 2nd/3rd/5th order | Steep regular waves | Fenton's 5th-order coefficients; warn when Ursell number Ur = HL²/h³ > ~26 |
-| Gerstner (trochoidal) | Visual comparison | Labeled as rotational, not a physical ocean solution |
-| Cnoidal waves | Shallow, long, nonlinear | Jacobi elliptic functions; valid for high Ursell number |
-| Solitary wave | Tsunami/run-up demos | Boussinesq/KdV profile |
-| **Focused wave group (NewWave)** | Controlled rogue/extreme waves | Phases focused at (x_f, t_f); set crest height |
-| **Peregrine breather** | Nonlinear rogue-wave demo | From the NLS equation, deep water |
-| Wave packets / groups | Group velocity demos | Shows c_g = c/2 in deep water and c_g → c in shallow water |
-| **Second-order bound waves** (Sharma–Dean) | Realistic crest asymmetry for the spectral sea | Optional; adds set-down under groups |
+| Model                                      | Use                                            | Notes                                                                      |
+| ------------------------------------------ | ---------------------------------------------- | -------------------------------------------------------------------------- |
+| Linear Airy wave                           | Teaching, RAO tests                            | Exact linear kinematics                                                    |
+| Stokes 2nd/3rd/5th order                   | Steep regular waves                            | Fenton's 5th-order coefficients; warn when Ursell number Ur = HL²/h³ > ~26 |
+| Gerstner (trochoidal)                      | Visual comparison                              | Labeled as rotational, not a physical ocean solution                       |
+| Cnoidal waves                              | Shallow, long, nonlinear                       | Jacobi elliptic functions; valid for high Ursell number                    |
+| Solitary wave                              | Tsunami/run-up demos                           | Boussinesq/KdV profile                                                     |
+| **Focused wave group (NewWave)**           | Controlled rogue/extreme waves                 | Phases focused at (x_f, t_f); set crest height                             |
+| **Peregrine breather**                     | Nonlinear rogue-wave demo                      | From the NLS equation, deep water                                          |
+| Wave packets / groups                      | Group velocity demos                           | Shows c_g = c/2 in deep water and c_g → c in shallow water                 |
+| **Second-order bound waves** (Sharma–Dean) | Realistic crest asymmetry for the spectral sea | Optional; adds set-down under groups                                       |
 
 Validity guards: Miche breaking limit H/L ≤ 0.142·tanh(kh), depth-limited breaking H/h ≈ 0.78. When the user exceeds these, the lab clips the wave, flags it, or (when the grid solver is active) hands off to that solver.
 
@@ -213,6 +237,7 @@ These are for problems where linear superposition breaks down: shoaling, refract
   (M + A_∞)·ẍ(t) + ∫₀ᵗ K(t−τ)·ẋ(τ) dτ + C·x(t) = F_FK+hs(t) + F_diff(t) + F_visc + F_prop + F_rudder + F_wind + F_moor
 
   In the default **time-domain nonlinear mode**, hydrostatics and Froude–Krylov forces come from pressure integration over the instantaneous wetted hull (not linearized C·x), so large-angle behavior such as capsize and parametric roll emerges naturally.
+
 - Integrator: semi-implicit (symplectic Euler) with substeps by default; RK4 in Reference mode. Added mass is included implicitly to avoid the well-known instability of explicit added-mass coupling.
 
 ### 5.2 Hull representation & force pipeline
@@ -227,9 +252,9 @@ These are for problems where linear superposition breaks down: shoaling, refract
    - **Slamming:** momentum-based water-entry impulse (a von Kármán/Wagner-type estimate) on panels with high relative normal velocity. These events are logged.
    - **Roll damping:** the Ikeda empirical components (friction, eddy, lift, wave, bilge keel), because potential theory alone badly under-predicts roll damping.
 4. **Radiation & diffraction (fidelity levels):**
-   - *L0:* constant added mass plus linear damping estimated from strip theory (fast, robust; the default).
-   - *L1:* strip-theory frequency-dependent coefficients (Frank close-fit or Lewis forms), converted to a retardation kernel K(t) for the Cummins convolution, with a state-space approximation for speed.
-   - *L2 (import):* coefficients from external BEM codes (e.g. Capytaine / NEMOH / WAMIT output files) for users who want naval-architecture-grade inputs.
+   - _L0:_ constant added mass plus linear damping estimated from strip theory (fast, robust; the default).
+   - _L1:_ strip-theory frequency-dependent coefficients (Frank close-fit or Lewis forms), converted to a retardation kernel K(t) for the Cummins convolution, with a state-space approximation for speed.
+   - _L2 (import):_ coefficients from external BEM codes (e.g. Capytaine / NEMOH / WAMIT output files) for users who want naval-architecture-grade inputs.
 
 ### 5.3 Propulsion, steering & control
 
@@ -250,17 +275,17 @@ These are for problems where linear superposition breaks down: shoaling, refract
 
 ### 5.5 Built-in ship library (initial)
 
-| Vessel | Why |
-|---|---|
-| Box barge | Analytic hydrostatics; the first validation target |
-| Wigley hull | Classic benchmark with published RAOs (Journée 1992) |
-| KCS (KRISO Container Ship) | Modern open benchmark (SIMMAN/Tokyo workshops) |
-| DTMB 5415 (destroyer) | Open benchmark, roll/maneuvering data |
-| Fishing trawler | Parametric roll / stability demo |
-| Sailing yacht | Heel, windage, keel lift |
-| RIB / planing boat | High-speed slamming demo |
-| Lifeboat / small craft | Survival-conditions demo |
-| Floating wind platform (spar) | Offshore engineering demo with mooring |
+| Vessel                        | Why                                                  |
+| ----------------------------- | ---------------------------------------------------- |
+| Box barge                     | Analytic hydrostatics; the first validation target   |
+| Wigley hull                   | Classic benchmark with published RAOs (Journée 1992) |
+| KCS (KRISO Container Ship)    | Modern open benchmark (SIMMAN/Tokyo workshops)       |
+| DTMB 5415 (destroyer)         | Open benchmark, roll/maneuvering data                |
+| Fishing trawler               | Parametric roll / stability demo                     |
+| Sailing yacht                 | Heel, windage, keel lift                             |
+| RIB / planing boat            | High-speed slamming demo                             |
+| Lifeboat / small craft        | Survival-conditions demo                             |
+| Floating wind platform (spar) | Offshore engineering demo with mooring               |
 
 ---
 
@@ -364,11 +389,11 @@ Orbit, free-fly, ship follow (chase), on-deck/bridge (with the ship's motion, op
 
   ```ts
   lab.ocean.add(jonswap({ hs: 6, tp: 11, gamma: 3.3, dir: 30 }));
-  const ship = lab.ships.spawn("kcs", { heading: 0, speed: 8 });
+  const ship = lab.ships.spawn('kcs', { heading: 0, speed: 8 });
   for (const heading of range(0, 180, 15)) {
     await lab.reset({ keepOcean: true });
     ship.setHeading(heading);
-    await lab.run({ seconds: 600, mode: "reference" });
+    await lab.run({ seconds: 600, mode: 'reference' });
     lab.report.add({ heading, rollRms: ship.stats.roll.rms });
   }
   ```
@@ -381,24 +406,24 @@ Orbit, free-fly, ship follow (chase), on-deck/bridge (with the ship's motion, op
 
 The validation suite in `tools/validation` runs in CI on every PR (fast subset) and nightly (full set). Each test produces numbers plus a plot in an auto-generated **Validation Report**, published with every release.
 
-| # | Test | Reference | Pass criterion (initial) |
-|---|---|---|---|
-| V1 | Dispersion relation: phase speed of single waves, deep/intermediate/shallow | Analytic | < 0.5 % error |
-| V2 | Spectrum reproduction: H_s, T_p and PSD shape from virtual gauges | Input spectrum | H_s within 3 %; PSD within 95 % CI |
-| V3 | Wave statistics: crest/height distributions (linear sea) | Rayleigh | KS test p > 0.05 |
-| V4 | Stokes 5th-order profile | Fenton (1985) | < 1 % of H |
-| V5 | Dam break (SWE) | Ritter analytic solution | L1 error convergence order ≥ 1 |
-| V6 | Solitary-wave run-up on a plane beach | Synolakis (1987) | Run-up within 5 % |
-| V7 | Shoal refraction/diffraction (Boussinesq) | Berkhoff et al. (1982) | Matches the transect data |
-| V8 | Wavemaker transfer function | Biesel analytic | < 2 % |
-| V9 | Box barge hydrostatics: draft, GM, GZ curve | Analytic | < 0.5 % |
-| V10 | Free heave/roll decay periods | Analytic (with added mass) | < 3 % |
-| V11 | Wigley hull heave/pitch RAOs | Journée (1992) experiments | Within experimental scatter for L1 fidelity |
-| V12 | KCS calm-water resistance trend & motions | SIMMAN / Tokyo 2015 data | Trend agreement; documented deviations |
-| V13 | Kelvin wake angle | 19.47° | ±0.5° |
-| V14 | Energy conservation (inviscid, periodic domain) | — | Drift < 0.1 % per 1000 periods |
-| V15 | GPU vs CPU reference agreement | Reference mode | Max relative error < 1e-3 (float32 bound) |
-| V16 | Real-time readback latency error on ship motions | Reference mode | < 2 % RMS difference |
+| #   | Test                                                                        | Reference                  | Pass criterion (initial)                    |
+| --- | --------------------------------------------------------------------------- | -------------------------- | ------------------------------------------- |
+| V1  | Dispersion relation: phase speed of single waves, deep/intermediate/shallow | Analytic                   | < 0.5 % error                               |
+| V2  | Spectrum reproduction: H_s, T_p and PSD shape from virtual gauges           | Input spectrum             | H_s within 3 %; PSD within 95 % CI          |
+| V3  | Wave statistics: crest/height distributions (linear sea)                    | Rayleigh                   | KS test p > 0.05                            |
+| V4  | Stokes 5th-order profile                                                    | Fenton (1985)              | < 1 % of H                                  |
+| V5  | Dam break (SWE)                                                             | Ritter analytic solution   | L1 error convergence order ≥ 1              |
+| V6  | Solitary-wave run-up on a plane beach                                       | Synolakis (1987)           | Run-up within 5 %                           |
+| V7  | Shoal refraction/diffraction (Boussinesq)                                   | Berkhoff et al. (1982)     | Matches the transect data                   |
+| V8  | Wavemaker transfer function                                                 | Biesel analytic            | < 2 %                                       |
+| V9  | Box barge hydrostatics: draft, GM, GZ curve                                 | Analytic                   | < 0.5 %                                     |
+| V10 | Free heave/roll decay periods                                               | Analytic (with added mass) | < 3 %                                       |
+| V11 | Wigley hull heave/pitch RAOs                                                | Journée (1992) experiments | Within experimental scatter for L1 fidelity |
+| V12 | KCS calm-water resistance trend & motions                                   | SIMMAN / Tokyo 2015 data   | Trend agreement; documented deviations      |
+| V13 | Kelvin wake angle                                                           | 19.47°                     | ±0.5°                                       |
+| V14 | Energy conservation (inviscid, periodic domain)                             | —                          | Drift < 0.1 % per 1000 periods              |
+| V15 | GPU vs CPU reference agreement                                              | Reference mode             | Max relative error < 1e-3 (float32 bound)   |
+| V16 | Real-time readback latency error on ship motions                            | Reference mode             | < 2 % RMS difference                        |
 
 Each model also gets a **"Theory & limits" doc page** covering equations, assumptions, validity range and references. The inspector links to these pages and shows a live validity indicator (e.g. a warning that the Ursell number is 40, so linear theory is unreliable and the user should switch to cnoidal waves or the Boussinesq solver).
 
@@ -408,16 +433,16 @@ Each model also gets a **"Theory & limits" doc page** covering equations, assump
 
 Target hardware: RTX 3060 / Apple M2 Pro class at 1440p, 60 fps minimum, 120 fps goal. Laptop iGPU target: 1080p, 30–60 fps with reduced cascades.
 
-| Stage | Budget (ms/frame) |
-|---|---|
-| Spectral FFT (4 cascades × 256², 7 fields each) | 0.8 |
-| Grid solver region (512², 2 substeps) | 1.5 |
-| Foam/derivatives/mip generation | 0.4 |
-| Ocean geometry + shading | 3.0 |
-| Ships, sky, particles, post-processing | 3.5 |
-| **GPU total** | **≈ 9.2 (≈ 108 fps)** |
+| Stage                                                   | Budget (ms/frame)     |
+| ------------------------------------------------------- | --------------------- |
+| Spectral FFT (4 cascades × 256², 7 fields each)         | 0.8                   |
+| Grid solver region (512², 2 substeps)                   | 1.5                   |
+| Foam/derivatives/mip generation                         | 0.4                   |
+| Ocean geometry + shading                                | 3.0                   |
+| Ships, sky, particles, post-processing                  | 3.5                   |
+| **GPU total**                                           | **≈ 9.2 (≈ 108 fps)** |
 | Vessel physics, 4 ships × 5k tris × 4 substeps (worker) | 2.0 (off main thread) |
-| UI + plots (main thread) | ≤ 2.0 |
+| UI + plots (main thread)                                | ≤ 2.0                 |
 
 Quality presets (Low/Medium/High/Ultra/Reference) scale cascade resolution, mesh density, grid size and effects. A built-in **performance HUD** shows per-pass GPU timings using timestamp queries.
 
@@ -428,6 +453,7 @@ Quality presets (Low/Medium/High/Ultra/Reference) scale cascade resolution, mesh
 Durations assume roughly 1–2 dedicated engineers; they should be re-estimated after Phase 1. Each phase ends with a **demo build and exit criteria**.
 
 ### Phase 0: Foundations (≈ 2 weeks)
+
 - Monorepo, TypeScript strict mode, lint/format, Vitest, Playwright, GitHub Actions CI, deploy previews (e.g. GitHub Pages / Cloudflare Pages).
 - WebGPU device bootstrap with feature detection and a friendly unsupported-browser page.
 - Core: math library, units, fixed-step clock, PCG RNG, event bus, Zod experiment schema v0.
@@ -435,6 +461,7 @@ Durations assume roughly 1–2 dedicated engineers; they should be re-estimated 
 - **Exit:** CI green, an empty scene at 144 fps, and the schema round-trips.
 
 ### Phase 1: Deep-water spectral ocean (≈ 4 weeks)
+
 - CPU float64 reference implementation of spectra, dispersion and direct summation.
 - GPU FFT (Stockham radix-4/8 in WGSL), multi-cascade synthesis, choppy displacement, normals, Jacobian.
 - JONSWAP, PM, TMA, spreading functions; the wind/fetch parameterization.
@@ -443,6 +470,7 @@ Durations assume roughly 1–2 dedicated engineers; they should be re-estimated 
 - **Exit:** V1, V2, V3 and V15 pass; a North Sea preset looks convincing at 120 fps.
 
 ### Phase 2: Vessel dynamics v1 (≈ 4 weeks)
+
 - Rigid-body 6-DOF in a worker; hull import/preprocessing; the parametric box barge and Wigley hull.
 - Waterline clipping + hydrostatic + Froude–Krylov pressure integration; L0 radiation; ITTC drag; Ikeda roll damping.
 - GPU→CPU local patch readback with time extrapolation.
@@ -450,38 +478,45 @@ Durations assume roughly 1–2 dedicated engineers; they should be re-estimated 
 - **Exit:** V9, V10 and V16 pass; a barge and a Wigley hull ride the waves stably at 4× speed.
 
 ### Phase 3: The sandbox v1 (≈ 4 weeks)
+
 - Scene tree, inspector, timeline (pause/step/speed/rewind via snapshots), drag-and-drop ships.
 - Save/load/share experiments; the first 6 presets; CSV export; screenshots.
 - Validity indicators and the "Theory & limits" pages for the implemented models.
 - **Exit:** a new user can build and share a "ship in a storm" experiment in under 5 minutes (usability test with 3–5 people).
 
 ### Phase 4: Propulsion, steering & richer vessels (≈ 3 weeks)
+
 - Propeller, rudder, engine, autopilot, manual helm controls.
 - KCS, trawler, RIB and yacht; loading-condition editor with a GZ curve.
 - Slamming, green water, capsize detection; vessel metrics panel (MSI etc.).
 - **Exit:** a parametric-roll preset reproduces the phenomenon; turning circles look plausible.
 
 ### Phase 5: Advanced waves (≈ 4 weeks)
+
 - Stokes 2nd–5th order, cnoidal, solitary, focused groups (NewWave), Peregrine breather, second-order bound waves.
 - Event scheduler; the Draupner preset; an automatic RAO sweep tool.
 - **Exit:** V4, V11 and V13 pass; the RAO tool reproduces Wigley reference curves.
 
 ### Phase 6: Nearshore & wave tanks (≈ 6 weeks)
+
 - GPU SWE (Kurganov–Petrova) with wet/dry fronts; bathymetry editor and import.
 - Wavemakers, absorbers, flume/basin domains, coupling with the spectral far field.
 - Boussinesq solver with a breaking model.
 - **Exit:** V5–V8 pass; tsunami-beach, Berkhoff shoal and harbor seiche presets work.
 
 ### Phase 7: Visual excellence (≈ 4 weeks, can overlap with Phases 5–6)
+
 - Persistent foam, spray particles, LEAN/LEADR filtering, SSR, caustics, underwater view, atmosphere and time of day, TAA and quality presets.
 - Kelvin wakes, bow waves, hull–water interaction effects.
 - **Exit:** a side-by-side review against reference footage; GPU budget met on target hardware.
 
 ### Phase 8: Science tooling & scripting (≈ 3 weeks)
+
 - Scripting API, headless batch runner, Reference mode end to end, auto-generated validation report, L1 strip-theory radiation with Cummins convolution, BEM coefficient import.
 - **Exit:** a heading sweep script runs headless and produces a polar plot report; V12 is documented.
 
 ### Phase 9: Hardening & release (≈ 3 weeks)
+
 - Performance profiling across GPUs/browsers, accessibility (keyboard navigation, color-blind-safe overlays), onboarding tutorial, user guide, example gallery.
 - **Exit:** v1.0 release with a published validation report.
 
@@ -503,15 +538,15 @@ Durations assume roughly 1–2 dedicated engineers; they should be re-estimated 
 
 ## 12. Risks & mitigations
 
-| Risk | Impact | Mitigation |
-|---|---|---|
-| WebGPU support gaps (Linux/Firefox/Safari versions) | Users can't run it | Feature detection, a reduced-quality path, the Tauri desktop wrapper as a fallback, and a clear support matrix |
-| GPU→CPU latency destabilizes ships | Jittery or unstable motion | Time extrapolation, implicit added mass, substepping, Reference-mode comparison test V16, and the option to move force integration to the GPU |
-| float32 precision far from the origin | Jitter over large domains | Camera-relative rendering, floating origin, and periodic phase wrapping (mod 2π) for spectral time |
-| Scope creep (CFD-level expectations) | Never ships | Clear fidelity statements; explicitly out of scope: full Navier–Stokes/VOF, wave–wave nonlinear energy transfer (WAM-style), ice, hull flexing. SPH/VOF is a possible "v2 research" item |
-| Radiation/diffraction modeling is complex | Inaccurate motions | Ship L0 early; validate against Wigley; allow imported BEM coefficients for experts |
-| Breaking waves are hard to simulate physically | Unrealistic crests | Parameterized breaking (Jacobian/steepness criteria + dissipation) in spectral mode; physically based breaking only in the grid solvers |
-| Performance on laptops | Poor experience | Quality presets, dynamic resolution, lower cascade counts |
+| Risk                                                | Impact                     | Mitigation                                                                                                                                                                               |
+| --------------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| WebGPU support gaps (Linux/Firefox/Safari versions) | Users can't run it         | Feature detection, a reduced-quality path, the Tauri desktop wrapper as a fallback, and a clear support matrix                                                                           |
+| GPU→CPU latency destabilizes ships                  | Jittery or unstable motion | Time extrapolation, implicit added mass, substepping, Reference-mode comparison test V16, and the option to move force integration to the GPU                                            |
+| float32 precision far from the origin               | Jitter over large domains  | Camera-relative rendering, floating origin, and periodic phase wrapping (mod 2π) for spectral time                                                                                       |
+| Scope creep (CFD-level expectations)                | Never ships                | Clear fidelity statements; explicitly out of scope: full Navier–Stokes/VOF, wave–wave nonlinear energy transfer (WAM-style), ice, hull flexing. SPH/VOF is a possible "v2 research" item |
+| Radiation/diffraction modeling is complex           | Inaccurate motions         | Ship L0 early; validate against Wigley; allow imported BEM coefficients for experts                                                                                                      |
+| Breaking waves are hard to simulate physically      | Unrealistic crests         | Parameterized breaking (Jacobian/steepness criteria + dissipation) in spectral mode; physically based breaking only in the grid solvers                                                  |
+| Performance on laptops                              | Poor experience            | Quality presets, dynamic resolution, lower cascade counts                                                                                                                                |
 
 ---
 
@@ -528,22 +563,22 @@ Durations assume roughly 1–2 dedicated engineers; they should be re-estimated 
 
 ## 14. Key references
 
-- Tessendorf, J. (2001). *Simulating Ocean Water.* SIGGRAPH course notes.
-- Hasselmann, K. et al. (1973). JONSWAP. *Dtsch. Hydrogr. Z.*
-- Holthuijsen, L. (2007). *Waves in Oceanic and Coastal Waters.* Cambridge.
-- Dean, R. & Dalrymple, R. (1991). *Water Wave Mechanics for Engineers and Scientists.*
-- Fenton, J. (1985). A fifth-order Stokes theory for steady waves. *J. Waterway, Port, Coastal, Ocean Eng.*
+- Tessendorf, J. (2001). _Simulating Ocean Water._ SIGGRAPH course notes.
+- Hasselmann, K. et al. (1973). JONSWAP. _Dtsch. Hydrogr. Z._
+- Holthuijsen, L. (2007). _Waves in Oceanic and Coastal Waters._ Cambridge.
+- Dean, R. & Dalrymple, R. (1991). _Water Wave Mechanics for Engineers and Scientists._
+- Fenton, J. (1985). A fifth-order Stokes theory for steady waves. _J. Waterway, Port, Coastal, Ocean Eng._
 - Kurganov, A. & Petrova, G. (2007). A second-order well-balanced positivity preserving central-upwind scheme for the Saint-Venant system.
 - Madsen, P. & Sørensen, O. (1992). A new form of the Boussinesq equations with improved linear dispersion characteristics.
-- Faltinsen, O. (1990). *Sea Loads on Ships and Offshore Structures.* Cambridge.
+- Faltinsen, O. (1990). _Sea Loads on Ships and Offshore Structures._ Cambridge.
 - Journée, J. (1992). Experiments and calculations on four Wigley hull forms. TU Delft Report 909.
 - Cummins, W. (1962). The impulse response function and ship motions.
 - Ikeda, Y. et al. (1978). Prediction of ship roll damping.
-- Fossen, T. (2021). *Handbook of Marine Craft Hydrodynamics and Motion Control.* Wiley.
+- Fossen, T. (2021). _Handbook of Marine Craft Hydrodynamics and Motion Control._ Wiley.
 - Kerner, J. (2015). Water interaction model for boats in video games (Gamasutra).
 - Bruneton, E. & Neyret, F. (2008). Precomputed atmospheric scattering.
 - Berkhoff, J. et al. (1982). Verification computations with linear wave propagation models.
-- Synolakis, C. (1987). The runup of solitary waves. *J. Fluid Mech.*
+- Synolakis, C. (1987). The runup of solitary waves. _J. Fluid Mech._
 
 ---
 
