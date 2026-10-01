@@ -36,7 +36,21 @@ Requires Node ≥ 22 and a browser with WebGL 2.
 | `pnpm validate`                                | Longer statistical physics validation suite                                           |
 | `pnpm test:e2e`                                | Browser tests: rendering, GPU↔CPU consistency, accessibility (run `pnpm build` first) |
 | `pnpm lint` / `pnpm typecheck` / `pnpm format` | Code quality                                                                          |
-| `pnpm check`                                   | Everything CI runs, except the browser tests                                          |
+| `pnpm check`                                   | Format, lint, typecheck, unit tests and build in one go                               |
+| `pnpm deploy:pages`                            | Build and publish the live demo to the `gh-pages` branch                              |
+
+## Deploying the live demo (GitHub Pages, no Actions)
+
+The demo is a static site, so it is published by committing the built files to a `gh-pages`
+branch. No GitHub Actions are involved.
+
+1. `pnpm deploy:pages` builds the app, verifies it, and pushes `dist/` to `gh-pages`. Use
+   `--dry-run` to prepare the branch without pushing.
+2. One-time setup: **Settings → Pages → Build and deployment → Source: Deploy from a branch →
+   `gh-pages` / `(root)`**.
+
+The site is then served at `https://exios66.github.io/wave-laboratory/`. The build uses
+relative paths, so it also works from any other static host or sub-folder.
 
 ## Using the lab
 

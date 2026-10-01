@@ -21,7 +21,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "validate": "vitest run --project validation",
-    "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build"
+    "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build",
+    "deploy:pages": "node scripts/deploy-pages.mjs"
   },
   "dependencies": {
     "react": "^19.3.0",
@@ -49,5 +50,10 @@
     "typescript-eslint": "^8.71.0",
     "vite": "^8.3.2",
     "vitest": "~4.1.11"
+  },
+  "homepage": "https://exios66.github.io/wave-laboratory/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Exios66/wave-laboratory.git"
   }
 }

@@ -42,7 +42,8 @@ export default defineConfig({
         launchOptions: { args: SWIFTSHADER },
       },
     },
-    // Real WebKit (Safari's engine) where it is installed, e.g. in CI.
+    // Real WebKit (Safari's engine) when installed: `pnpm exec playwright install webkit`
+    // then run with PW_WEBKIT=1.
     ...(process.env.PW_WEBKIT
       ? [
           {

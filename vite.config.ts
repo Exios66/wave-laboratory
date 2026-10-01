@@ -2,9 +2,9 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// `base` is configurable so the app can be served from a sub-path (e.g. GitHub Pages).
+// Relative asset paths: the build works from any URL path (GitHub Pages, a sub-folder, file servers).
 export default defineConfig({
-  base: process.env.VITE_BASE ?? '/',
+  base: process.env.VITE_BASE ?? './',
   plugins: [react()],
   worker: { format: 'es' },
   build: {
