@@ -3,7 +3,7 @@
  * Simulation Web Worker. Keeps the physics (ocean FFTs, vessel dynamics, instruments) off the
  * main thread so the UI and renderer stay responsive.
  */
-import { parseExperiment } from '../schema/experiment';
+import { parseExperiment, type OceanQuality } from '../schema/experiment';
 import { createSimVessel } from './vessels';
 import { Simulation } from './Simulation';
 import type { FromWorker, ToWorker } from './types';
@@ -11,6 +11,7 @@ import type { FromWorker, ToWorker } from './types';
 declare const self: DedicatedWorkerGlobalScope;
 
 let sim: Simulation | null = null;
+let visualQuality: OceanQuality | undefined;
 
 function post(msg: FromWorker, transfer: Transferable[] = []): void {
   self.postMessage(msg, transfer);
@@ -24,8 +25,9 @@ function handle(msg: ToWorker): void {
         post({ type: 'error', message: `Invalid experiment: ${parsed.errors.join('; ')}` });
         return;
       }
+      if (msg.visualQuality) visualQuality = msg.visualQuality;
       sim = new Simulation(parsed.experiment, { createVessel: createSimVessel });
-      const ocean = sim.gpuData();
+      const ocean = sim.gpuData(visualQuality);
       post(
         {
           type: 'loaded',
@@ -36,6 +38,16 @@ function handle(msg: ToWorker): void {
         ocean.cascades.map((c) => c.h0.buffer as ArrayBuffer),
       );
       post({ type: 'frame', frame: sim.frame() });
+      return;
+    }
+    case 'visual': {
+      visualQuality = msg.quality;
+      if (!sim) return;
+      const ocean = sim.gpuData(visualQuality);
+      post(
+        { type: 'ocean', ocean },
+        ocean.cascades.map((c) => c.h0.buffer as ArrayBuffer),
+      );
       return;
     }
     case 'reset': {

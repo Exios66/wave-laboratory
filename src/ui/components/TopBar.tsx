@@ -1,6 +1,7 @@
 import { useId, useRef } from 'react';
 import { presetExperiment } from '../../schema/presets';
 import { readExperimentFile, saveExperiment, shareUrl } from '../fileOps';
+import type { PerformanceMode } from '../deviceProfile';
 import { useLab, type ThemePreference } from '../store';
 import { Icon } from './icons';
 
@@ -9,6 +10,8 @@ export function TopBar() {
   const canUndo = useLab((s) => s.past.length > 0);
   const canRedo = useLab((s) => s.future.length > 0);
   const theme = useLab((s) => s.theme);
+  const performance = useLab((s) => s.performance);
+  const perfId = useId();
   const fileRef = useRef<HTMLInputElement>(null);
   const nameId = useId();
   const themeId = useId();
@@ -128,6 +131,21 @@ export function TopBar() {
           <Icon name="redo" />
         </button>
         <span className="toolbar__sep" aria-hidden="true" />
+        <label htmlFor={perfId} className="visually-hidden">
+          Graphics performance
+        </label>
+        <select
+          id={perfId}
+          className="select"
+          style={{ width: 'auto' }}
+          value={performance}
+          title="Graphics performance — the physics is identical in every mode"
+          onChange={(e) => lab().setPerformance(e.target.value as PerformanceMode)}
+        >
+          <option value="auto">Graphics: Auto</option>
+          <option value="saver">Graphics: Battery saver</option>
+          <option value="quality">Graphics: Best quality</option>
+        </select>
         <label htmlFor={themeId} className="visually-hidden">
           Colour theme
         </label>

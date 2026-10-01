@@ -6,7 +6,7 @@
 import { FixedStepClock } from '../core/clock';
 import { buildGpuOceanData, type GpuOceanData } from '../ocean/gpuData';
 import { OceanField } from '../ocean/oceanField';
-import type { Experiment, VesselConfig } from '../schema/experiment';
+import type { Experiment, OceanQuality, VesselConfig } from '../schema/experiment';
 import type { VesselCommand, VesselDefinition, VesselTelemetry } from '../vessel/api';
 import { seaDiagnostics } from './diagnostics';
 import { Recorder } from './recorder';
@@ -51,13 +51,9 @@ export class Simulation {
     return this.clock.time;
   }
 
-  /** Data for the GPU renderer at a given visual quality. */
-  gpuData(): GpuOceanData {
-    return buildGpuOceanData(
-      this.experiment.waves,
-      this.experiment.environment,
-      this.experiment.quality,
-    );
+  /** Data for the GPU renderer at a given visual quality (default: the experiment's). */
+  gpuData(quality: OceanQuality = this.experiment.quality): GpuOceanData {
+    return buildGpuOceanData(this.experiment.waves, this.experiment.environment, quality);
   }
 
   diagnostics(): SeaDiagnostics {

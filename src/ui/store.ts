@@ -15,6 +15,7 @@ import {
 import { presetExperiment } from '../schema/presets';
 import type { SeaDiagnostics, SimFrame } from '../sim/types';
 import type { VesselDefinition } from '../vessel/api';
+import type { PerformanceMode } from './deviceProfile';
 
 export type Selection =
   | { kind: 'environment' }
@@ -56,6 +57,9 @@ export interface LabState {
   cameraTarget: string | null;
 
   theme: ThemePreference;
+  performance: PerformanceMode;
+  /** Current dynamic render scale (1 = full resolution). */
+  renderScale: number;
   dockTab: DockTab;
   dialog: 'help' | 'presets' | 'about' | null;
   notices: Notice[];
@@ -71,6 +75,8 @@ export interface LabState {
   setOverlay(mode: OverlayMode): void;
   setCamera(mode: CameraMode, target?: string | null): void;
   setTheme(theme: ThemePreference): void;
+  setPerformance(mode: PerformanceMode): void;
+  setRenderScale(scale: number): void;
   setDockTab(tab: DockTab): void;
   openDialog(dialog: LabState['dialog']): void;
   notify(tone: Notice['tone'], message: string): void;
@@ -84,6 +90,15 @@ export interface LabState {
 
 const HISTORY_LIMIT = 100;
 let noticeId = 0;
+
+function readPerformance(): PerformanceMode {
+  try {
+    const p = localStorage.getItem('wave-lab:performance');
+    return p === 'saver' || p === 'quality' ? p : 'auto';
+  } catch {
+    return 'auto';
+  }
+}
 
 function readTheme(): ThemePreference {
   try {
@@ -116,6 +131,8 @@ export const useLab = create<LabState>()((set, get) => ({
   cameraTarget: null,
 
   theme: readTheme(),
+  performance: readPerformance(),
+  renderScale: 1,
   dockTab: 'gauges',
   dialog: null,
   notices: [],
@@ -212,6 +229,17 @@ export const useLab = create<LabState>()((set, get) => ({
       /* storage unavailable: preference lasts for this session only */
     }
     set({ theme });
+  },
+  setPerformance(performance) {
+    try {
+      localStorage.setItem('wave-lab:performance', performance);
+    } catch {
+      /* storage unavailable */
+    }
+    set({ performance });
+  },
+  setRenderScale(renderScale) {
+    set({ renderScale });
   },
   setDockTab(dockTab) {
     set({ dockTab });

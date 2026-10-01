@@ -9,6 +9,7 @@ import type {
   VesselType,
   WaveSystem,
 } from '../../schema/experiment';
+import { detectDeviceProfile, effectiveQuality } from '../deviceProfile';
 import { getRuntime } from '../runtime';
 import { findProbe, findVessel, findWave, useLab } from '../store';
 import { VESSEL_TYPE_LABELS } from '../factories';
@@ -244,8 +245,23 @@ function EnvironmentInspector({ env, quality }: { env: Environment; quality: Oce
           }
           hint="Visual resolution only; the physics always uses the same wave components."
         />
+        <DeviceInfo quality={quality} />
       </fieldset>
     </>
+  );
+}
+
+function DeviceInfo({ quality }: { quality: OceanQuality }) {
+  const mode = useLab((s) => s.performance);
+  const scale = useLab((s) => s.renderScale);
+  const profile = detectDeviceProfile();
+  const eff = effectiveQuality(quality, mode, profile);
+  return (
+    <p className="field__hint">
+      This device: {profile.description}. Rendering at {eff} detail
+      {eff !== quality ? ` (capped from ${quality})` : ''}, {Math.round(scale * 100)} % resolution.
+      Change this with the Graphics setting in the top bar.
+    </p>
   );
 }
 

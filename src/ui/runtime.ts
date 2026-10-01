@@ -10,6 +10,7 @@ import type { LabRendererApi } from '../render/api';
 import { SimClient } from '../sim/SimClient';
 import type { FromWorker } from '../sim/types';
 import type { VesselCommand } from '../vessel/api';
+import { detectDeviceProfile, effectiveQuality, ResolutionGovernor } from './deviceProfile';
 import { useLab } from './store';
 import { telemetry } from './telemetry';
 
@@ -22,6 +23,9 @@ export class LabRuntime {
   private unsubscribers: (() => void)[] = [];
   private resizeObserver: ResizeObserver | null = null;
   private lastLoaded: Extract<FromWorker, { type: 'loaded' }> | null = null;
+  private readonly governor = new ResolutionGovernor();
+  private canvas: HTMLCanvasElement | null = null;
+  private visualQuality: string | null = null;
 
   constructor() {
     this.client = new SimClient();
@@ -30,6 +34,10 @@ export class LabRuntime {
       useLab.getState().simLoaded(defs, msg.diagnostics);
       this.lastLoaded = msg;
       this.pushSceneToRenderer();
+    });
+    this.client.on('ocean', (ocean) => {
+      if (this.lastLoaded) this.lastLoaded = { ...this.lastLoaded, ocean };
+      this.renderer?.setOcean(ocean);
     });
     this.client.on('frame', (frame) => {
       if (frame.samples) telemetry.append(frame.samples);
@@ -44,6 +52,7 @@ export class LabRuntime {
     this.unsubscribers.push(
       useLab.subscribe((s, prev) => {
         if (s.revision !== this.loadedRevision) this.load();
+        else if (s.performance !== prev.performance) this.applyPerformanceMode();
         if (!this.renderer) return;
         if (s.overlay !== prev.overlay) this.renderer.setOverlay(s.overlay);
         if (s.camera !== prev.camera || s.cameraTarget !== prev.cameraTarget) {
@@ -60,11 +69,39 @@ export class LabRuntime {
     this.load();
   }
 
+  private targetQuality() {
+    const s = useLab.getState();
+    return effectiveQuality(s.experiment.quality, s.performance, detectDeviceProfile());
+  }
+
   private load(): void {
     const s = useLab.getState();
     this.loadedRevision = s.revision;
     telemetry.clear();
-    this.client.load(s.experiment);
+    const quality = this.targetQuality();
+    this.visualQuality = quality;
+    this.client.load(s.experiment, quality);
+  }
+
+  /** Re-derive graphics settings after the performance mode changed (no simulation restart). */
+  private applyPerformanceMode(): void {
+    const quality = this.targetQuality();
+    if (quality !== this.visualQuality) {
+      this.visualQuality = quality;
+      this.client.setVisualQuality(quality);
+    }
+    this.configureGovernor();
+    if (this.canvas) this.resize(this.canvas);
+  }
+
+  private configureGovernor(): void {
+    const mode = useLab.getState().performance;
+    const g = this.governor;
+    g.maxScale = 1;
+    g.minScale = mode === 'quality' ? 0.75 : 0.5;
+    g.targetFps = mode === 'saver' ? 30 : 55;
+    g.scale = Math.min(g.scale, g.maxScale);
+    useLab.getState().setRenderScale(g.scale);
   }
 
   /** Attach the 3D view. `createRenderer` may throw if WebGL 2 is unavailable. */
@@ -85,6 +122,8 @@ export class LabRuntime {
     this.renderer.setCamera(s.camera, s.cameraTarget);
     this.renderer.setSelection(selectionId(s.selection));
     this.pushSceneToRenderer();
+    this.canvas = canvas;
+    this.configureGovernor();
     const parent = canvas.parentElement ?? canvas;
     this.resizeObserver = new ResizeObserver(() => this.resize(canvas));
     this.resizeObserver.observe(parent);
@@ -104,6 +143,7 @@ export class LabRuntime {
     this.resizeObserver = null;
     this.renderer?.dispose();
     this.renderer = null;
+    this.canvas = null;
   }
 
   get rendererApi(): LabRendererApi | null {
@@ -113,10 +153,15 @@ export class LabRuntime {
   private resize(canvas: HTMLCanvasElement): void {
     const parent = canvas.parentElement ?? canvas;
     const rect = parent.getBoundingClientRect();
+    const s = useLab.getState();
+    const profile = detectDeviceProfile();
+    const cap =
+      s.performance === 'quality' ? 2 : s.performance === 'saver' ? 1 : profile.maxPixelRatio;
+    const ratio = Math.min(window.devicePixelRatio || 1, cap) * this.governor.scale;
     this.renderer?.resize(
       Math.max(1, Math.floor(rect.width)),
       Math.max(1, Math.floor(rect.height)),
-      Math.min(window.devicePixelRatio || 1, 2),
+      Math.max(0.35, ratio),
     );
   }
 
@@ -139,6 +184,10 @@ export class LabRuntime {
     this.lastTime = now;
     const s = useLab.getState();
     if (s.playing && s.status === 'ready') this.client.advance(wall * s.timeScale);
+    if (this.renderer && !document.hidden && this.governor.frame(wall) && this.canvas) {
+      this.resize(this.canvas);
+      s.setRenderScale(this.governor.scale);
+    }
     this.renderer?.render();
   }
 

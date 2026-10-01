@@ -4,7 +4,7 @@
   "private": true,
   "description": "Wave Laboratory: a real-time, scientifically grounded 3D ocean-wave sandbox for wave experiments and ship seakeeping.",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "packageManager": "pnpm@10.28.0",
   "engines": {
     "node": ">=22"

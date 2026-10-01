@@ -4,7 +4,8 @@
  * (larger steps per message, `lagging` flag) instead of building an unbounded message queue.
  */
 import { Emitter } from '../core/emitter';
-import type { Experiment } from '../schema/experiment';
+import type { GpuOceanData } from '../ocean/gpuData';
+import type { Experiment, OceanQuality } from '../schema/experiment';
 import type { VesselCommand } from '../vessel/api';
 import type { FromWorker, SimFrame, ToWorker } from './types';
 
@@ -12,6 +13,7 @@ type LoadedMessage = Extract<FromWorker, { type: 'loaded' }>;
 
 export interface SimClientEvents extends Record<string, unknown> {
   loaded: LoadedMessage;
+  ocean: GpuOceanData;
   frame: SimFrame;
   error: string;
 }
@@ -46,6 +48,9 @@ export class SimClient extends Emitter<SimClientEvents> {
         this.loading = false;
         this.emit('loaded', msg);
         break;
+      case 'ocean':
+        this.emit('ocean', msg.ocean);
+        break;
       case 'frame':
         this.inFlight = false;
         this.emit('frame', msg.frame);
@@ -58,11 +63,18 @@ export class SimClient extends Emitter<SimClientEvents> {
     }
   }
 
-  load(experiment: Experiment): void {
+  load(experiment: Experiment, visualQuality?: OceanQuality): void {
     this.loading = true;
     this.pendingDt = 0;
     this.inFlight = true; // the worker answers a load with a frame
-    this.send({ type: 'load', experiment });
+    this.send(
+      visualQuality ? { type: 'load', experiment, visualQuality } : { type: 'load', experiment },
+    );
+  }
+
+  /** Change the renderer's ocean resolution without restarting the simulation. */
+  setVisualQuality(quality: OceanQuality): void {
+    this.send({ type: 'visual', quality });
   }
 
   /** Request the simulation to advance by `dt` seconds of simulated time. */
