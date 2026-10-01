@@ -134,9 +134,11 @@ export class OceanField {
     this.rho = env.waterDensity;
     this.g = env.gravity;
     const specs = cascadeSpecs(opts.cascadeSizes ?? CASCADE_SIZES).filter((s) => s.physics);
-    this.cascades = specs.map((s) =>
-      buildCascadeSpectrum(s, this.n, this.sea.spectral, this.sea.dispersion),
-    );
+    // Cascades without energy (e.g. only regular waves, or calm water) are skipped entirely so
+    // they cost no FFTs.
+    this.cascades = specs
+      .map((s) => buildCascadeSpectrum(s, this.n, this.sea.spectral, this.sea.dispersion))
+      .filter((c) => c.variance > 0);
     this.work = Array.from({ length: F.Count / 2 }, () => new Float64Array(2 * this.n * this.n));
     this.kx = new Float64Array(this.n);
     this.ky = new Float64Array(this.n);
