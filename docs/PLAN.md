@@ -6,6 +6,30 @@ Status: Draft v1 · Owner: TBD · Last updated: 2026-10-01
 
 ---
 
+## 0. Implementation status (v0.1)
+
+The first build implements the core of Phases 0–4 and part of Phase 7:
+
+| Area                                                                                                                     | Status                 |
+| ------------------------------------------------------------------------------------------------------------------------ | ---------------------- |
+| Tooling, CI, schema, deterministic core                                                                                  | ✅ Done                |
+| Spectral ocean (JONSWAP/PM/Bretschneider, TMA, wind-sea growth, spreading, 4 cascades, choppy)                           | ✅ CPU reference + GPU |
+| Regular (Airy) waves                                                                                                     | ✅                     |
+| Vessel dynamics: pressure integration with waterline clipping, L0 radiation, viscous drag, propulsion, rudder, autopilot | ✅                     |
+| Instruments: wave gauges, motion recorders, Welch PSD, statistics, MSI, CSV export                                       | ✅                     |
+| Sandbox UI with presets, save/open/share, undo/redo, accessibility checks                                                | ✅                     |
+| Stokes/cnoidal/focused waves, grid (SWE/Boussinesq) solvers, scripting API, L1/L2 radiation                              | ⏳ Later phases        |
+
+**Deviation from §2:** the renderer uses **WebGL 2 through Three.js**, not raw WebGPU. Every
+current desktop and mobile browser supports WebGL 2, which maximises compatibility, and it runs
+in headless CI (SwiftShader), so GPU↔CPU consistency is tested on every change. The renderer is
+isolated behind `src/render/api.ts`, so a WebGPU backend can be added later without touching
+the rest of the app.
+
+**Deviation from §3.3:** vessels do not read the GPU surface back. They sample a CPU evaluation
+of _the same_ spectral components (`src/ocean/oceanField.ts`) in the simulation worker. This
+keeps the physics deterministic, testable in Node, and free of GPU read-back latency.
+
 ## 1. Vision
 
 Wave Laboratory is an interactive "ocean lab." A user can:
