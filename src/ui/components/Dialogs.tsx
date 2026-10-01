@@ -1,7 +1,8 @@
-import { PRESETS } from '../../schema/presets';
-import { presetExperiment } from '../../schema/presets';
-import { useLab } from '../store';
+import { PRESETS, presetExperiment } from '../../schema/presets';
+import { detectDeviceProfile, type PerformanceMode } from '../deviceProfile';
+import { useLab, type ThemePreference } from '../store';
 import { Dialog } from './Dialog';
+import { SelectField } from './fields';
 
 export function Dialogs() {
   const dialog = useLab((s) => s.dialog);
@@ -33,6 +34,9 @@ export function Dialogs() {
       </Dialog>
       <Dialog open={dialog === 'help'} title="Help & keyboard shortcuts" onClose={close}>
         <HelpContent />
+      </Dialog>
+      <Dialog open={dialog === 'settings'} title="Settings" onClose={close}>
+        <SettingsContent />
       </Dialog>
     </>
   );
@@ -104,5 +108,36 @@ function HelpContent() {
         leave the range where these assumptions hold.
       </p>
     </div>
+  );
+}
+
+function SettingsContent() {
+  const theme = useLab((s) => s.theme);
+  const performance = useLab((s) => s.performance);
+  const lab = useLab.getState;
+  return (
+    <>
+      <SelectField<ThemePreference>
+        label="Colour theme"
+        value={theme}
+        options={[
+          { value: 'system', label: 'Match system' },
+          { value: 'dark', label: 'Dark' },
+          { value: 'light', label: 'Light' },
+        ]}
+        onChange={(v) => lab().setTheme(v)}
+      />
+      <SelectField<PerformanceMode>
+        label="Graphics"
+        value={performance}
+        options={[
+          { value: 'auto', label: 'Auto (recommended)' },
+          { value: 'saver', label: 'Battery saver' },
+          { value: 'quality', label: 'Best quality' },
+        ]}
+        onChange={(v) => lab().setPerformance(v)}
+        hint={`Detected: ${detectDeviceProfile().description}. The physics is identical in every mode.`}
+      />
+    </>
   );
 }

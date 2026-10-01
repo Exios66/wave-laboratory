@@ -25,7 +25,8 @@ type IconName =
   | 'eye'
   | 'eye-off'
   | 'camera'
-  | 'warning';
+  | 'warning'
+  | 'more';
 
 const paths: Record<IconName, ReactElement> = {
   logo: <path d="M2 15c3-5 6-5 9 0s6 5 9 0 2-2 2-2v8H2z" fill="currentColor" stroke="none" />,
@@ -90,6 +91,13 @@ const paths: Record<IconName, ReactElement> = {
     </>
   ),
   warning: <path d="M12 3 2 20h20zM12 10v4M12 17v.01" />,
+  more: (
+    <>
+      <circle cx="5" cy="12" r="1.6" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+      <circle cx="19" cy="12" r="1.6" fill="currentColor" />
+    </>
+  ),
 };
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {

@@ -113,7 +113,10 @@ test.describe('Wave Laboratory app', () => {
   test('rejects invalid input with an accessible message', async ({ page }) => {
     await page.goto('/');
     await waitForSimulation(page);
-    await page.getByRole('navigation', { name: 'Scene' }).getByRole('button', { name: /Wind sea/ }).click();
+    await page
+      .getByRole('navigation', { name: 'Scene' })
+      .getByRole('button', { name: /Wind sea/ })
+      .click();
     const hs = page.getByRole('textbox', { name: 'Significant wave height Hs' });
     await hs.fill('abc');
     await hs.press('Enter');

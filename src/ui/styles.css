@@ -109,6 +109,12 @@ body,
   margin: 0;
 }
 
+/* Dynamic viewport units keep mobile browser chrome from cropping the layout. */
+#root {
+  height: 100vh;
+  height: 100dvh;
+}
+
 body {
   background: var(--bg);
   color: var(--text);
@@ -202,19 +208,6 @@ textarea {
   .app {
     --inspector-w: 300px;
     --panel-w: 260px;
-  }
-}
-
-@media (max-width: 960px) {
-  .app {
-    height: auto;
-    min-height: 100%;
-    grid-template-columns: 1fr;
-    grid-template-rows: var(--header-h) 56vh auto auto auto;
-    grid-template-areas: 'header' 'viewport' 'dock' 'inspector' 'scene';
-  }
-  .app__dock {
-    min-height: 320px;
   }
 }
 
@@ -324,12 +317,6 @@ textarea {
   height: 24px;
   background: var(--border);
   margin: 0 var(--space-1);
-}
-
-@media (max-width: 960px) {
-  .topbar .btn__label {
-    display: none;
-  }
 }
 
 /* ------------------------------------------------------------------ buttons */
@@ -1088,4 +1075,170 @@ kbd {
 .menu__list [role='menuitem']:hover,
 .menu__list [role='menuitem']:focus-visible {
   background: var(--bg-elev-2);
+}
+
+/* ------------------------------------------------------------------ responsive */
+
+.mobile-only {
+  display: none !important;
+}
+
+.mobile-tabs {
+  display: none;
+}
+
+@media (max-width: 1280px) {
+  .topbar .btn__label {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .desktop-only {
+    display: none !important;
+  }
+  .mobile-only {
+    display: inline-flex !important;
+  }
+
+  .app {
+    --header-h: 52px;
+    height: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(220px, 50%) auto minmax(0, 1fr);
+    grid-template-areas: 'header' 'viewport' 'mtabs' 'panel';
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .topbar {
+    padding: env(safe-area-inset-top) max(var(--space-3), env(safe-area-inset-right)) 0
+      max(var(--space-3), env(safe-area-inset-left));
+    min-height: var(--header-h);
+    gap: var(--space-2);
+  }
+  .brand span {
+    display: none;
+  }
+  .topbar__name {
+    min-width: 0;
+  }
+
+  .app__scene,
+  .app__inspector,
+  .app__dock {
+    grid-area: panel;
+    display: none;
+    border-width: 0 !important;
+  }
+  .app[data-mobile-panel='scene'] .app__scene,
+  .app[data-mobile-panel='inspector'] .app__inspector {
+    display: block;
+  }
+  .app[data-mobile-panel='data'] .app__dock {
+    display: flex;
+  }
+
+  .mobile-tabs {
+    grid-area: mtabs;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    background: var(--bg-elev);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .mobile-tabs [role='tab'] {
+    min-height: 44px;
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    color: var(--text-muted);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .mobile-tabs [role='tab'][aria-selected='true'] {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+
+  .transport {
+    flex-wrap: wrap;
+  }
+  .tabs {
+    margin-left: 0;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .hud {
+    padding: var(--space-2);
+  }
+  .hud__row {
+    gap: 6px;
+  }
+  .hud__card {
+    font-size: 12px;
+    padding: 4px 8px;
+  }
+  .legend {
+    min-width: 150px;
+  }
+
+  .charts-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .chart {
+    min-height: 200px;
+  }
+  .data-table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .notices {
+    right: var(--space-3);
+    left: var(--space-3);
+    width: auto;
+    bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
+  }
+
+  dialog.dialog {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 32px);
+  }
+}
+
+@media (max-width: 900px) and (orientation: landscape) and (max-height: 520px) {
+  /* Phones in landscape: side-by-side view and panel. */
+  .app {
+    grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas: 'header header' 'viewport mtabs' 'viewport panel';
+  }
+}
+
+/* Comfortable touch targets (WCAG 2.5.8; Apple/Material guidance ≥ 44 px). */
+@media (pointer: coarse) {
+  .btn,
+  .select,
+  .input,
+  .tree__select,
+  .tabs [role='tab'],
+  .segmented button,
+  .hud select {
+    min-height: 44px;
+  }
+  .btn--icon {
+    width: 44px;
+  }
+  /* ≥ 16 px stops iOS Safari from zooming into focused inputs. */
+  .input,
+  .select,
+  .hud select,
+  .topbar__name input {
+    font-size: 16px;
+  }
+  input[type='range'] {
+    min-height: 36px;
+  }
 }

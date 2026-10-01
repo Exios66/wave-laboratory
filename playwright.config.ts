@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const PORT = 4173;
+/** Software WebGL so tests run on GPU-less CI machines. */
+const SWIFTSHADER = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
 
 export default defineConfig({
   testDir: './e2e',
@@ -16,13 +18,45 @@ export default defineConfig({
   },
   projects: [
     {
-      name: 'chromium',
+      name: 'desktop-chromium',
+      testIgnore: /mobile\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 1440, height: 900 },
-        launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] },
+        launchOptions: { args: SWIFTSHADER },
       },
     },
+    {
+      name: 'android-chromium',
+      testMatch: /mobile\.spec\.ts/,
+      use: { ...devices['Pixel 7'], launchOptions: { args: SWIFTSHADER } },
+    },
+    {
+      // iPhone viewport, touch and user agent on Chromium (always available).
+      name: 'iphone-viewport',
+      testMatch: /mobile\.spec\.ts/,
+      use: {
+        ...devices['iPhone 14'],
+        browserName: 'chromium',
+        defaultBrowserType: 'chromium',
+        launchOptions: { args: SWIFTSHADER },
+      },
+    },
+    // Real WebKit (Safari's engine) where it is installed, e.g. in CI.
+    ...(process.env.PW_WEBKIT
+      ? [
+          {
+            name: 'iphone-webkit',
+            testMatch: /mobile\.spec\.ts/,
+            use: { ...devices['iPhone 14'] },
+          },
+          {
+            name: 'desktop-webkit',
+            testMatch: /app\.spec\.ts/,
+            use: { ...devices['Desktop Safari'] },
+          },
+        ]
+      : []),
   ],
   webServer: {
     command: `pnpm exec vite preview --port ${PORT} --strictPort`,

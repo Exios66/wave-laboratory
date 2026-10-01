@@ -26,6 +26,8 @@ export type Selection =
 
 export type SimStatus = 'loading' | 'ready' | 'error' | 'unsupported';
 export type DockTab = 'gauges' | 'motions' | 'spectrum' | 'statistics';
+/** Which panel is shown under the 3D view on narrow (mobile) layouts. */
+export type MobilePanel = 'scene' | 'inspector' | 'data';
 export type ThemePreference = 'system' | 'dark' | 'light';
 
 export interface Notice {
@@ -61,7 +63,8 @@ export interface LabState {
   /** Current dynamic render scale (1 = full resolution). */
   renderScale: number;
   dockTab: DockTab;
-  dialog: 'help' | 'presets' | 'about' | null;
+  mobilePanel: MobilePanel;
+  dialog: 'help' | 'presets' | 'settings' | null;
   notices: Notice[];
 
   // actions
@@ -78,6 +81,7 @@ export interface LabState {
   setPerformance(mode: PerformanceMode): void;
   setRenderScale(scale: number): void;
   setDockTab(tab: DockTab): void;
+  setMobilePanel(panel: MobilePanel): void;
   openDialog(dialog: LabState['dialog']): void;
   notify(tone: Notice['tone'], message: string): void;
   dismissNotice(id: number): void;
@@ -134,6 +138,7 @@ export const useLab = create<LabState>()((set, get) => ({
   performance: readPerformance(),
   renderScale: 1,
   dockTab: 'gauges',
+  mobilePanel: 'data',
   dialog: null,
   notices: [],
 
@@ -208,7 +213,8 @@ export const useLab = create<LabState>()((set, get) => ({
   },
 
   select(selection) {
-    set({ selection });
+    // On phones, selecting something reveals its editor.
+    set(selection ? { selection, mobilePanel: 'inspector' } : { selection });
   },
   setPlaying(playing) {
     set({ playing });
@@ -243,6 +249,9 @@ export const useLab = create<LabState>()((set, get) => ({
   },
   setDockTab(dockTab) {
     set({ dockTab });
+  },
+  setMobilePanel(mobilePanel) {
+    set({ mobilePanel });
   },
   openDialog(dialog) {
     set({ dialog });

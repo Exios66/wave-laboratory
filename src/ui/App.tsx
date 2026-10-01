@@ -9,7 +9,7 @@ import { TopBar } from './components/TopBar';
 import { Viewport } from './components/Viewport';
 import { experimentFromLocation } from './fileOps';
 import { getRuntime } from './runtime';
-import { useLab } from './store';
+import { useLab, type MobilePanel } from './store';
 import './styles.css';
 
 const CAMERA_CYCLE: CameraMode[] = ['orbit', 'top', 'follow', 'bridge'];
@@ -147,11 +147,50 @@ function useDocumentTitle(): void {
   }, [name]);
 }
 
+const MOBILE_PANELS: { id: MobilePanel; label: string; controls: string }[] = [
+  { id: 'scene', label: 'Scene', controls: 'scene' },
+  { id: 'inspector', label: 'Inspector', controls: 'inspector' },
+  { id: 'data', label: 'Data', controls: 'dock' },
+];
+
+/** Panel switcher shown under the 3D view on narrow screens (hidden on desktop). */
+function MobileTabs() {
+  const panel = useLab((s) => s.mobilePanel);
+  const set = useLab.getState().setMobilePanel;
+  return (
+    <div className="mobile-tabs" role="tablist" aria-label="Panels">
+      {MOBILE_PANELS.map((p, i) => (
+        <button
+          key={p.id}
+          id={`mtab-${p.id}`}
+          type="button"
+          role="tab"
+          aria-selected={panel === p.id}
+          aria-controls={p.controls}
+          tabIndex={panel === p.id ? 0 : -1}
+          onClick={() => set(p.id)}
+          onKeyDown={(e) => {
+            const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+            if (!d) return;
+            e.preventDefault();
+            const next = MOBILE_PANELS[(i + d + MOBILE_PANELS.length) % MOBILE_PANELS.length]!;
+            set(next.id);
+            requestAnimationFrame(() => document.getElementById(`mtab-${next.id}`)?.focus());
+          }}
+        >
+          {p.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function App() {
   useGlobalShortcuts();
   useTheme();
   useInitialExperimentFromUrl();
   useDocumentTitle();
+  const mobilePanel = useLab((s) => s.mobilePanel);
   return (
     <>
       <a className="skip-link" href="#viewport-canvas">
@@ -160,10 +199,11 @@ export function App() {
       <a className="skip-link" href="#inspector">
         Skip to inspector
       </a>
-      <div className="app">
+      <div className="app" data-mobile-panel={mobilePanel}>
         <TopBar />
         <ScenePanel />
         <Viewport />
+        <MobileTabs />
         <Inspector />
         <Dock />
       </div>
