@@ -25,6 +25,22 @@ export interface RendererStats {
   triangles: number;
 }
 
+/** Colour scale of the active overlay, for drawing an exact legend in the UI. */
+export interface OverlayLegend {
+  mode: Exclude<OverlayMode, 'none'>;
+  /** Human-readable quantity, e.g. "Surface elevation η". */
+  label: string;
+  /** Unit of min/max ("m", "–" for dimensionless). */
+  unit: string;
+  min: number;
+  max: number;
+  /**
+   * Colour stops (offset 0…1 from min to max, sRGB hex). The surface is coloured by linear
+   * interpolation in sRGB between these stops, exactly like a CSS linear-gradient.
+   */
+  stops: readonly { offset: number; color: string }[];
+}
+
 export interface LabRendererApi {
   /** Upload a new spectral sea (called after every experiment load). */
   setOcean(data: GpuOceanData): void;
@@ -44,5 +60,7 @@ export interface LabRendererApi {
   /** Keyboard camera control (accessible alternative to pointer orbiting). */
   nudgeCamera(action: 'left' | 'right' | 'up' | 'down' | 'in' | 'out' | 'reset'): void;
   readonly stats: RendererStats;
+  /** Colour scale of the current overlay (null when no overlay or no sea is loaded). */
+  readonly overlayLegend?: OverlayLegend | null;
   dispose(): void;
 }
