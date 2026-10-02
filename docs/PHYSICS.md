@@ -115,3 +115,56 @@ the shortest physics wavelength); other fields use Catmull–Rom.
   Pierson–Moskowitz limit (H_s ≈ 0.209 U²/g).
 - **Spreading**: cos-2s, Mitsuyasu (frequency-dependent s), Donelan–Banner sech², all
   normalised to ∫D dθ = 1.
+
+## Focused (rogue) waves
+
+A `focused` wave system is a NewWave group (Tromans, Anaturk & Hagemeijer 1991): 40 linear
+components between 0.6 ω_p and 3 ω_p with amplitudes `a_n = A_c S(ω_n)Δω / Σ S(ω_m)Δω`
+(JONSWAP shape, γ = 3.3) and phases chosen so every crest coincides at the focus point and time
+(`k·x_f − ω t_f + φ = 0`). Frequencies are jittered inside their bins so the group does not
+refocus periodically. The components are evaluated exactly like regular waves and add to the
+spectral sea, so the crest height at the focus is A_c above the background sea.
+
+## Weather (`src/weather`)
+
+Everything is a pure function of (seed, x, y, t), so the worker, the renderer and the tests see
+the same weather.
+
+- **Mean wind** is the environment's U₁₀ and compass "from" direction.
+- **Gusts:** longitudinal and lateral turbulence u′, v′ is a sum of 24 Fourier modes drawn
+  from the von Kármán spectrum `S_u(f) = 4σ_u²(L/U) / (1 + 70.8 (fL/U)²)^(5/6)` with
+  L = 180 m, σ_u = I·U (I = gustiness) and σ_v = 0.75 σ_u (ESDU 85020). The field is advected
+  with the mean wind (Taylor's frozen turbulence) and varies across the wind, so gusts arrive
+  as moving patches. The truncated band is rescaled so σ_u is exactly the requested value.
+- **Squalls:** fronts move downwind at the mean wind speed (at least 2 m/s), arriving on
+  average every `intervalMin`. Each has a sharp gust-front rise, a plateau, and a slower decay
+  over `durationMin`. Inside a squall the wind is multiplied by up to `strength`, turbulence
+  rises by half, the wind veers clockwise by up to `veerDeg`, rain rises by max(25, 2R) mm/h and
+  cloud cover goes to 95 %.
+- **Rain and visibility:** Koschmieder's law with rain extinction
+  `β = 3.912/V_clear + 0.25 R^0.63 km⁻¹`.
+- **Whitecaps:** coverage `W = 3.84·10⁻⁶ U₁₀^3.41` (Monahan & O'Muircheartaigh 1980), capped
+  at 1.
+- **Lightning:** a Poisson-like process (one hash per 0.25 s slot) whose rate rises with rain
+  and squalls. It is visual only.
+- **Wind sea following the weather:** a `wind` wave system with `followWeather` takes its U₁₀
+  and direction from the environment, so the fetch-limited JONSWAP sea grows and turns with the
+  wind you set. Gusts and squalls act on the vessels and the picture, not on the spectrum.
+
+## Wind loads and sails (`src/vessel/windLoads.ts`)
+
+Wind acts on every vessel at the air velocity relative to the ship, V_a, in the body frame.
+
+- **Windage** (Isherwood/Blendermann-type drag, Fossen 2011 §10.1):
+  `X = ½ρ_a C_X A_F |V_a| V_ax`, `Y = ½ρ_a C_Y A_L |V_a| V_ay` with C_X = 0.7, C_Y = 0.9.
+  The lateral force acts at the centroid of the lateral area shifted 0.15 L toward the windward
+  end (Hughes 1930), which gives the weather-vaning yaw moment. The heeling moment is that force
+  times the centroid height. Frontal and lateral areas are rasterised from each hull and its
+  superstructure.
+- **Square sails:** one aerodynamic surface of area A_s set to a fraction `set` with
+  `C_L(α) = 1.25 sin 2α · f(α)` and `C_D(α) = 0.08 + 1.2 sin² α`. f rises smoothly from 0 at
+  α = 8° to 1 at 20° because a square sail luffs at small angles of attack. Lift is
+  perpendicular and drag parallel to the apparent wind, and the force falls with cos² of heel.
+  The crew braces the yards between a minimum angle and square to maximise drive, which
+  reproduces a square-rigger's inability to point higher than about 60° off the wind. With the
+  autopilot on, the crew reefs above 13 m/s apparent wind (about Beaufort 6).
