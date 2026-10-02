@@ -374,8 +374,10 @@ uniform float uHs;
 uniform float uOverlay;
 uniform float uFogDensity;
 uniform float uWakeCount;
-uniform vec4 uWakeA[4];
-uniform vec4 uWakeB[4];
+uniform sampler2D uWakeTex;
+uniform vec4 uWakeShip[8];
+uniform vec4 uWakeInfo[8];
+uniform vec4 uWakeBox[8];
 uniform sampler2D uS0;
 uniform sampler2D uS1;
 uniform sampler2D uS2;
@@ -425,30 +427,103 @@ vec4 slopeSample(sampler2D tex, float size, vec2 p) {
   return s;
 }
 
-float wakeFoam(vec2 worldXY) {
+// Ship wakes along each hull's recorded track (see render/scene/wakes.ts). Row 2i of uWakeTex
+// holds (x, y, time laid, odometer) in the water frame, bow first; row 2i + 1 the speed then.
+// p is the water-frame label, so the foam rides the orbital motion and drifts with the current.
+float wakeFoam(vec2 p, float foot) {
   float foam = 0.0;
-  for (int i = 0; i < 4; i++) {
+  // Fine noise averages out once a pixel covers it, instead of shimmering.
+  float fine = 1.0 - smoothstep(0.6, 2.5, foot);
+  for (int i = 0; i < 8; i++) {
     if (float(i) + 0.5 > uWakeCount) break;
-    vec4 a = uWakeA[i];
-    vec4 b = uWakeB[i];
-    vec2 rel = worldXY - a.xy;
-    float along = dot(rel, b.xy);
-    float across = abs(rel.x * b.y - rel.y * b.x);
-    float behind = -along;
-    float speed = a.z;
-    float len = max(a.w, 4.0);
-    float beam = max(b.z, 1.0);
-    if (behind > 0.0 && behind < len * 6.0 && speed > 0.8) {
-      float wedge = beam * 0.42 + behind * 0.16;
-      float inside = 1.0 - smoothstep(wedge * 0.35, wedge, across);
-      float fade = exp(-behind / (len * 1.8));
-      // Churned water: patchy, strongest just astern, breaking up downstream.
-      float n1 = vnoise(rel * 0.45 + vec2(uTime * 0.2, 0.0));
-      float n2 = vnoise(rel * 1.7 - vec2(0.0, uTime * 0.3));
-      float churn = smoothstep(0.35 + 0.35 * (1.0 - fade), 0.85, n1 * 0.6 + n2 * 0.4);
-      float core = 1.0 - smoothstep(0.0, beam * 0.6, across);
-      foam += inside * fade * clamp(speed / 8.0, 0.0, 1.0) * (0.45 * churn + 0.25 * core * fade);
+    vec4 box = uWakeBox[i];
+    if (p.x < box.x || p.y < box.y || p.x > box.z || p.y > box.w) continue;
+    vec4 ship = uWakeShip[i];
+    vec4 info = uWakeInfo[i];
+    float L = max(ship.x, 2.0);
+    float B = max(ship.y, 1.0);
+    // Nearest point on the track polyline.
+    float best = 1e20;
+    float age = 0.0;
+    float s = 0.0;
+    float u = 0.0;
+    float odo = 0.0;
+    float side = 0.0;
+    vec2 aft = vec2(1.0, 0.0);
+    bool outside = false;
+    vec4 a = texelFetch(uWakeTex, ivec2(0, 2 * i), 0);
+    float ua = texelFetch(uWakeTex, ivec2(0, 2 * i + 1), 0).x;
+    for (int j = 1; j < 32; j++) {
+      if (float(j) + 0.5 > info.x) break;
+      vec4 b = texelFetch(uWakeTex, ivec2(j, 2 * i), 0);
+      float ub = texelFetch(uWakeTex, ivec2(j, 2 * i + 1), 0).x;
+      vec2 ab = b.xy - a.xy;
+      float l2 = max(dot(ab, ab), 1e-6);
+      float h = clamp(dot(p - a.xy, ab) / l2, 0.0, 1.0);
+      vec2 d = p - (a.xy + ab * h);
+      float dd = dot(d, d);
+      if (dd < best) {
+        best = dd;
+        // Nearest to an open end of the track (ahead of the bow, or past the oldest point):
+        // nothing is drawn there, or the arms would close into circles.
+        outside = (j == 1 && h <= 0.0) || (float(j) + 1.5 > info.x && h >= 1.0);
+        age = uTime - mix(a.z, b.z, h);
+        s = ship.w - mix(a.w, b.w, h);
+        u = mix(ua, ub, h);
+        odo = mix(a.w, b.w, h);
+        aft = ab * inversesqrt(l2);
+        side = d.x * aft.y - d.y * aft.x;
+      }
+      a = b;
+      ua = ub;
     }
+    if (outside) continue;
+    float lat = sqrt(best);
+    float tau = info.z;
+    float life = 1.0 - smoothstep(0.6, 1.0, age / info.w);
+    float fn = u / sqrt(9.81 * L);
+    float go = smoothstep(0.4, 3.0, u);
+
+    // Turbulent wake from the stern aft (from a little forward of it along the hull sides).
+    float astern = s - L;
+    float c = 0.0;
+    if (astern > -0.25 * L) {
+      float halfW = 0.5 * B * (0.85 + 0.55 * pow(max(astern, 0.0) / B, 0.3333));
+      halfW *= smoothstep(-0.25 * L, 0.05 * L, astern) * 0.4 + 0.6;
+      // Screw race: water thrown aft at ~30 % of ship speed, settling within a few seconds.
+      float race = 0.3 * u * 3.0 * (1.0 - exp(-age / 3.0));
+      vec2 q = p - aft * race;
+      vec2 qr = mat2(0.8, -0.6, 0.6, 0.8) * q;
+      float n1 = vnoise(q * 0.13 + vec2(float(i) * 7.3, uTime * 0.025));
+      float n2 = vnoise(qr * 0.55 - vec2(uTime * 0.05, float(i) * 3.1));
+      float n3 = vnoise(q * 1.9 + vec2(0.0, uTime * 0.09));
+      // Streaks along the track, fixed to the water (odometer, signed offset).
+      float streak = vnoise(vec2((odo + race) * 0.025, side * 0.3 + float(i) * 11.0));
+      float tex = n1 * 0.36 + streak * 0.3 + mix(0.5, n2, fine) * 0.22 + mix(0.5, n3, fine) * 0.12;
+      // Ragged edges that wander along the track.
+      float edge = halfW * (0.75 + 0.45 * vnoise(vec2(odo * 0.04, float(i))));
+      float prof = 1.0 - smoothstep(0.35 * edge, edge, lat);
+      float bright = exp(-age / tau);
+      float lane = exp(-age / (3.0 * tau));
+      // Fresh foam is nearly solid; as bubbles burst it breaks into patches, then streaks.
+      float thr = mix(0.68, 0.3, bright);
+      float patches = smoothstep(thr - 0.12, thr + 0.2, tex);
+      float core = (1.0 - smoothstep(0.0, 0.45 * halfW, lat)) * exp(-age / (0.35 * tau));
+      c = prof * go * (bright * (0.55 * patches + 0.3 * core) + 0.14 * lane * patches) * life;
+    }
+
+    // Kelvin arms: divergent waves at 19.47° from the bow, breaking along their cusps.
+    float arm = 0.0;
+    if (fn > 0.12 && s < 4.0 * L) {
+      float off = abs(lat - 0.35355 * s);
+      float wa = 0.4 + 0.02 * s + 0.03 * B;
+      float lambdaD = 4.18879 * u * u / 9.81; // (2/3) 2π U² / g
+      float cusps = 0.7 + 0.3 * cos(6.28318 * s / max(lambdaD, 0.5));
+      float broken = smoothstep(0.3, 0.8, vnoise(vec2(odo * 0.09, off * 0.35 + side * 0.01)));
+      arm = (1.0 - smoothstep(0.3 * wa, wa, off)) * cusps * mix(0.6, broken, fine)
+        * smoothstep(0.12, 0.3, fn) * exp(-s / (1.3 * L)) * exp(-age / tau) * 0.45;
+    }
+    foam = max(foam, c + arm);
   }
   return foam;
 }
@@ -588,13 +663,16 @@ void main() {
   float band = vnoise(vec2(alongW * 0.03, (acrossW + wobble) * 0.6));
   float bandFade = 1.0 - smoothstep(0.4, 1.2, foot);
   float streaks = smoothstep(0.7, 0.92, band) * vnoise(vec2(alongW, acrossW) * 0.08)
-    * smoothstep(16.0, 24.0, uWind) * 0.6 * bandFade;
+    * smoothstep(16.0, 24.0, uWind) * 0.6 * bandFade
+    // Streaks come and go along their length instead of running unbroken for kilometres.
+    * smoothstep(0.25, 0.65, vnoise(vec2(alongW * 0.004, acrossW * 0.015 + 7.0)));
   float texture1 = vnoise(label * 0.9 + uTime * 0.05) * 0.6 + vnoise(label * 3.1) * 0.4;
   float foam = breaking * smoothstep(0.25, 0.75, texture1 + breaking * 0.35);
   foam += streaks * (0.5 + 0.5 * texture1);
-  foam += wakeFoam(world);
+  foam += wakeFoam(label, foot);
   foam = clamp(foam, 0.0, 1.0);
-  vec3 foamCol = srgbToLinear(vec3(0.90, 0.94, 0.96)) * (0.35 + 0.65 * light);
+  // Foam is lit like the water around it: at night only a faint grey, not a glowing band.
+  vec3 foamCol = srgbToLinear(vec3(0.90, 0.94, 0.96)) * (0.06 + 0.94 * light);
   col = mix(col, foamCol, foam * 0.92);
 
   if (uOverlay > 0.5 && uOverlay < 1.5) {

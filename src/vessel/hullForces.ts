@@ -73,6 +73,8 @@ export class HullForces {
   /** Largest relative normal entry velocity among slam-prone panels [m/s]. */
   slamVelocity = 0;
   greenWater = false;
+  /** Deepest water over the deck edge (0 when the deck is dry) [m]. */
+  greenWaterDepth = 0;
   /** World-frame horizontal bounding box of the hull vertices. */
   minX = 0;
   maxX = 0;
@@ -205,15 +207,14 @@ export class HullForces {
     this.maxY = maxY;
 
     // ---- green water: any deck-edge vertex below the local surface
-    let green = false;
+    let greenDepth = 0;
     const de = this.opts.deckEdge;
     for (let k = 0; k < de.length; k++) {
-      if (this.h[de[k]!]! < 0) {
-        green = true;
-        break;
-      }
+      const hk = this.h[de[k]!]!;
+      if (-hk > greenDepth) greenDepth = -hk;
     }
-    this.greenWater = green;
+    this.greenWater = greenDepth > 0;
+    this.greenWaterDepth = greenDepth;
 
     acc.reset(r6, r7, r8);
     const cd = 0.5 * rho * this.opts.crossFlowCd;

@@ -203,7 +203,8 @@ function cargoShip(): HullDesign {
   for (let k = 0; k < 6; k++) {
     const x = -34.5 + 12.8 * k;
     bays.push(box(x, 0, D + 3.9, 12.2, 17.1, 7.8, 'cargo'));
-    if (k % 2 === 0) bays.push(box(x, 0, D + 3.9 + 7.8, 11.4, 15.6, 5.4, 'cargo'));
+    // The second tier sits on the first (7.8 m), not 1.2 m above it.
+    if (k % 2 === 0) bays.push(box(x, 0, D + 7.8 + 2.7, 11.4, 15.6, 5.4, 'cargo'));
   }
   bays.push(box(42.3, 0, D + 2.6, 9, 12.2, 5.2, 'cargo'));
   return {
@@ -232,17 +233,19 @@ function cargoShip(): HullDesign {
     maxSpeedKn: 15,
     superstructure: [
       ...bays,
-      box(-46, 0, D + 6.5, 10, 16, 13, 'superstructure'),
-      box(-44, 0, D + 12.2, 5, 20, 1.8, 'superstructure'),
-      box(-41.45, 0, D + 12.4, 0.1, 15, 1.1, 'glass'),
-      box(-50.5, 0, D + 15, 3.5, 3.5, 5, 'accent'),
-      box(-48, 0, D + 18.2, 1.2, 1.2, 2.2, 'accent'),
+      // Accommodation tall enough for the bridge to see over the stacked containers.
+      box(-46, 0, D + 7.75, 10, 16, 15.5, 'superstructure'),
+      box(-44, 0, D + 14.7, 5, 20, 1.8, 'superstructure'),
+      box(-41.45, 0, D + 14.9, 0.1, 15, 1.1, 'glass'),
+      box(-50.5, 0, D + 17.5, 3.5, 3.5, 5, 'accent'),
+      box(-48, 0, D + 20.7, 1.2, 1.2, 2.2, 'accent'),
       box(-46, 7.2, D + 7.2, 8, 1.2, 2.4, 'superstructure'),
       box(-46, -7.2, D + 7.2, 8, 1.2, 2.4, 'superstructure'),
       box(53, 0, D + 4.5, 0.4, 0.4, 6, 'accent'),
-      box(20, 0, D + 0.35, 70, 18.5, 0.15, 'deck'),
+      // Hatch-cover plate, kept aft of where the bow narrows inside it.
+      box(10, 0, D + 0.35, 50, 18.5, 0.15, 'deck'),
     ],
-    bridge: { x: -42, y: 0, z: D + 12.5 },
+    bridge: { x: -42, y: 0, z: D + 15 },
     propeller: { x: -54.2, z: 2.45, diameter: 4.3, wake: 0.25, timeConstant: 6 },
     rudder: { x: -56.6, z: 3.0, area: 13.5, aspect: 1.6, rateDeg: 2.3 },
   };

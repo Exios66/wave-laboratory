@@ -1,6 +1,8 @@
+import { useMemo, type ReactNode } from 'react';
 import { beaufortFromWind } from '../../core/units';
 import type { VesselType, WaveSystem, Weather } from '../../schema/experiment';
 import { newProbe, newVessel, newWaveSystem, VESSEL_TYPE_LABELS } from '../factories';
+import { healthPercent, healthTone } from '../health';
 import { useLab, type Selection } from '../store';
 import { Icon, type IconName } from './icons';
 import { Menu } from './Menu';
@@ -35,6 +37,7 @@ function TreeItem({
   icon,
   label,
   meta,
+  status,
   current,
   disabled,
   onSelect,
@@ -43,6 +46,8 @@ function TreeItem({
   icon: IconName;
   label: string;
   meta?: string;
+  /** Extra status shown after the meta text (e.g. vessel health). */
+  status?: ReactNode;
   current: boolean;
   disabled?: boolean;
   onSelect: () => void;
@@ -59,6 +64,7 @@ function TreeItem({
           {disabled && <span className="visually-hidden"> (disabled)</span>}
         </span>
         {meta && <span className="tree__meta">{meta}</span>}
+        {status}
       </button>
       {onRemove && (
         <button
@@ -75,9 +81,40 @@ function TreeItem({
   );
 }
 
+/** Compact health pill of a vessel in the scene list. */
+function HealthPill({ health, disabled }: { health: number; disabled: boolean }) {
+  const pct = healthPercent(health);
+  const text = disabled ? 'Disabled' : `${pct} %`;
+  return (
+    <span className={`tree__health tree__health--${healthTone(health)}`} title={`Health ${pct} %`}>
+      <span className="visually-hidden">{disabled ? ', ' : ', health '}</span>
+      {text}
+    </span>
+  );
+}
+
+/** Health of each vessel from the latest frame, as `id → [health, disabled]` (stable string). */
+function useVesselHealth(): Map<string, [number, boolean]> {
+  const key = useLab(
+    (s) =>
+      s.frame?.vessels
+        .map((v) => `${v.id}:${healthPercent(v.health)}:${v.disabled ? 1 : 0}`)
+        .join(',') ?? '',
+  );
+  return useMemo(() => {
+    const m = new Map<string, [number, boolean]>();
+    for (const part of key ? key.split(',') : []) {
+      const [id, pct, dis] = part.split(':');
+      m.set(id!, [Number(pct) / 100, dis === '1']);
+    }
+    return m;
+  }, [key]);
+}
+
 export function ScenePanel() {
   const exp = useLab((s) => s.experiment);
   const selection = useLab((s) => s.selection);
+  const health = useVesselHealth();
   const lab = useLab.getState;
 
   const addWave = (kind: WaveSystem['kind']) => {
@@ -213,6 +250,11 @@ export function ScenePanel() {
                   icon="ship"
                   label={v.name}
                   meta={`${v.speedKn.toFixed(0)} kn`}
+                  status={
+                    exp.damage && health.has(v.id) ? (
+                      <HealthPill health={health.get(v.id)![0]} disabled={health.get(v.id)![1]} />
+                    ) : undefined
+                  }
                   current={isSelected(selection, 'vessel', v.id)}
                   onSelect={() => lab().select({ kind: 'vessel', id: v.id })}
                   onRemove={() => remove('vessels', v.id, v.name)}

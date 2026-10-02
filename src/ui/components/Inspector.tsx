@@ -15,6 +15,9 @@ import { detectDeviceProfile, effectiveQuality } from '../deviceProfile';
 import { getRuntime } from '../runtime';
 import { findProbe, findVessel, findWave, useLab } from '../store';
 import { newWaveSystem, VESSEL_TYPE_LABELS } from '../factories';
+import { DAMAGE_CAUSE_LABELS, healthPercent, healthTone } from '../health';
+import { thrustFactor } from '../../vessel/damage';
+import type { VesselTelemetry } from '../../vessel/api';
 import { fmt, NumberField, Readout, SelectField, Switch, TextField } from './fields';
 import { Icon } from './icons';
 
@@ -26,7 +29,7 @@ export function Inspector() {
   let body = <SeaSummary />;
   if (selection?.kind === 'environment') {
     title = 'Environment';
-    body = <EnvironmentInspector env={exp.environment} quality={exp.quality} />;
+    body = <EnvironmentInspector env={exp.environment} quality={exp.quality} damage={exp.damage} />;
   } else if (selection?.kind === 'weather') {
     title = 'Weather';
     body = <WeatherInspector />;
@@ -151,7 +154,15 @@ function Warnings() {
 
 // ------------------------------------------------------------------ environment
 
-function EnvironmentInspector({ env, quality }: { env: Environment; quality: OceanQuality }) {
+function EnvironmentInspector({
+  env,
+  quality,
+  damage,
+}: {
+  env: Environment;
+  quality: OceanQuality;
+  damage: boolean;
+}) {
   const lab = useLab.getState;
   const set = <K extends keyof Environment>(key: K, value: Environment[K], reload = true) =>
     lab().updateExperiment(
@@ -284,6 +295,16 @@ function EnvironmentInspector({ env, quality }: { env: Environment; quality: Oce
           hint="Visual resolution only; the physics always uses the same wave components."
         />
         <DeviceInfo quality={quality} />
+        <Switch
+          label="Vessel damage"
+          checked={damage}
+          onChange={(c) =>
+            lab().updateExperiment((d) => {
+              d.damage = c;
+            })
+          }
+          hint="Slamming, green water, storm-force wind, heavy heel and collisions wear down each vessel's health, costing it power and steering until it is disabled. Small craft suffer most. Off: hulls still bounce apart but take no damage. Restarts the run."
+        />
       </fieldset>
     </>
   );
@@ -905,6 +926,7 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
               <span className="badge badge--ok">Normal</span>
             )}
           </p>
+          <VesselHealth tel={tel} onRepair={() => live({ repair: true })} />
         </>
       )}
 
@@ -1067,6 +1089,54 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
         </div>
       </fieldset>
     </>
+  );
+}
+
+/** Health meter, damage cause and the repair order. */
+function VesselHealth({ tel, onRepair }: { tel: VesselTelemetry; onRepair: () => void }) {
+  const damageOn = useLab((s) => s.experiment.damage);
+  const pct = healthPercent(tel.health);
+  const tone = healthTone(tel.health);
+  let status: string;
+  if (!damageOn) status = 'Damage is off for this experiment.';
+  else if (tel.damageCause) status = `Damage: ${DAMAGE_CAUSE_LABELS[tel.damageCause]}.`;
+  else if (tel.disabled) status = 'Engine and steering are out. She drifts until repaired.';
+  else if (tel.health < 1)
+    status = `Power limited to ${Math.round(thrustFactor(tel.health) * 100)} %.`;
+  else status = 'No damage.';
+  return (
+    <section className="health" aria-labelledby="health-h">
+      <div className="health__head">
+        <h3 id="health-h" className="health__title">
+          Hull health
+        </h3>
+        <span className={`health__value health__value--${tone}`} aria-hidden="true">
+          {pct} %
+        </span>
+      </div>
+      <div
+        className="health__meter"
+        role="meter"
+        aria-labelledby="health-h"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        aria-valuetext={`Health ${pct} %`}
+      >
+        <span className={`health__fill health__fill--${tone}`} style={{ width: `${pct}%` }} />
+      </div>
+      <p className="health__status" aria-live="polite">
+        {tel.disabled ? (
+          <span className="badge badge--danger">Disabled</span>
+        ) : tel.health < 0.25 ? (
+          <span className="badge badge--warning">Steering failing</span>
+        ) : null}
+        <span>{status}</span>
+      </p>
+      <button type="button" className="btn" onClick={onRepair} disabled={tel.health >= 1}>
+        <Icon name="wrench" size={16} /> Repair
+      </button>
+    </section>
   );
 }
 

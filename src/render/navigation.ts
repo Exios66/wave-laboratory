@@ -34,7 +34,7 @@ export function cameraNavigation(
 }
 
 /** Islands for the chart, nearest first, capped so a zoomed-out map stays cheap to draw. */
-export function chartIslands(x: number, y: number, radius: number, max = 400): MapIsland[] {
+export function chartIslands(x: number, y: number, radius: number, max = 1200): MapIsland[] {
   return islandsNear(x, y, radius)
     .slice(0, max)
     .map((s) => ({
