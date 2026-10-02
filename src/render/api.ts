@@ -22,6 +22,30 @@ export interface PickResult {
   point: { x: number; y: number; z: number };
 }
 
+/** Where the camera is, for the minimap. World axes: x east, y north [m]. */
+export interface NavigationView {
+  x: number;
+  y: number;
+  /** Compass bearing the camera looks toward [deg, 0 north, clockwise]. */
+  headingDeg: number;
+  /** Horizontal field of view [deg]. */
+  fovDeg: number;
+  /** Point the orbit camera has been sent to from the map, or null when it follows the fleet. */
+  explore: { x: number; y: number } | null;
+}
+
+/** An island as the minimap draws it. */
+export interface MapIsland {
+  key: string;
+  x: number;
+  y: number;
+  /** Nominal shoreline radius [m]. */
+  radius: number;
+  /** Outer edge of the surrounding lagoon and reef [m]. */
+  reefRadius: number;
+  lighthouse: boolean;
+}
+
 export interface RendererStats {
   fps: number;
   /** CPU time spent in render() [ms]. */
@@ -68,6 +92,15 @@ export interface LabRendererApi {
   pick(x: number, y: number): PickResult | null;
   /** Keyboard camera control (accessible alternative to pointer orbiting). */
   nudgeCamera(action: 'left' | 'right' | 'up' | 'down' | 'in' | 'out' | 'reset'): void;
+  /** Camera position and heading for the minimap. */
+  getNavigation(): NavigationView;
+  /** Islands within `radius` [m] of world point (x, y), nearest first; [] while islands are off. */
+  mapIslands(x: number, y: number, radius: number): MapIsland[];
+  /**
+   * Glide the orbit (and top) camera to look at a world point, for exploring from the map.
+   * null goes back to the fleet. Follow and bridge views clear it.
+   */
+  setExplorePoint(point: { x: number; y: number } | null): void;
   /** Easter egg: draw every hull as a rubber duck. The physics is unchanged. */
   setDuckMode(on: boolean): void;
   readonly stats: RendererStats;

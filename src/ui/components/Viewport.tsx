@@ -7,6 +7,7 @@ import { useLab } from '../store';
 import { dayPhase, formatClock } from './clock';
 import { fmt } from './fields';
 import { Icon } from './icons';
+import { Minimap } from './Minimap';
 
 const CAMERAS: { mode: CameraMode; label: string; needsVessel: boolean }[] = [
   { mode: 'orbit', label: 'Orbit', needsVessel: false },
@@ -233,7 +234,10 @@ function Hud() {
           {status === 'ready' && 'Simulation running'}
         </div>
         {camera === 'plane' && <RideCaption />}
-        {overlay !== 'none' && <Legend mode={overlay} />}
+        <div className="hud__corner">
+          {overlay !== 'none' && <Legend mode={overlay} />}
+          <Minimap />
+        </div>
       </div>
     </div>
   );

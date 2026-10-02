@@ -295,6 +295,8 @@ export const RIDE = {
   fadeOut: 8,
   /** Time constant with which the circuit's centre follows the fleet [s]. */
   followS: 20,
+  /** Fastest the circuit's centre moves, e.g. after a point is picked on the chart [m/s]. */
+  maxShiftSpeed: 120,
 } as const;
 
 /**
@@ -479,9 +481,16 @@ export class CrossingScheduler {
     const tau = t - c.startT;
     c.duration = Math.max(c.duration, tau + c.fadeOut + 30);
     if (c.orbit) {
+      // Ease toward the new centre, but no faster than an aircraft could carry the circuit.
+      const dx = centre.x - c.orbit.cx;
+      const dz = centre.z - c.orbit.cz;
+      const dist = Math.hypot(dx, dz);
       const k = 1 - Math.exp(-Math.max(0, dt) / RIDE.followS);
-      c.orbit.cx += (centre.x - c.orbit.cx) * k;
-      c.orbit.cz += (centre.z - c.orbit.cz) * k;
+      const step = Math.min(dist * k, RIDE.maxShiftSpeed * Math.max(0, dt));
+      if (dist > 1e-9) {
+        c.orbit.cx += (dx / dist) * step;
+        c.orbit.cz += (dz / dist) * step;
+      }
     }
     return c;
   }

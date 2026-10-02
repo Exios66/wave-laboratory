@@ -32,6 +32,40 @@ test.describe('Wave Laboratory app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('chart shows the camera, zooms, and sends the camera exploring', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    const chart = page.getByRole('region', { name: 'Chart' });
+    await expect(chart).toBeVisible();
+    await expect(chart.locator('#minimap-readout')).toContainText('Hdg');
+    await expect(chart.getByText('1.0 km', { exact: true })).toBeVisible();
+    await chart.getByRole('button', { name: 'Zoom chart out' }).click();
+    await expect(chart.getByText('2.0 km', { exact: true })).toBeVisible();
+
+    // Clicking open water near the rim sends the orbit camera there.
+    const map = chart.locator('canvas');
+    const box = (await map.boundingBox())!;
+    await page.mouse.click(box.x + box.width * 0.85, box.y + box.height * 0.5);
+    const back = chart.getByRole('button', { name: 'Back to fleet' });
+    await expect(back).toBeVisible();
+    await back.click();
+    await expect(back).toBeHidden();
+
+    // Keyboard: arrows explore, Home returns.
+    await map.focus();
+    await page.keyboard.press('ArrowUp');
+    await expect(back).toBeVisible();
+    await page.keyboard.press('Home');
+    await expect(back).toBeHidden();
+
+    await chart.getByRole('button', { name: 'Hide chart' }).click();
+    await expect(chart).toBeHidden();
+    await page.getByRole('button', { name: 'Show chart' }).click();
+    await expect(page.getByRole('region', { name: 'Chart' })).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
   test('has no detectable WCAG 2.2 A/AA violations', async ({ page }) => {
     await page.goto('/');
     await waitForSimulation(page);

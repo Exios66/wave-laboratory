@@ -22,10 +22,19 @@ import {
   whitecapFraction,
   type WindSample,
 } from '../weather/weather';
-import type { CameraMode, LabRendererApi, OverlayMode, PickResult, RendererStats } from './api';
+import type {
+  CameraMode,
+  LabRendererApi,
+  MapIsland,
+  NavigationView,
+  OverlayMode,
+  PickResult,
+  RendererStats,
+} from './api';
 import { buildDuck } from './effects/duck';
 import { GpuOcean } from './ocean/GpuOcean';
 import { OCEAN_FRAG, OCEAN_VERT, SKY_FRAG, SKY_VERT } from './ocean/shaders';
+import { cameraNavigation, chartIslands } from './navigation';
 import { calmFromConditions, ease } from './scenery/ambience';
 import { SeabirdLayer } from './scenery/birds';
 import { IslandLayer } from './scenery/islands';
@@ -301,6 +310,11 @@ export class LabRenderer implements LabRendererApi {
   private wallT = 0;
   private lastRenderAt = 0;
   private readonly vesselPositions: THREE.Vector3[] = [];
+  /** Map-chosen point the orbit camera glides to (Three.js axes), or null to follow the fleet. */
+  private explore: THREE.Vector3 | null = null;
+  private readonly exploreFrom = new THREE.Vector3();
+  private exploreGlide = 1;
+  private readonly orbitCentre = new THREE.Vector3();
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -972,11 +986,30 @@ export class LabRenderer implements LabRendererApi {
 
   setCamera(mode: CameraMode, targetId?: string | null): void {
     this.mode = mode;
+    if (mode === 'follow' || mode === 'bridge') this.explore = null;
     if (targetId !== undefined) this.cameraTarget = targetId ?? null;
   }
 
   planeRide(): string | null {
     return this.mode === 'plane' ? this.planes.rideLabel : null;
+  }
+
+  getNavigation(): NavigationView {
+    return cameraNavigation(this.camera, this.explore);
+  }
+
+  mapIslands(x: number, y: number, radius: number): MapIsland[] {
+    return this.ambience.islands ? chartIslands(x, y, radius) : [];
+  }
+
+  setExplorePoint(point: { x: number; y: number } | null): void {
+    if (!point) {
+      this.explore = null;
+      return;
+    }
+    this.exploreFrom.copy(this.orbitCentre);
+    this.explore = new THREE.Vector3(point.x, 0, -point.y);
+    this.exploreGlide = 0;
   }
 
   setSelection(id: string | null): void {
@@ -1498,6 +1531,13 @@ export class LabRenderer implements LabRendererApi {
     if (this.updateRide()) return;
     const focus = this.focusVessel();
     const target = this.tmp;
+    if (this.explore && (this.mode === 'orbit' || this.mode === 'top')) {
+      this.exploreGlide = Math.min(1, this.exploreGlide + 0.035);
+      const k = this.exploreGlide * this.exploreGlide * (3 - 2 * this.exploreGlide);
+      target.lerpVectors(this.exploreFrom, this.explore, k);
+      this.placeOrbit(target, this.yaw, this.mode === 'top' ? 0.12 : this.polar, this.radius);
+      return;
+    }
     if (focus && this.frame) {
       const state = this.frame.vessels.find((v) => v.id === focus.id);
       if (state && (this.mode === 'follow' || this.mode === 'bridge' || this.mode === 'top')) {
@@ -1547,6 +1587,11 @@ export class LabRenderer implements LabRendererApi {
     if (n > 0) {
       c.x /= n;
       c.z /= n;
+    }
+    // A point picked on the chart: the flight takes its circuit over there instead.
+    if (this.explore) {
+      c.x = this.explore.x;
+      c.z = this.explore.z;
     }
     this.planes.updateRide(this.wallT, this.wallDt, riding, c, this.calm);
     if (!riding) return false;
@@ -1611,26 +1656,23 @@ export class LabRenderer implements LabRendererApi {
     };
     const side = rotate(attitude, { x: 0, y: 1, z: 0 });
     const yaw = this.yaw;
+    // Up/down tilts the gaze from about 25° down to 65° up (to the stars at night).
+    const pitch = THREE.MathUtils.clamp((0.95 - this.polar) * 1.4, -0.45, 1.15);
+    const ahead = Math.cos(pitch) * 40;
+    const rise = Math.sin(pitch) * 40;
     const lookAt = {
-      x:
-        eye.x +
-        (bow.x * Math.cos(yaw) + side.x * Math.sin(yaw)) * 40 +
-        up.x * (0.95 - this.polar) * 20,
-      y:
-        eye.y +
-        (bow.y * Math.cos(yaw) + side.y * Math.sin(yaw)) * 40 +
-        up.y * (0.95 - this.polar) * 20,
-      z:
-        eye.z +
-        (bow.z * Math.cos(yaw) + side.z * Math.sin(yaw)) * 40 +
-        up.z * (0.95 - this.polar) * 20,
+      x: eye.x + (bow.x * Math.cos(yaw) + side.x * Math.sin(yaw)) * ahead + up.x * rise,
+      y: eye.y + (bow.y * Math.cos(yaw) + side.y * Math.sin(yaw)) * ahead + up.y * rise,
+      z: eye.z + (bow.z * Math.cos(yaw) + side.z * Math.sin(yaw)) * ahead + up.z * rise,
     };
+    this.orbitCentre.set(eye.x, 0, -eye.y);
     this.camera.up.set(up.x, up.z, -up.y);
     this.camera.position.set(eye.x, eye.z, -eye.y);
     this.camera.lookAt(lookAt.x, lookAt.z, -lookAt.y);
   }
 
   private placeOrbit(target: THREE.Vector3, azimuth: number, polar: number, radius: number): void {
+    this.orbitCentre.copy(target);
     // Back the camera out along its ray until it is outside every hull, so zooming in on a
     // big ship never parks the lens inside it (a solid black frame).
     let r = radius;

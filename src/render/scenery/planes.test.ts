@@ -298,6 +298,19 @@ describe('riding a flight', () => {
     expect(s.ride!.orbit!.cx).toBeGreaterThan(490);
   });
 
+  it('carries its circuit to a far point picked on the chart at an aircraft’s pace', () => {
+    const s = new CrossingScheduler(5);
+    s.updateRide(0, 0.1, true, { x: 0, z: 0 }, 1);
+    let last = 0;
+    for (let t = 0.1; t < 10; t += 0.1) {
+      s.updateRide(t, 0.1, true, { x: 6000, z: 0 }, 1);
+      const cx = s.ride!.orbit!.cx;
+      expect(cx - last).toBeLessThanOrEqual(RIDE.maxShiftSpeed * 0.1 + 1e-6);
+      last = cx;
+    }
+    expect(last).toBeGreaterThan(RIDE.maxShiftSpeed * 9);
+  });
+
   it('never changes the sky’s own schedule, and does not count toward its limit', () => {
     const plain = simulate(9, 0.5).started.map((c) => c.startT);
     const s = new CrossingScheduler(9);
