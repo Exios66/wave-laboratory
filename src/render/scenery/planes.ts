@@ -133,9 +133,6 @@ export class PlaneLayer implements SceneryLayer {
     };
     this.object.add(group);
     this.flights.push(flight);
-    if (typeof window !== 'undefined') {
-      (window as unknown as { __labPlanes?: number }).__labPlanes = this.flights.length;
-    }
   }
 
   private buildPlane(ghost: boolean, seed: number): THREE.Group {

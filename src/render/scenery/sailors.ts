@@ -13,8 +13,6 @@ interface Sailor {
   lane: number;
   aft: THREE.Vector3;
   fwd: THREE.Vector3;
-  /** Vessel body-frame group this sailor is attached to. */
-  host: THREE.Group;
 }
 
 /** High-vis gear so the figures read against dark decks. */
@@ -35,7 +33,6 @@ export class SailorLayer implements SceneryLayer {
   private readonly sailors: Sailor[] = [];
   private readonly bodyGeo = this.pool.share(new THREE.BoxGeometry(0.45, 1.1, 0.35));
   private readonly headGeo = this.pool.share(new THREE.SphereGeometry(0.22, 8, 6));
-  private readonly mastGeo = this.pool.share(new THREE.BoxGeometry(2, 24, 2));
   private enabled = true;
 
   constructor() {
@@ -50,10 +47,7 @@ export class SailorLayer implements SceneryLayer {
 
   setVessels(vessels: readonly SceneryVessel[]): void {
     this.clearSailors();
-    if (vessels.length === 0) {
-      this.publishDebug();
-      return;
-    }
+    if (vessels.length === 0) return;
     for (const v of vessels) {
       try {
         this.spawnForVessel(v);
@@ -61,7 +55,6 @@ export class SailorLayer implements SceneryLayer {
         console.error('[scenery/sailors] failed to spawn crew on', v.id, err);
       }
     }
-    this.publishDebug();
   }
 
   update(frame: SceneryFrame): void {
@@ -73,7 +66,6 @@ export class SailorLayer implements SceneryLayer {
         continue;
       }
       s.mesh.visible = true;
-      if (s.speed <= 0) continue; // static mast marker
       const seaFactor = 0.35 + 0.65 * frame.calm;
       s.phase = (s.phase + frame.dt * s.speed * seaFactor) % 2;
       const u = s.phase < 1 ? s.phase : 2 - s.phase;
@@ -85,7 +77,6 @@ export class SailorLayer implements SceneryLayer {
       s.mesh.rotation.y = s.phase < 1 ? 0 : Math.PI;
       s.mesh.position.y += Math.sin(s.phase * Math.PI * 2) * 0.05;
     }
-    if (frame.wallT % 2 < frame.dt) this.publishDebug();
   }
 
   private spawnForVessel(v: SceneryVessel): void {
@@ -95,37 +86,16 @@ export class SailorLayer implements SceneryLayer {
     const zDeck = deckHeight(def);
     const aftX = -def.length * 0.18;
     const fwdX = Math.min(bow.x - def.length * 0.06, def.length * 0.38);
+    // Wide freighters: walk the outer catwalk outside the cargo footprint.
     const sideBias = def.beam > 12 ? 0.455 : 0.2;
-
-    // Magenta mast on the bow — unmistakable if the host group is the rendered vessel.
-    const mastMat = new THREE.MeshBasicMaterial({ color: 0xff00ff, toneMapped: false });
-    const mast = new THREE.Group();
-    mast.name = 'sailor-mast';
-    const mastMesh = new THREE.Mesh(this.mastGeo, mastMat);
-    mastMesh.position.y = 12;
-    mastMesh.frustumCulled = false;
-    mast.add(mastMesh);
-    mast.position.set(fwdX, zDeck, 0);
-    mast.frustumCulled = false;
-    mast.userData.mats = [mastMat];
-    v.group.add(mast);
-    this.sailors.push({
-      mesh: mast,
-      vesselId: v.id,
-      phase: 0,
-      speed: 0,
-      lane: 0,
-      aft: new THREE.Vector3(fwdX, 0, zDeck),
-      fwd: new THREE.Vector3(fwdX, 0, zDeck),
-      host: v.group,
-    });
 
     for (let i = 0; i < count; i++) {
       const seed = Math.imul(Math.round(def.length * 1000) + i, 2654435761) >>> 0;
       const mesh = this.makeSailor(seed);
       const lane = (i % 2 === 0 ? 1 : -1) * def.beam * (sideBias + hash01(seed + 3) * 0.015);
       mesh.position.set(aftX, zDeck, -lane);
-      const scale = def.beam > 12 ? 7 : Math.min(3.2, Math.max(1.4, def.beam * 0.22));
+      // Readable from orbit without looking like cargo: ~4–5 m on freighters.
+      const scale = def.beam > 12 ? 5 : Math.min(2.8, Math.max(1.3, def.beam * 0.2));
       mesh.scale.setScalar(scale);
       mesh.frustumCulled = false;
       v.group.add(mesh);
@@ -137,7 +107,6 @@ export class SailorLayer implements SceneryLayer {
         lane,
         aft: new THREE.Vector3(aftX, 0, zDeck),
         fwd: new THREE.Vector3(fwdX, 0, zDeck),
-        host: v.group,
       });
     }
   }
@@ -171,24 +140,6 @@ export class SailorLayer implements SceneryLayer {
       if (mats) for (const m of mats) m.dispose();
     }
     this.sailors.length = 0;
-  }
-
-  private publishDebug(): void {
-    if (typeof window === 'undefined') return;
-    const w = window as unknown as {
-      __labSailors?: number;
-      __labSailorPos?: number[][];
-      __labSailorParents?: string[];
-    };
-    w.__labSailors = this.sailors.length;
-    w.__labSailorParents = this.sailors.map(
-      (s) => `${s.mesh.name}@${s.host.uuid.slice(0, 8)}:parent=${s.mesh.parent?.uuid.slice(0, 8) ?? 'none'}`,
-    );
-    w.__labSailorPos = this.sailors.map((s) => {
-      const p = new THREE.Vector3();
-      s.mesh.getWorldPosition(p);
-      return [+p.x.toFixed(1), +p.y.toFixed(1), +p.z.toFixed(1), s.mesh.visible ? 1 : 0];
-    });
   }
 
   dispose(): void {
