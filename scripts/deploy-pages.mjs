@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 /**
- * Publish the production build into docs/ on this branch — no GitHub Actions, no gh-pages branch.
+ * Publish the production build onto this branch — no GitHub Actions and no gh-pages branch.
  *
- *   pnpm deploy:pages            build and commit docs/ here
- *   pnpm deploy:pages --dry-run  build docs/ but do not commit
+ *   pnpm deploy:pages            build and commit the site here
+ *   pnpm deploy:pages --dry-run  build the site files but do not commit
  *
- * GitHub Pages serves it when the source is main and the folder is /docs
- * (Settings → Pages → Deploy from a branch → main → /docs).
- * The markdown notes in docs/ are kept beside the built site.
+ * GitHub Pages is "Deploy from a branch" → main → / (root). The same files are copied
+ * into docs/ next to the markdown notes.
  * Asset paths are relative, so the site works at any URL prefix.
  */
 import { execFileSync } from 'node:child_process';
@@ -19,6 +18,14 @@ const root = resolve(import.meta.dirname, '..');
 const dist = join(root, 'dist');
 const docs = join(root, 'docs');
 const KEEP = new Set(['PLAN.md', 'ARCHITECTURE.md', 'PHYSICS.md']);
+
+function builtIndex() {
+  const named = join(dist, 'index.html');
+  if (existsSync(named)) return named;
+  const alt = join(dist, 'vite.index.html');
+  if (existsSync(alt)) return alt;
+  throw new Error('Build produced no index.html');
+}
 
 const run = (cmd, args, opts = {}) =>
   execFileSync(cmd, args, { cwd: root, stdio: 'inherit', ...opts });
@@ -35,25 +42,51 @@ const branch = out('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
 
 console.info('› Building…');
 run('pnpm', ['run', 'build']);
-if (!existsSync(join(dist, 'index.html'))) throw new Error('Build produced no index.html');
+const indexHtml = builtIndex();
 
-for (const entry of readdirSync(docs)) {
-  if (!KEEP.has(entry)) rmSync(join(docs, entry), { recursive: true, force: true });
-}
-cpSync(dist, docs, {
-  recursive: true,
-  filter: (src) => !src.endsWith('.map'),
-});
-writeFileSync(join(docs, '.nojekyll'), '');
-cpSync(join(docs, 'index.html'), join(docs, '404.html'));
+const copySite = (dir, { preserve }) => {
+  if (existsSync(dir)) {
+    for (const entry of readdirSync(dir)) {
+      if (preserve?.has(entry)) continue;
+      if (
+        entry === 'assets' ||
+        entry === 'index.html' ||
+        entry === '404.html' ||
+        entry === '.nojekyll'
+      ) {
+        rmSync(join(dir, entry), { recursive: true, force: true });
+      }
+    }
+  }
+  cpSync(join(dist, 'assets'), join(dir, 'assets'), {
+    recursive: true,
+    filter: (src) => !src.endsWith('.map'),
+  });
+  cpSync(indexHtml, join(dir, 'index.html'));
+  cpSync(indexHtml, join(dir, '404.html'));
+  writeFileSync(join(dir, '.nojekyll'), '');
+};
+
+// Pages is configured as main / (root). docs/ gets the same build.
+copySite(root, {});
+copySite(docs, { preserve: KEEP });
 
 if (dryRun) {
   console.info('› Dry run: docs/ updated, not committed.');
   process.exit(0);
 }
 
-run('git', ['add', '--all', 'docs']);
-const changed = out('git', ['status', '--porcelain', '--', 'docs']);
+run('git', ['add', '--all', 'docs', 'index.html', '404.html', '.nojekyll', 'assets']);
+const changed = out('git', [
+  'status',
+  '--porcelain',
+  '--',
+  'docs',
+  'index.html',
+  '404.html',
+  '.nojekyll',
+  'assets',
+]);
 if (!changed) {
   console.info('› Nothing changed since the last deployment.');
 } else {
