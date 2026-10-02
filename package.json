@@ -55,5 +55,12 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/Exios66/wave-laboratory.git"
+  },
+  "prettier": {
+    "printWidth": 100,
+    "singleQuote": true,
+    "trailingComma": "all",
+    "semi": true,
+    "arrowParens": "always"
   }
 }

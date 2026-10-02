@@ -5,9 +5,6 @@ test-results
 pnpm-lock.yaml
 .claude
 # Built site committed for GitHub Pages (scripts/deploy-pages.mjs)
-/index.html
-/404.html
-/assets
 /docs/index.html
 /docs/404.html
 /docs/assets
