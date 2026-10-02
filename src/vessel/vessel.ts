@@ -160,8 +160,8 @@ export class Vessel {
     this.water = new LocalWater(
       field,
       levels,
-      options.patchColumns ?? 120,
-      Math.max(0.3, 0.02 * L),
+      options.patchColumns ?? 280,
+      Math.max(0.25, 0.012 * L),
     );
 
     const slamMask = new Uint8Array(def.physicsHull.indices.length / 3);

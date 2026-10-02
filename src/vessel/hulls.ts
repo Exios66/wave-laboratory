@@ -157,7 +157,7 @@ function wigley(): HullDesign {
       draft: T,
     },
     physicsLoft: { stations: 37, levelsBelow: 10, levelsAbove: 3 },
-    renderLoft: { stations: 73, levelsBelow: 16, levelsAbove: 4 },
+    renderLoft: { stations: 110, levelsBelow: 22, levelsAbove: 8 },
     maxSpeedKn: 14,
     superstructure: [
       box(-4, 0, D + 1, 8, 2.6, 2, 'superstructure'),
@@ -180,8 +180,11 @@ function cargoShip(): HullDesign {
   const deck = (u: number): number =>
     D + 1.8 * smoothstep(0.8, 1, u) + 0.4 * smoothstep(0.15, 0, u);
   const bays: VisualBox[] = [];
-  for (let k = 0; k < 6; k++)
-    bays.push(box(-34.5 + 12.8 * k, 0, D + 3.9, 12.2, 17.1, 7.8, 'cargo'));
+  for (let k = 0; k < 6; k++) {
+    const x = -34.5 + 12.8 * k;
+    bays.push(box(x, 0, D + 3.9, 12.2, 17.1, 7.8, 'cargo'));
+    if (k % 2 === 0) bays.push(box(x, 0, D + 3.9 + 7.8, 11.4, 15.6, 5.4, 'cargo'));
+  }
   bays.push(box(42.3, 0, D + 2.6, 9, 12.2, 5.2, 'cargo'));
   return {
     displayName: 'Feeder container ship',
@@ -205,7 +208,7 @@ function cargoShip(): HullDesign {
       draft: T,
     },
     physicsLoft: { stations: 38, levelsBelow: 9, levelsAbove: 4 },
-    renderLoft: { stations: 90, levelsBelow: 16, levelsAbove: 8 },
+    renderLoft: { stations: 140, levelsBelow: 24, levelsAbove: 12 },
     maxSpeedKn: 15,
     superstructure: [
       ...bays,
@@ -213,7 +216,11 @@ function cargoShip(): HullDesign {
       box(-44, 0, D + 12.2, 5, 20, 1.8, 'superstructure'),
       box(-41.45, 0, D + 12.4, 0.1, 15, 1.1, 'glass'),
       box(-50.5, 0, D + 15, 3.5, 3.5, 5, 'accent'),
+      box(-48, 0, D + 18.2, 1.2, 1.2, 2.2, 'accent'),
+      box(-46, 7.2, D + 7.2, 8, 1.2, 2.4, 'superstructure'),
+      box(-46, -7.2, D + 7.2, 8, 1.2, 2.4, 'superstructure'),
       box(53, 0, D + 4.5, 0.4, 0.4, 6, 'accent'),
+      box(20, 0, D + 0.35, 70, 18.5, 0.15, 'deck'),
     ],
     bridge: { x: -42, y: 0, z: D + 12.5 },
     propeller: { x: -54.2, z: 2.45, diameter: 4.3, wake: 0.25, timeConstant: 6 },
@@ -251,7 +258,7 @@ function trawler(): HullDesign {
       draft: T,
     },
     physicsLoft: { stations: 32, levelsBelow: 8, levelsAbove: 4 },
-    renderLoft: { stations: 72, levelsBelow: 14, levelsAbove: 8 },
+    renderLoft: { stations: 100, levelsBelow: 18, levelsAbove: 10 },
     maxSpeedKn: 11,
     superstructure: [
       box(1.5, 0, 4.0 + 1.15, 7, 5.4, 2.3, 'superstructure'),
@@ -304,7 +311,7 @@ function patrolBoat(): HullDesign {
       draft: T,
     },
     physicsLoft: { stations: 34, levelsBelow: 8, levelsAbove: 4 },
-    renderLoft: { stations: 80, levelsBelow: 14, levelsAbove: 8 },
+    renderLoft: { stations: 110, levelsBelow: 18, levelsAbove: 10 },
     maxSpeedKn: 24,
     superstructure: [
       box(0, 0, D + 1.2, 10, 5.2, 2.4, 'superstructure'),
@@ -348,7 +355,7 @@ function lifeboat(): HullDesign {
       draft: T,
     },
     physicsLoft: { stations: 30, levelsBelow: 7, levelsAbove: 3 },
-    renderLoft: { stations: 64, levelsBelow: 12, levelsAbove: 6 },
+    renderLoft: { stations: 90, levelsBelow: 16, levelsAbove: 8 },
     maxSpeedKn: 6.5,
     superstructure: [
       box(0, 0, D + 0.55, 7, 2.7, 1.1, 'accent'),

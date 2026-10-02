@@ -24,13 +24,17 @@ const Q_WORLD_TO_THREE = new THREE.Quaternion().setFromAxisAngle(
 const Q_THREE_TO_WORLD = Q_WORLD_TO_THREE.clone().invert();
 
 const HULL_COLORS: Record<string, number> = {
-  hull: 0x1e3a5f,
-  deck: 0x3f4f63,
+  hull: 0xffffff,
+  deck: 0x4b5568,
   superstructure: 0xe8eef6,
   glass: 0x9bd7f5,
-  cargo: 0xc2410c,
-  accent: 0xf59e0b,
+  cargo: 0xb45309,
+  accent: 0xd97706,
 };
+
+const PAINT_BOTTOM = new THREE.Color(0x7f1d1d);
+const PAINT_BOOT = new THREE.Color(0x1c1917);
+const PAINT_TOP = new THREE.Color(0x1e3a5f);
 
 interface VesselView {
   id: string;
@@ -354,6 +358,21 @@ export class LabRenderer implements LabRendererApi {
       view.group.position.set(state.position.x, state.position.z, -state.position.y);
       attitudeToThree(state.attitude, view.group.quaternion);
       view.group.userData.capsized = state.capsized;
+      const spray = view.group.getObjectByName('spray');
+      if (spray) {
+        const kn = Math.max(0, state.speedKn);
+        const t = Math.min(1, kn / 12);
+        spray.visible = kn > 0.4;
+        spray.scale.set(
+          view.definition.beam * (0.12 + 0.28 * t),
+          view.definition.draft * (0.2 + 0.45 * t),
+          view.definition.beam * (0.16 + 0.3 * t),
+        );
+        const mat = (spray as THREE.Mesh).material;
+        if (!Array.isArray(mat) && mat instanceof THREE.MeshStandardMaterial) {
+          mat.opacity = 0.12 + 0.55 * t;
+        }
+      }
     }
     for (const reading of frame.probes) {
       const probe = this.probes.get(reading.id);
@@ -384,6 +403,7 @@ export class LabRenderer implements LabRendererApi {
     const t0 = performance.now();
     this.renderer.info.reset();
     const t = this.frame?.t ?? 0;
+    this.updateWakes();
     this.ocean.update(t);
     this.updateCamera();
     this.sky.position.copy(this.camera.position);
@@ -443,6 +463,34 @@ export class LabRenderer implements LabRendererApi {
     return { kind: 'water', point: { x: planeHit.x, y: -planeHit.z, z: planeHit.y } };
   }
 
+  /** Visual Kelvin-ish foam. It does not feed back into the hull forces. */
+  private updateWakes(): void {
+    const A = this.ocean.uniforms.uWakeA!.value as THREE.Vector4[];
+    const B = this.ocean.uniforms.uWakeB!.value as THREE.Vector4[];
+    let n = 0;
+    for (const state of this.frame?.vessels ?? []) {
+      if (n >= 4) break;
+      const view = this.vessels.get(state.id);
+      if (!view) continue;
+      const stern = rotate(state.attitude, {
+        x: view.definition.points.propeller.x,
+        y: 0,
+        z: 0,
+      });
+      const fwd = rotate(state.attitude, { x: 1, y: 0, z: 0 });
+      const speed = Math.max(0, state.speedKn) * (1852 / 3600);
+      A[n]!.set(
+        state.position.x + stern.x,
+        state.position.y + stern.y,
+        speed,
+        view.definition.length,
+      );
+      B[n]!.set(fwd.x, fwd.y, view.definition.beam, 0);
+      n++;
+    }
+    this.ocean.uniforms.uWakeCount!.value = n;
+  }
+
   private pointerSpan(): number {
     const pts = [...this.pointers.values()];
     const a = pts[0];
@@ -494,6 +542,9 @@ export class LabRenderer implements LabRendererApi {
     group.userData.pickId = id;
     const materials: THREE.MeshStandardMaterial[] = [];
     const hullMat = this.material('hull');
+    hullMat.vertexColors = true;
+    hullMat.roughness = 0.42;
+    hullMat.metalness = 0.12;
     materials.push(hullMat);
     group.add(
       this.meshFromHull(
@@ -501,8 +552,24 @@ export class LabRenderer implements LabRendererApi {
         definition.renderHull.indices,
         hullMat,
         id,
+        definition.draft - definition.kg,
       ),
     );
+    const sprayMat = new THREE.MeshStandardMaterial({
+      color: 0xf8fafc,
+      transparent: true,
+      opacity: 0.2,
+      roughness: 0.15,
+      metalness: 0,
+      depthWrite: false,
+    });
+    materials.push(sprayMat);
+    const spray = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), sprayMat);
+    spray.name = 'spray';
+    const bow = definition.points.bow;
+    spray.position.set(bow.x + definition.length * 0.02, bow.z, -bow.y);
+    spray.scale.set(definition.beam * 0.22, definition.draft * 0.35, definition.beam * 0.28);
+    group.add(spray);
 
     for (const box of definition.superstructure) {
       const mat = this.material(box.material);
@@ -545,15 +612,24 @@ export class LabRenderer implements LabRendererApi {
     indices: Uint32Array,
     material: THREE.Material,
     id: string,
+    waterlineZ: number,
   ): THREE.Mesh {
     const positions = new Float32Array(src.length);
+    const colors = new Float32Array(src.length);
     for (let i = 0; i < src.length; i += 3) {
       positions[i] = src[i]!;
       positions[i + 1] = src[i + 2]!;
       positions[i + 2] = -src[i + 1]!;
+      const z = src[i + 2]!;
+      const paint =
+        z < waterlineZ - 0.15 ? PAINT_BOTTOM : z < waterlineZ + 0.35 ? PAINT_BOOT : PAINT_TOP;
+      colors[i] = paint.r;
+      colors[i + 1] = paint.g;
+      colors[i + 2] = paint.b;
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, material);

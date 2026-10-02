@@ -8,11 +8,10 @@
  * is bilinear in space, piece-wise linear over a few stretched depth levels, and linear in time
  * — the same temporal scheme the ocean itself uses, so no accuracy is lost in time.
  *
- * Spatial resolution: the grid spacing adapts to the vessel size (≈ footprint / 12 for a
- * ship-sized patch). Waves shorter than ~4 spacings are smoothed out, which is physically
- * benign: their pressure integrates to almost nothing over the hull (the "Smith effect" of
- * hull averaging) and they are still rendered. For the 118 m container ship this filters
- * λ ≲ 30 m; for the lifeboat it filters λ ≲ 3 m.
+ * Spatial resolution: the grid spacing adapts to the vessel size, up to 280 columns.
+ * Waves shorter than about four spacings are smoothed (the Smith effect of hull averaging)
+ * and are still rendered. A 118 m ship resolves down to roughly 12–15 m; a lifeboat, to the
+ * 0.4 m floor.
  *
  * Timing: the field holds snapshots A ≤ t < B. At t ∈ [t_k, t_{k+1}) we call
  * `field.prepare(t_k)` (a no-op when the simulation already did it) and sample the next patch
@@ -80,7 +79,7 @@ export class LocalWater {
   av = 0;
   aw = 0;
 
-  constructor(field: OceanField, levels: readonly number[], maxColumns = 144, minSpacing = 0.4) {
+  constructor(field: OceanField, levels: readonly number[], maxColumns = 220, minSpacing = 0.35) {
     this.field = field;
     this.calm = field.sea.spectral.length === 0 && field.sea.regular.length === 0;
     this.levels = Float64Array.from(levels);
