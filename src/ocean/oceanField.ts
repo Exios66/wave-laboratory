@@ -367,7 +367,9 @@ export class OceanField {
       const c = Math.cos(theta);
       const s = Math.sin(theta);
       const a2 =
-        this.env.choppiness > 0 ? stokesSecondAmplitude(r.amplitude, r.k, this.env.depth) : 0;
+        r.stokes && this.env.choppiness > 0
+          ? stokesSecondAmplitude(r.amplitude, r.k, this.env.depth)
+          : 0;
       const c2 = Math.cos(2 * theta);
       const s2 = Math.sin(2 * theta);
       eta += r.amplitude * c + a2 * c2;
@@ -429,7 +431,9 @@ export class OceanField {
       const s = Math.sin(theta);
       const att = pressureAttenuation(r.k, zeta, h);
       const a2 =
-        this.env.choppiness > 0 ? stokesSecondAmplitude(r.amplitude, r.k, this.env.depth) : 0;
+        r.stokes && this.env.choppiness > 0
+          ? stokesSecondAmplitude(r.amplitude, r.k, this.env.depth)
+          : 0;
       head +=
         r.amplitude * c * att + a2 * Math.cos(2 * theta) * pressureAttenuation(2 * r.k, zeta, h);
       const uh = r.amplitude * r.omega * r.cothKh * c * att;
@@ -500,7 +504,9 @@ export class OceanField {
       const cs = Math.cos(theta);
       const sn = Math.sin(theta);
       const a2 =
-        this.env.choppiness > 0 ? stokesSecondAmplitude(r.amplitude, r.k, this.env.depth) : 0;
+        r.stokes && this.env.choppiness > 0
+          ? stokesSecondAmplitude(r.amplitude, r.k, this.env.depth)
+          : 0;
       const cs2 = Math.cos(2 * theta);
       for (let j = 0; j < m; j++) {
         const zeta = Math.min(0, zetas[j]!);
@@ -519,7 +525,8 @@ export class OceanField {
   get representedVariance(): number {
     let v = 0;
     for (const c of this.cascades) v += c.variance;
-    for (const r of this.sea.regular) v += (r.amplitude * r.amplitude) / 2;
+    // Focused-group energy is transient (one passing crest), not part of the stationary H_s.
+    for (const r of this.sea.regular) if (!r.group) v += (r.amplitude * r.amplitude) / 2;
     return v;
   }
 }

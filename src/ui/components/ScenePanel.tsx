@@ -14,9 +14,11 @@ function waveMeta(w: WaveSystem): string {
     case 'spectrum':
       return `Hs ${w.hs.toFixed(1)} m · Tp ${w.tp.toFixed(0)} s`;
     case 'wind':
-      return `${w.windSpeed.toFixed(0)} m/s wind`;
+      return w.followWeather ? 'Follows the weather wind' : `${w.windSpeed.toFixed(0)} m/s wind`;
     case 'regular':
       return `H ${w.height.toFixed(1)} m · T ${w.period.toFixed(0)} s`;
+    case 'focused':
+      return `Crest ${w.crestHeight.toFixed(1)} m at ${w.focusTime.toFixed(0)} s`;
   }
 }
 
@@ -146,6 +148,7 @@ export function ScenePanel() {
                 { label: 'Spectrum (Hs, Tp)', onSelect: () => addWave('spectrum') },
                 { label: 'Wind sea (wind, fetch)', onSelect: () => addWave('wind') },
                 { label: 'Regular waves (H, T)', onSelect: () => addWave('regular') },
+                { label: 'Rogue wave (focused group)', onSelect: () => addWave('focused') },
               ]}
             />
           </div>

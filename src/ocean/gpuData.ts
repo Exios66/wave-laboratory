@@ -60,7 +60,7 @@ export function buildGpuOceanData(
       variance: c.variance,
     };
   });
-  for (const r of sea.regular) variance += (r.amplitude * r.amplitude) / 2;
+  for (const r of sea.regular) if (!r.group) variance += (r.amplitude * r.amplitude) / 2;
   return {
     cascades,
     regular: sea.regular,

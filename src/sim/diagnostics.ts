@@ -28,7 +28,24 @@ export function seaDiagnostics(sea: ResolvedSea, representedHs: number): SeaDiag
     }
     checkShallow(s.id, s.hs, wavelength, kp);
   }
+  for (const f of sea.focused) {
+    systems.push({
+      id: f.id,
+      hs: f.crestHeight,
+      tp: f.tp,
+      wavelength: f.wavelength,
+      note: `Focused crest of ${f.crestHeight.toFixed(1)} m at t = ${f.focusTime.toFixed(0)} s`,
+    });
+    const steep = (2 * f.crestHeight) / f.wavelength;
+    if (steep > 0.12) {
+      warnings.push(
+        `${f.id}: the focused crest is very steep (2A/λp = ${steep.toFixed(2)}); a real wave ` +
+          'group would break before reaching it, and linear theory under-predicts its shape.',
+      );
+    }
+  }
   for (const r of sea.regular) {
+    if (r.group) continue;
     const wavelength = (2 * Math.PI) / r.k;
     systems.push({ id: r.id, hs: 2 * r.amplitude, tp: (2 * Math.PI) / r.omega, wavelength });
     const steep = (2 * r.amplitude) / wavelength;

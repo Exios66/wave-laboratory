@@ -364,16 +364,24 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
       )}
       {wave.kind === 'wind' && (
         <>
-          <NumberField
-            label="Wind speed (10 m)"
-            value={wave.windSpeed}
-            min={1}
-            max={40}
-            step={0.5}
-            unit="m/s"
-            unitLabel="metres per second"
-            onCommit={(v) => update((w) => w.kind === 'wind' && void (w.windSpeed = v))}
+          <Switch
+            label="Follow the weather wind"
+            checked={wave.followWeather}
+            onChange={(c) => update((w) => w.kind === 'wind' && void (w.followWeather = c))}
+            hint="Use the environment wind speed and direction, so the sea grows with the weather."
           />
+          {!wave.followWeather && (
+            <NumberField
+              label="Wind speed (10 m)"
+              value={wave.windSpeed}
+              min={1}
+              max={40}
+              step={0.5}
+              unit="m/s"
+              unitLabel="metres per second"
+              onCommit={(v) => update((w) => w.kind === 'wind' && void (w.windSpeed = v))}
+            />
+          )}
           <NumberField
             label="Fetch"
             value={wave.fetchKm}
@@ -384,6 +392,66 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
             unitLabel="kilometres"
             onCommit={(v) => update((w) => w.kind === 'wind' && void (w.fetchKm = v))}
             hint="Distance over which the wind has blown. Long fetches reach the fully developed limit."
+          />
+        </>
+      )}
+      {wave.kind === 'focused' && (
+        <>
+          <p className="field__hint">
+            A NewWave focused group: the components of a JONSWAP sea are phased so that their crests
+            meet at one point and time — the standard model of a rogue wave.
+          </p>
+          <NumberField
+            label="Crest height"
+            value={wave.crestHeight}
+            min={0.5}
+            max={30}
+            step={0.5}
+            unit="m"
+            unitLabel="metres"
+            onCommit={(v) => update((w) => w.kind === 'focused' && void (w.crestHeight = v))}
+            hint="Linear crest elevation at the focus (the Draupner wave was 18.5 m)."
+          />
+          <NumberField
+            label="Peak period Tp"
+            value={wave.tp}
+            min={4}
+            max={20}
+            step={0.5}
+            unit="s"
+            unitLabel="seconds"
+            onCommit={(v) => update((w) => w.kind === 'focused' && void (w.tp = v))}
+          />
+          <NumberField
+            label="Focus time"
+            value={wave.focusTime}
+            min={0}
+            max={600}
+            step={5}
+            unit="s"
+            unitLabel="seconds"
+            onCommit={(v) => update((w) => w.kind === 'focused' && void (w.focusTime = v))}
+            hint="Simulation time at which the crest peaks."
+          />
+          <NumberField
+            label="Focus east (x)"
+            value={wave.focusX}
+            min={-2000}
+            max={2000}
+            step={5}
+            unit="m"
+            unitLabel="metres"
+            onCommit={(v) => update((w) => w.kind === 'focused' && void (w.focusX = v))}
+          />
+          <NumberField
+            label="Focus north (y)"
+            value={wave.focusY}
+            min={-2000}
+            max={2000}
+            step={5}
+            unit="m"
+            unitLabel="metres"
+            onCommit={(v) => update((w) => w.kind === 'focused' && void (w.focusY = v))}
           />
         </>
       )}
@@ -422,23 +490,29 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
           />
         </>
       )}
-      <NumberField
-        label="Coming from"
-        value={wave.directionDeg}
-        min={0}
-        max={360}
-        step={5}
-        unit="°"
-        unitLabel="degrees"
-        onCommit={(v) => update((w) => void (w.directionDeg = v))}
-        hint="Compass bearing the waves arrive from (0 = north, 90 = east)."
-      />
+      {!(wave.kind === 'wind' && wave.followWeather) && (
+        <NumberField
+          label="Coming from"
+          value={wave.directionDeg}
+          min={0}
+          max={360}
+          step={5}
+          unit="°"
+          unitLabel="degrees"
+          onCommit={(v) => update((w) => void (w.directionDeg = v))}
+          hint="Compass bearing the waves arrive from (0 = north, 90 = east)."
+        />
+      )}
+      {(wave.kind === 'spectrum' || wave.kind === 'wind') && (
+        <SpreadingFields
+          spreading={wave.spreading}
+          onChange={(s) =>
+            update((w) => (w.kind === 'spectrum' || w.kind === 'wind') && void (w.spreading = s))
+          }
+        />
+      )}
       {wave.kind !== 'regular' && (
         <>
-          <SpreadingFields
-            spreading={wave.spreading}
-            onChange={(s) => update((w) => w.kind !== 'regular' && void (w.spreading = s))}
-          />
           <NumberField
             label="Random seed"
             value={wave.seed}

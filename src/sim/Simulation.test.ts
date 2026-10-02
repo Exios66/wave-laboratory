@@ -35,6 +35,13 @@ function stubVessel(id: string): SimVessel & { steps: number } {
         slamming: false,
         greenWater: false,
         capsized: false,
+        windSpeed: 0,
+        windFromDeg: 0,
+        apparentWind: 0,
+        apparentWindAngleDeg: 0,
+        windForce: 0,
+        sailSet: 0,
+        braceDeg: 90,
       };
     },
   };

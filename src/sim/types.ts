@@ -20,6 +20,17 @@ export interface SimFrame {
   lagging: boolean;
   /** Fixed-rate recordings since the previous frame (channel names: `<id>:<quantity>`). */
   samples: SampleBlock | null;
+  /** Weather at the origin at time t. */
+  weather: WeatherReading;
+}
+
+export interface WeatherReading {
+  /** 10 m wind speed [m/s] and the compass bearing it comes FROM [deg]. */
+  windSpeed: number;
+  windFromDeg: number;
+  /** Squall intensity 0–1. */
+  squall: number;
+  rainMmH: number;
 }
 
 export type { SampleBlock };
