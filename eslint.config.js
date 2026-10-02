@@ -29,6 +29,11 @@ export default tseslint.config(
     plugins: { 'react-hooks': reactHooks },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // WAI-ARIA APG: a tab panel is focusable so keyboard users can scroll its content.
+      'jsx-a11y/no-noninteractive-tabindex': [
+        'error',
+        { tags: [], roles: ['tabpanel'], allowExpressionValues: true },
+      ],
     },
   },
   {

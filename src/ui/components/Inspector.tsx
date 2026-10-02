@@ -118,8 +118,11 @@ function SeaSummary() {
   );
 }
 
+/** Stable empty array: selectors must not return a new object on every call. */
+const NO_WARNINGS: readonly string[] = [];
+
 function Warnings() {
-  const warnings = useLab((s) => s.diagnostics?.warnings ?? []);
+  const warnings = useLab((s) => s.diagnostics?.warnings ?? NO_WARNINGS);
   if (warnings.length === 0) return null;
   return (
     <div className="callout" role="note" style={{ marginTop: 12 }}>

@@ -27,6 +27,8 @@ export type { SampleBlock };
 export interface SeaDiagnostics {
   /** Expected H_s of everything represented (all cascades + regular waves) [m]. */
   hs: number;
+  /** H_s actually present on the discrete spectral grid (differs from `hs` by ~1 %) [m]. */
+  representedHs: number;
   /** Per-system details for the inspector. */
   systems: { id: string; hs: number; tp: number; wavelength: number; note?: string }[];
   /** Validity warnings (e.g. steepness beyond the breaking limit). */

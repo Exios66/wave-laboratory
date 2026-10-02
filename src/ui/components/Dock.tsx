@@ -88,6 +88,7 @@ export function Dock() {
         role="tabpanel"
         id={`panel-${tab}`}
         aria-labelledby={`tab-${tab}`}
+        tabIndex={0}
       >
         {tab === 'gauges' && <GaugeCharts />}
         {tab === 'motions' && <MotionCharts />}

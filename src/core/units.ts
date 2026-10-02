@@ -45,7 +45,8 @@ export function wmoSeaState(hs: number): { code: number; label: string } {
     [14, 'Very high'],
   ];
   for (let i = 0; i < table.length; i++) {
-    if (hs <= table[i]![0]) return { code: i, label: table[i]![1] };
+    // Upper bounds are inclusive (WMO code 3700); tolerate floating-point round-off.
+    if (hs <= table[i]![0] * (1 + 1e-6)) return { code: i, label: table[i]![1] };
   }
   return { code: 9, label: 'Phenomenal' };
 }

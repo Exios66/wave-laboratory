@@ -45,7 +45,7 @@ test.describe('mobile layout', () => {
     await panels.getByRole('tab', { name: 'Scene' }).tap();
     await page
       .getByRole('navigation', { name: 'Scene' })
-      .getByRole('button', { name: /MV Meridian/ })
+      .getByRole('button', { name: /^MV Meridian/ })
       .tap();
     // Selecting reveals the inspector automatically.
     await expect(panels.getByRole('tab', { name: 'Inspector' })).toHaveAttribute(

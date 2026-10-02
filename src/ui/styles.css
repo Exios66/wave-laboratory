@@ -286,7 +286,7 @@ textarea {
 
 .topbar__name {
   flex: 1 1 auto;
-  min-width: 120px;
+  min-width: 200px;
   max-width: 420px;
 }
 
@@ -616,9 +616,9 @@ input[type='range'] {
 .readout dd {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: 15px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .badge {
@@ -1123,18 +1123,18 @@ kbd {
     min-width: 0;
   }
 
-  .app__scene,
-  .app__inspector,
-  .app__dock {
+  .app > .app__scene.panel,
+  .app > .app__inspector.panel,
+  .app > .app__dock.panel {
     grid-area: panel;
     display: none;
-    border-width: 0 !important;
+    border-width: 0;
   }
-  .app[data-mobile-panel='scene'] .app__scene,
-  .app[data-mobile-panel='inspector'] .app__inspector {
+  .app[data-mobile-panel='scene'] > .app__scene.panel,
+  .app[data-mobile-panel='inspector'] > .app__inspector.panel {
     display: block;
   }
-  .app[data-mobile-panel='data'] .app__dock {
+  .app[data-mobile-panel='data'] > .app__dock.panel {
     display: flex;
   }
 
@@ -1172,6 +1172,22 @@ kbd {
 
   .hud {
     padding: var(--space-2);
+  }
+  /* Compact HUD controls so the 3D view stays visible on phones. */
+  .hud .segmented button {
+    min-height: 36px;
+    padding: 4px 8px;
+    font-size: 13px;
+  }
+  .hud select {
+    min-height: 36px;
+    max-width: 11em;
+  }
+  .transport .toolbar {
+    flex-wrap: wrap;
+  }
+  .tabs [role='tab'] {
+    white-space: nowrap;
   }
   .hud__row {
     gap: 6px;
@@ -1223,10 +1239,13 @@ kbd {
   .select,
   .input,
   .tree__select,
-  .tabs [role='tab'],
+  .tabs [role='tab'] {
+    min-height: 44px;
+  }
+  /* Overlaid HUD controls stay at 36 px (WCAG 2.5.8 minimum is 24 px) to keep the view clear. */
   .segmented button,
   .hud select {
-    min-height: 44px;
+    min-height: 36px;
   }
   .btn--icon {
     width: 44px;

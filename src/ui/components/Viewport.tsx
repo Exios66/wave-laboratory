@@ -1,6 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { LabRenderer } from '../../render/LabRenderer';
-import type { CameraMode, OverlayMode } from '../../render/api';
+import type { CameraMode, OverlayLegend, OverlayMode } from '../../render/api';
 import { getRuntime } from '../runtime';
 import { useLab } from '../store';
 import { fmt } from './fields';
@@ -28,16 +28,25 @@ export function Viewport() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rt = getRuntime();
-    rt.attach(
-      canvas,
-      (c) =>
-        new LabRenderer(c, {
-          onContextLost: () =>
-            useLab.getState().notify('warning', 'Graphics context lost — trying to restore…'),
-          onContextRestored: () => useLab.getState().notify('success', 'Graphics restored.'),
-        }),
-    );
-    return () => rt.detach();
+    let offTap: (() => void) | null = null;
+    rt.attach(canvas, (c) => {
+      const renderer = new LabRenderer(c, {
+        onContextLost: () =>
+          useLab.getState().notify('warning', 'Graphics context lost — trying to restore…'),
+        onContextRestored: () => useLab.getState().notify('success', 'Graphics restored.'),
+      });
+      // Taps and clicks select; drags (orbit, pan, pinch) never do.
+      offTap = renderer.enableTapPicking((hit) => {
+        const lab = useLab.getState();
+        if (hit?.kind === 'vessel' && hit.id) lab.select({ kind: 'vessel', id: hit.id });
+        else if (hit?.kind === 'probe' && hit.id) lab.select({ kind: 'probe', id: hit.id });
+      });
+      return renderer;
+    });
+    return () => {
+      offTap?.();
+      rt.detach();
+    };
   }, []);
 
   return (
@@ -69,15 +78,6 @@ export function Viewport() {
             e.preventDefault();
             r.nudgeCamera(action);
           }
-        }}
-        onClick={(e) => {
-          const r = getRuntime().rendererApi;
-          if (!r) return;
-          const rect = e.currentTarget.getBoundingClientRect();
-          const hit = r.pick(e.clientX - rect.left, e.clientY - rect.top);
-          const lab = useLab.getState();
-          if (hit?.kind === 'vessel' && hit.id) lab.select({ kind: 'vessel', id: hit.id });
-          else if (hit?.kind === 'probe' && hit.id) lab.select({ kind: 'probe', id: hit.id });
         }}
       />
       <p id="viewport-desc" className="visually-hidden">
@@ -207,35 +207,38 @@ function Hud() {
   );
 }
 
-function Legend({ mode }: { mode: OverlayMode }) {
-  const hs = useLab((s) => s.diagnostics?.hs ?? 1);
-  const a = Math.max(0.25, hs * 0.75);
-  const spec =
-    mode === 'height'
-      ? {
-          title: 'Surface elevation η',
-          gradient: 'linear-gradient(90deg,#2166ac,#67a9cf,#f7f7f7,#ef8a62,#b2182b)',
-          ticks: [`−${a.toFixed(1)} m`, '0', `+${a.toFixed(1)} m`],
-        }
-      : mode === 'steepness'
-        ? {
-            title: 'Slope |∇η|',
-            gradient: 'linear-gradient(90deg,#0d0887,#7e03a8,#cc4778,#f89540,#f0f921)',
-            ticks: ['0', '0.15', '0.3+'],
-          }
-        : {
-            title: 'Breaking (Jacobian) & foam',
-            gradient: 'linear-gradient(90deg,#08306b,#4292c6,#f7fbff)',
-            ticks: ['none', '', 'breaking'],
-          };
+function Legend({ mode }: { mode: Exclude<OverlayMode, 'none'> }) {
+  const diagnostics = useLab((s) => s.diagnostics);
+  const [legend, setLegend] = useState<OverlayLegend | null>(null);
+  useEffect(() => {
+    // The renderer owns the exact colour scale; re-read it whenever the sea or mode changes
+    // (the GPU ocean is uploaded just after the diagnostics arrive, hence the short delay).
+    const read = () => setLegend(getRuntime().rendererApi?.overlayLegend ?? null);
+    read();
+    const t = setTimeout(read, 250);
+    return () => clearTimeout(t);
+  }, [mode, diagnostics]);
+  if (!legend) return null;
+  const gradient = `linear-gradient(90deg, ${legend.stops
+    .map((s) => `${s.color} ${(s.offset * 100).toFixed(1)}%`)
+    .join(', ')})`;
+  const unit = legend.unit === '–' ? '' : ` ${legend.unit}`;
+  const mid = (legend.min + legend.max) / 2;
+  const f = (v: number) => (Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(0));
   return (
     <figure className="hud__card legend" style={{ margin: 0 }}>
-      <figcaption>{spec.title}</figcaption>
-      <div className="legend__bar" style={{ background: spec.gradient }} aria-hidden="true" />
+      <figcaption>{legend.label}</figcaption>
+      <div className="legend__bar" style={{ background: gradient }} aria-hidden="true" />
       <div className="legend__ticks">
-        {spec.ticks.map((t, i) => (
-          <span key={i}>{t}</span>
-        ))}
+        <span>
+          {f(legend.min)}
+          {unit}
+        </span>
+        <span>{f(mid)}</span>
+        <span>
+          {f(legend.max)}
+          {unit}
+        </span>
       </div>
     </figure>
   );

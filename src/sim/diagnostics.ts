@@ -64,5 +64,7 @@ export function seaDiagnostics(sea: ResolvedSea, representedHs: number): SeaDiag
     }
   }
 
-  return { hs: representedHs, systems, warnings };
+  // Nominal total H_s combines the independent systems' variances (H_s ∝ √m₀).
+  const hs = Math.sqrt(systems.reduce((acc, s) => acc + s.hs * s.hs, 0));
+  return { hs, representedHs, systems, warnings };
 }
