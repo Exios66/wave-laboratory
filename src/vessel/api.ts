@@ -88,8 +88,10 @@ export interface VesselDefinition {
   length: number;
   beam: number;
   depth: number;
-  /** Design (still-water equilibrium) draft [m]. */
+  /** Still-water equilibrium draft in the chosen loading condition [m]. */
   draft: number;
+  /** Draft at the design load [m]; the boot-top paint line sits here. */
+  designDraft: number;
   /** Mass [kg]. */
   mass: number;
   /** Principal moments of inertia about the CoG [kg·m²]. */

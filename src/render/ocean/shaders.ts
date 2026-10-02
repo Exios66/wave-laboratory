@@ -293,6 +293,7 @@ uniform float uTime;
 uniform float uLambda;
 uniform float uHasMips;
 uniform float uMeshScale;
+uniform vec2 uDrift;
 uniform vec4 uRegA[48];
 uniform vec4 uRegB[48];
 uniform float uRegularCount;
@@ -344,16 +345,19 @@ vec3 regularSample(vec2 worldXY, float h, out vec4 slope) {
 void main() {
   vec3 base = (modelMatrix * vec4(position, 1.0)).xyz;
   vec2 worldXY = vec2(base.x, -base.z);
+  // The sea lives in the frame of the moving water: sample it where the current carried this
+  // point from (uDrift = current × time), as the CPU physics does.
+  vec2 waterXY = worldXY - uDrift;
   float h = max(aCell * uMeshScale, 0.02);
   vec4 regSlope;
-  vec3 d = regularSample(worldXY, h, regSlope);
-  if (uCount > 0.5) d += cascadeSample(uC0, uSize0, worldXY, h);
-  if (uCount > 1.5) d += cascadeSample(uC1, uSize1, worldXY, h);
-  if (uCount > 2.5) d += cascadeSample(uC2, uSize2, worldXY, h);
-  if (uCount > 3.5) d += cascadeSample(uC3, uSize3, worldXY, h);
+  vec3 d = regularSample(waterXY, h, regSlope);
+  if (uCount > 0.5) d += cascadeSample(uC0, uSize0, waterXY, h);
+  if (uCount > 1.5) d += cascadeSample(uC1, uSize1, waterXY, h);
+  if (uCount > 2.5) d += cascadeSample(uC2, uSize2, waterXY, h);
+  if (uCount > 3.5) d += cascadeSample(uC3, uSize3, waterXY, h);
   vec3 p = vec3(worldXY.x + d.x, d.z, -(worldXY.y + d.y));
   vThreePos = p;
-  vLabel = worldXY;
+  vLabel = waterXY;
   vEta = d.z;
   vRegSlope = regSlope;
   vCell = h;
@@ -362,6 +366,7 @@ void main() {
 `;
 
 export const OCEAN_FRAG = /* glsl */ `
+uniform vec2 uDrift;
 uniform float uWind;
 uniform float uTime;
 uniform float uHs;
@@ -511,8 +516,10 @@ void main() {
   float near = 1.0 - smoothstep(30.0, 250.0, dist);
 
   // Weather on the water: gust patches ("cat's paws") roughen it, squall lines darken it.
-  float gust = uGustCount > 0.5 ? gustAt(label) : 0.0;
-  float squall = squallAt(label);
+  // Wind, rain and ship wakes are anchored to the world, not to the drifting water.
+  vec2 world = label + uDrift;
+  float gust = uGustCount > 0.5 ? gustAt(world) : 0.0;
+  float squall = squallAt(world);
   float rough = clamp(0.35 + uWind * 0.05, 0.2, 2.5) * (1.0 + 2.5 * max(gust, 0.0)) * (1.0 + squall);
   vec2 cap = vec2(0.0);
   float capFade = 1.0 - smoothstep(0.15, 0.6, foot);
@@ -523,7 +530,7 @@ void main() {
     cap *= 0.35 * rough * capFade;
   }
   if (uRain > 0.1 && near > 0.0) {
-    cap += rainRipples(label, clamp(uRain / 20.0, 0.3, 3.0)) * 0.08 * near * clamp(uRain / 15.0, 0.2, 1.0);
+    cap += rainRipples(world, clamp(uRain / 20.0, 0.3, 3.0)) * 0.08 * near * clamp(uRain / 15.0, 0.2, 1.0);
   }
   // Lagrangian normal: tangents (1 + Dxx, 0, ηx) and (0, 1 + Dyy, ηy) in world (x, y, z).
   vec3 nWorld = normalize(vec3(-(sl.x + cap.x) * jy, -(sl.y + cap.y) * jx, jx * jy));
@@ -559,6 +566,13 @@ void main() {
   // Diffuse light through steep, thin crests, also under an overcast sky.
   float thin = clamp(length(sl.xy) * 2.5, 0.0, 1.0) * crest;
   col += srgbToLinear(vec3(0.06, 0.24, 0.24)) * thin * light * 0.6;
+  // Crest glow: sunlight through thin crests when looking toward a low sun.
+  vec3 sunFlat = normalize(vec3(uSunDir.x, 0.0, uSunDir.z) + vec3(0.0, 1e-4, 0.0));
+  float backlit = pow(clamp(dot(-V, sunFlat), 0.0, 1.0), 3.0);
+  float glowCrest = smoothstep(0.55, 1.0, crest) * smoothstep(0.05, 0.3, length(sl.xy) + 0.08);
+  float sunUp = smoothstep(-0.05, 0.25, uSunDir.y);
+  col += srgbToLinear(vec3(0.12, 0.72, 0.58)) * backlit * glowCrest * sunUp * sunVis
+    * (1.0 - fresnel) * 0.55;
 
   // Whitecaps: breaking where the surface compresses (Jacobian), with coverage that follows
   // the Monahan whitecap law for the wind, plus wind-aligned foam streaks above Beaufort 8.
@@ -577,7 +591,7 @@ void main() {
   float texture1 = vnoise(label * 0.9 + uTime * 0.05) * 0.6 + vnoise(label * 3.1) * 0.4;
   float foam = breaking * smoothstep(0.25, 0.75, texture1 + breaking * 0.35);
   foam += streaks * (0.5 + 0.5 * texture1);
-  foam += wakeFoam(label);
+  foam += wakeFoam(world);
   foam = clamp(foam, 0.0, 1.0);
   vec3 foamCol = srgbToLinear(vec3(0.90, 0.94, 0.96)) * (0.35 + 0.65 * light);
   col = mix(col, foamCol, foam * 0.92);

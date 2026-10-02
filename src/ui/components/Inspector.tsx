@@ -219,6 +219,30 @@ function EnvironmentInspector({ env, quality }: { env: Environment; quality: Oce
         />
       </fieldset>
       <fieldset className="fieldset">
+        <legend>Surface current</legend>
+        <NumberField
+          label="Current speed"
+          value={env.currentSpeed}
+          min={0}
+          max={5}
+          step={0.05}
+          unit="m/s"
+          unitLabel="metres per second"
+          onCommit={(v) => set('currentSpeed', v)}
+          hint={`${fmt(env.currentSpeed / 0.5144, 1, 'kn')}. The whole sea drifts with it: waves are Doppler shifted and ships are set off their track. The Gulf Stream runs at up to 2.5 m/s.`}
+        />
+        <NumberField
+          label="Current flowing toward"
+          value={env.currentDirectionDeg}
+          min={0}
+          max={360}
+          step={5}
+          unit="°"
+          unitLabel="degrees"
+          onCommit={(v) => set('currentDirectionDeg', v)}
+        />
+      </fieldset>
+      <fieldset className="fieldset">
         <legend>Sun</legend>
         <NumberField
           label="Sun elevation"
@@ -992,12 +1016,23 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
           onCommit={(v) => update((x) => void (x.kgFactor = v))}
           hint="Higher = less stable. Watch GM: negative GM means the vessel cannot stay upright."
         />
+        <NumberField
+          label="Loading (displacement / design)"
+          value={vessel.loadFactor}
+          min={0.4}
+          max={1.25}
+          step={0.01}
+          unit="×"
+          onCommit={(v) => update((x) => void (x.loadFactor = v))}
+          hint="Cargo and ballast. Below 1 the ship floats light and shows its red bottom paint; above 1 it is overloaded with less freeboard."
+        />
         {def && (
           <Readout
             items={[
               { label: 'Length', value: fmt(def.length, 1, 'm') },
               { label: 'Beam', value: fmt(def.beam, 1, 'm') },
               { label: 'Draft', value: fmt(def.draft, 2, 'm') },
+              { label: 'Freeboard', value: fmt(def.depth - def.draft, 2, 'm') },
               { label: 'Mass', value: fmt(def.mass / 1000, 0, 't') },
               { label: 'GM', value: fmt(def.gm, 2, 'm'), title: 'Transverse metacentric height' },
               { label: 'Max speed', value: fmt(def.maxSpeed / 0.5144, 0, 'kn') },

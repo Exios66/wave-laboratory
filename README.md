@@ -7,7 +7,8 @@ oceanographic wave spectra, drop ships into it, and measure how they handle the 
 
 - **Waves:** JONSWAP, Pierson–Moskowitz and Bretschneider spectra, the TMA finite-depth
   correction, fetch-limited wind seas (Hasselmann et al. 1973) and regular Airy waves.
-  Directional spreading is Mitsuyasu, cos-2s or Donelan–Banner. The dispersion relation
+  Directional spreading is Mitsuyasu, cos-2s or Donelan–Banner. A uniform surface current
+  Doppler shifts the whole sea and sets the ships. The dispersion relation
   includes finite depth and surface tension. The surface is synthesised from four FFT
   cascades (1 km swells down to centimetre ripples) with choppy (Lagrangian) displacement.
 - **Ships:** 6-DOF rigid-body dynamics. Forces come from pressure integration over the
@@ -15,7 +16,8 @@ oceanographic wave spectra, drop ships into it, and measure how they handle the 
   columns, plus added mass, radiation and viscous damping, propulsion, rudder and autopilot.
   Slamming, green water and capsize are detected. The hull you see is lofted more finely than
   the physics mesh, with antifouling below the waterline, deck cargo and a foam wake that
-  does not feed back into the forces.
+  does not feed back into the forces. A loading setting (light ballast to overloaded) sets the
+  displacement, and the ship floats at the matching draft.
 - **Instruments:** wave gauges, vessel motion recorders, Welch spectra, zero-crossing
   statistics, motion-sickness incidence and CSV export.
 - **What you see is what the ships feel.** The GPU renderer inverse-FFTs the same h₀ amplitudes
@@ -84,6 +86,8 @@ paths, so it also works from any other static host or sub-folder.
 4. **Save** the experiment as JSON, or **share** it as a link. Experiments are deterministic:
    the same file always produces the same sea. Theme and graphics quality are in **Settings**
    (also under the phone More menu).
+
+A few secrets are hidden in the lab; old gamers and oceanographers will find them first.
 
 Press <kbd>?</kbd> in the app for all keyboard shortcuts. On a phone, drag with one finger to
 orbit and pinch with two fingers to zoom.

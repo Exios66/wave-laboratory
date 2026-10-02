@@ -139,4 +139,34 @@ test.describe('Wave Laboratory app', () => {
       'Wave tank: Wigley hull',
     );
   });
+
+  test('easter eggs: Konami duck and the Draupner wave', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    await page.locator('body').click({ position: { x: 2, y: 2 } });
+    for (const key of [
+      'ArrowUp',
+      'ArrowUp',
+      'ArrowDown',
+      'ArrowDown',
+      'ArrowLeft',
+      'ArrowRight',
+      'ArrowLeft',
+      'ArrowRight',
+      'b',
+      'a',
+    ]) {
+      await page.keyboard.press(key);
+    }
+    await expect(page.getByText(/Rubber duck mode/)).toBeVisible();
+    await page.waitForTimeout(800);
+    await page.screenshot({ path: 'test-results/easter-duck.png' });
+    await page.keyboard.type('draupner');
+    await expect(page.getByRole('textbox', { name: 'Experiment name' })).toHaveValue(
+      /Draupner, 1995/,
+    );
+    await waitForSimulation(page);
+    expect(errors).toEqual([]);
+  });
 });

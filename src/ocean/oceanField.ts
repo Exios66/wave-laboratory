@@ -124,6 +124,9 @@ export class OceanField {
   private readonly ky: Float64Array;
   private readonly rho: number;
   private readonly g: number;
+  /** Uniform surface current, world frame [m/s]. Waves are advected with it. */
+  readonly currentX: number;
+  readonly currentY: number;
 
   constructor(waves: readonly WaveSystem[], env: Environment, opts: OceanFieldOptions = {}) {
     this.env = env;
@@ -133,6 +136,9 @@ export class OceanField {
     this.fft = new FFT(this.n);
     this.rho = env.waterDensity;
     this.g = env.gravity;
+    const current = currentVelocity(env);
+    this.currentX = current.x;
+    this.currentY = current.y;
     const specs = cascadeSpecs(opts.cascadeSizes ?? CASCADE_SIZES).filter((s) => s.physics);
     // Cascades without energy (e.g. only regular waves, or calm water) are skipped entirely so
     // they cost no FFTs.
@@ -346,7 +352,9 @@ export class OceanField {
   surface(x: number, y: number, t: number, out?: SurfaceSample): SurfaceSample {
     const res = out ?? { eta: 0, slopeX: 0, slopeY: 0, etaT: 0 };
     const w = this.interpWeight(t);
-    this.invertChoppy(x, y, t, w, this.label);
+    // The sea is defined in the frame of the moving water: sample it where this point was
+    // carried from, x − U t (a uniform current Doppler shifts every component by k·U).
+    this.invertChoppy(x - this.currentX * t, y - this.currentY * t, t, w, this.label);
     const [x0, y0] = this.label;
     let eta = 0;
     let sx = 0;
@@ -381,7 +389,8 @@ export class OceanField {
     res.eta = eta;
     res.slopeX = sx;
     res.slopeY = sy;
-    res.etaT = et;
+    // ∂η/∂t at a fixed point = ∂η/∂t in the water frame − U·∇η.
+    res.etaT = et - this.currentX * sx - this.currentY * sy;
     return res;
   }
 
@@ -442,8 +451,8 @@ export class OceanField {
       wv += r.amplitude * r.omega * s * att;
     }
     res.pressure = this.rho * this.g * (head - z);
-    res.u = u;
-    res.v = v;
+    res.u = u + this.currentX;
+    res.v = v + this.currentY;
     res.w = wv;
     return res;
   }
@@ -516,6 +525,12 @@ export class OceanField {
         out.u[j]! += uh * r.dirX;
         out.v[j]! += uh * r.dirY;
         out.w[j]! += r.amplitude * r.omega * sn * att;
+      }
+    }
+    if (this.currentX !== 0 || this.currentY !== 0) {
+      for (let j = 0; j < m; j++) {
+        out.u[j]! += this.currentX;
+        out.v[j]! += this.currentY;
       }
     }
     return out;
@@ -650,4 +665,12 @@ function profile(
   if (zeta >= z2) return p1 + ((p2 - p1) * (zeta - z1)) / (z2 - z1);
   if (zeta >= z3) return p2 + ((p3 - p2) * (zeta - z2)) / (z3 - z2);
   return p3 * Math.exp(kRef * (zeta - z3));
+}
+
+/** World-frame velocity of the uniform surface current (bearing is the direction it flows to). */
+export function currentVelocity(env: Environment): { x: number; y: number } {
+  const u = env.currentSpeed ?? 0;
+  if (!(u > 0)) return { x: 0, y: 0 };
+  const az = ((env.currentDirectionDeg ?? 0) * Math.PI) / 180;
+  return { x: u * Math.sin(az), y: u * Math.cos(az) };
 }

@@ -53,6 +53,7 @@ const vessel = (
   speedKn: 0,
   autopilot: true,
   kgFactor: 0.6,
+  loadFactor: 1,
   ...o,
 });
 
@@ -180,6 +181,52 @@ export const PRESETS: readonly Preset[] = [
       [vessel('ship-1', 'cargo-ship', 'MV Draupner', { headingDeg: 0, speedKn: 10 })],
       [gauge(0, 380, 'gauge-1', 'Focus gauge')],
       weatherOf('gale', { rainMmH: 6 }),
+    ),
+  },
+  {
+    id: 'agulhas-current',
+    title: 'Agulhas Current · light bulk carrier',
+    summary:
+      'A ballasted ship runs down the Agulhas Current off South Africa against a Southern Ocean ' +
+      'swell: the current sets it along and Doppler shortens the waves it meets.',
+    experiment: experiment(
+      'Agulhas Current · light bulk carrier',
+      'The Agulhas Current flows south-west at up to 2 m/s, straight into the swell arriving ' +
+        'from the Southern Ocean, and is notorious for freak waves. Here a 1.8 m/s current runs ' +
+        'against a 12 s swell and a ship loaded to 60 % of its design displacement (high ' +
+        'freeboard, red bottom paint showing) heads down-current. The current is uniform: the ' +
+        'waves are Doppler shifted, but the steepening on the current edge is not modelled.',
+      env({
+        currentSpeed: 1.8,
+        currentDirectionDeg: 225,
+        windSpeed: 12,
+        windDirectionDeg: 225,
+        sunElevationDeg: 35,
+      }),
+      [
+        {
+          id: 'swell-1',
+          name: 'Southern Ocean swell',
+          kind: 'spectrum',
+          enabled: true,
+          spectrum: 'jonswap',
+          hs: 4,
+          tp: 12,
+          gamma: 5,
+          directionDeg: 225,
+          depthLimited: true,
+          spreading: spreading(40),
+          seed: 1858,
+        },
+      ],
+      [
+        vessel('ship-1', 'cargo-ship', 'MV Cape Agulhas', {
+          headingDeg: 225,
+          speedKn: 12,
+          loadFactor: 0.6,
+        }),
+      ],
+      [gauge(0, -150)],
     ),
   },
   {

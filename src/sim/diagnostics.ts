@@ -1,9 +1,13 @@
 /** Sea-state diagnostics and model-validity warnings shown in the inspector. */
-import { micheLimit, ursellNumber, wavenumberOf } from '../ocean/dispersion';
+import { groupVelocity, micheLimit, ursellNumber, wavenumberOf } from '../ocean/dispersion';
 import type { ResolvedSea } from '../ocean/systems';
 import type { SeaDiagnostics } from './types';
 
-export function seaDiagnostics(sea: ResolvedSea, representedHs: number): SeaDiagnostics {
+export function seaDiagnostics(
+  sea: ResolvedSea,
+  representedHs: number,
+  current: { x: number; y: number } = { x: 0, y: 0 },
+): SeaDiagnostics {
   const warnings: string[] = [];
   const disp = sea.dispersion;
   const depth = disp.depth;
@@ -27,6 +31,7 @@ export function seaDiagnostics(sea: ResolvedSea, representedHs: number): SeaDiag
       );
     }
     checkShallow(s.id, s.hs, wavelength, kp);
+    checkCurrent(s.id, kp, Math.cos(s.theta0), Math.sin(s.theta0));
   }
   for (const f of sea.focused) {
     systems.push({
@@ -62,6 +67,30 @@ export function seaDiagnostics(sea: ResolvedSea, representedHs: number): SeaDiag
       );
     }
     checkShallow(r.id, 2 * r.amplitude, wavelength, r.k);
+  }
+
+  /**
+   * Wave–current interaction. The lab advects the sea with a uniform current, which is exact for
+   * the Doppler shift, but against a strong opposing current real waves shorten and steepen,
+   * and once the current matches their group velocity they are blocked and break.
+   */
+  function checkCurrent(id: string, k: number, dirX: number, dirY: number): void {
+    const opposing = -(current.x * dirX + current.y * dirY);
+    if (opposing <= 0) return;
+    const cg = groupVelocity(k, disp);
+    if (opposing >= cg) {
+      warnings.push(
+        `${id}: the current opposes these waves faster than their group velocity ` +
+          `(${opposing.toFixed(2)} ≥ ${cg.toFixed(2)} m/s). Real waves would be blocked and break; ` +
+          'here they are only drifted, so treat the result with care.',
+      );
+    } else if (opposing >= 0.5 * cg) {
+      warnings.push(
+        `${id}: strong opposing current (${opposing.toFixed(2)} m/s, half the group velocity). ` +
+          'Real waves would shorten and steepen against it; this uniform-current model only ' +
+          'Doppler shifts them.',
+      );
+    }
   }
 
   function checkShallow(id: string, height: number, wavelength: number, k: number): void {
