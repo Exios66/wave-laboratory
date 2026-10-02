@@ -49,18 +49,18 @@ Requires Node ≥ 22 and a browser with WebGL 2.
 | `pnpm test:e2e`                                | Browser tests on desktop, Pixel 7 and iPhone 14 viewports (run `pnpm build` first) |
 | `pnpm lint` / `pnpm typecheck` / `pnpm format` | Code quality                                                                       |
 | `pnpm check`                                   | Format, lint, typecheck, unit tests and build in one go                            |
-| `pnpm deploy:pages`                            | Build and publish the live demo to the `gh-pages` branch                           |
+| `pnpm deploy:pages`                            | Build the site into `docs/` and commit it (Pages serves `main` / `docs`)           |
 
-## Deploying the live demo (GitHub Pages, no Actions)
+## Deploying the live demo (from `main`, no Actions)
 
 There are no GitHub Actions workflows. Quality checks run locally (`pnpm check`, `pnpm test:e2e`).
-The demo is a static site, published by committing the built files to the `gh-pages` branch.
-GitHub Pages is set to **Deploy from a branch**, source `gh-pages` / `/ (root)`.
+The demo is the production build committed into [`docs/`](docs/) on **`main`**, next to the
+markdown notes. GitHub Pages serves that folder directly.
 
-1. `pnpm deploy:pages` builds the app and pushes `dist/` to `gh-pages`. Use `--dry-run` to
-   prepare the branch without pushing.
-2. If Pages was never configured: **Settings → Pages → Build and deployment → Source: Deploy
-   from a branch → `gh-pages` / `(root)`**.
+1. `pnpm deploy:pages` builds the app and commits it into `docs/` on the current branch. Use
+   `--dry-run` to update the folder without committing. Merge that commit to `main`.
+2. Pages source: **Settings → Pages → Build and deployment → Deploy from a branch → `main` →
+   `/docs`**.
 
 The site is served at `https://exios66.github.io/wave-laboratory/`. The build uses relative
 paths, so it also works from any other static host or sub-folder.

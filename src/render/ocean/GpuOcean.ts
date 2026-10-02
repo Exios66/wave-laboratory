@@ -104,7 +104,7 @@ export class GpuOcean {
       uN: { value: 1 },
       uTime: { value: 0 },
       uLambda: { value: 1 },
-      uEps: { value: 1.25 },
+      uEps: { value: 4 },
       uRegularCount: { value: 0 },
       uRegA: { value: regA },
       uRegB: { value: regB },

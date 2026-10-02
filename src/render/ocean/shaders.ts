@@ -243,6 +243,12 @@ uniform float uFogDensity;
 uniform float uWakeCount;
 uniform vec4 uWakeA[4];
 uniform vec4 uWakeB[4];
+uniform sampler2D uC2;
+uniform sampler2D uC3;
+uniform float uSize2;
+uniform float uSize3;
+uniform float uCount;
+uniform float uN;
 varying vec3 vNormal;
 varying vec3 vThreePos;
 varying float vEta;
@@ -257,6 +263,14 @@ vec3 ramp5(float u, vec3 a, vec3 b, vec3 c, vec3 d, vec3 e) {
   if (x < 0.5) return mix(b, c, (x - 0.25) / 0.25);
   if (x < 0.75) return mix(c, d, (x - 0.5) / 0.25);
   return mix(d, e, (x - 0.75) / 0.25);
+}
+
+float smallEta(vec2 p) {
+  vec2 bias = vec2(0.5 / max(uN, 1.0));
+  float h = 0.0;
+  if (uCount > 2.5) h += texture(uC2, p / uSize2 + bias).r;
+  if (uCount > 3.5) h += texture(uC3, p / uSize3 + bias).r;
+  return h;
 }
 
 float capillary(vec2 p) {
@@ -291,11 +305,12 @@ float wakeFoam(vec2 worldXY) {
 
 void main() {
   vec2 worldXY = vec2(vThreePos.x, -vThreePos.z);
-  float e = 0.35;
-  float c0 = capillary(worldXY);
-  float cx = (capillary(worldXY + vec2(e, 0.0)) - c0) / e;
-  float cy = (capillary(worldXY + vec2(0.0, e)) - c0) / e;
-  vec3 N = normalize(normalize(vNormal) + vec3(-cx, 0.0, cy));
+  float e = 0.55;
+  float h0 = smallEta(worldXY) + capillary(worldXY);
+  float hx = smallEta(worldXY + vec2(e, 0.0)) + capillary(worldXY + vec2(e, 0.0));
+  float hy = smallEta(worldXY + vec2(0.0, e)) + capillary(worldXY + vec2(0.0, e));
+  vec3 detail = normalize(vec3(-(hx - h0) / e, 1.0, (hy - h0) / e));
+  vec3 N = normalize(mix(normalize(vNormal), detail, 0.82));
   if (!gl_FrontFacing) N = -N;
   vec3 V = normalize(cameraPosition - vThreePos);
   float ndv = clamp(dot(N, V), 0.0, 1.0);
@@ -340,6 +355,7 @@ void main() {
   float fog = 1.0 - exp(-dist * dist * uFogDensity);
   col = mix(col, uFogColor, clamp(fog, 0.0, 1.0));
   gl_FragColor = vec4(col, 1.0);
+  #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
 `;
@@ -359,6 +375,7 @@ varying vec3 vDir;
 ${SKY}
 void main() {
   gl_FragColor = vec4(skyColor(normalize(vDir), uSunDir), 1.0);
+  #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
 `;

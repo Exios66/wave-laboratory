@@ -61,7 +61,7 @@ function createOceanGeometry(segments: number, extent: number): THREE.BufferGeom
   // vertices toward the middle. The mesh is recentred on the camera every frame.
   const warp = (u: number) => {
     const a = Math.abs(u);
-    return Math.sign(u) * a * (0.18 + 0.82 * a * a);
+    return Math.sign(u) * a * (0.42 + 0.58 * a);
   };
   if (pos instanceof THREE.BufferAttribute) {
     for (let i = 0; i < pos.count; i++) {
@@ -159,15 +159,16 @@ export class LabRenderer implements LabRendererApi {
       powerPreference: 'high-performance',
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.NoToneMapping;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
     this.renderer.setClearColor(0x8aa4b8, 1);
     this.renderer.info.autoReset = false;
 
     this.camera = new THREE.PerspectiveCamera(48, 1, 0.2, 40000);
     this.ocean = new GpuOcean(this.renderer, texType);
 
-    const segments = tier === 'light' ? 128 : 288;
-    const extent = tier === 'light' ? 3600 : 6400;
+    const segments = tier === 'light' ? 160 : 420;
+    const extent = tier === 'light' ? 2200 : 2800;
     const geo = createOceanGeometry(segments, extent);
     this.oceanMesh = new THREE.Mesh(
       geo,
@@ -639,10 +640,19 @@ export class LabRenderer implements LabRendererApi {
   }
 
   private material(kind: string): THREE.MeshStandardMaterial {
+    if (kind === 'hull') {
+      return new THREE.MeshPhysicalMaterial({
+        color: 0xffffff,
+        roughness: 0.32,
+        metalness: 0.06,
+        clearcoat: 0.55,
+        clearcoatRoughness: 0.22,
+      });
+    }
     return new THREE.MeshStandardMaterial({
       color: HULL_COLORS[kind] ?? HULL_COLORS.hull,
-      roughness: kind === 'hull' ? 0.55 : 0.7,
-      metalness: kind === 'hull' ? 0.18 : 0.04,
+      roughness: kind === 'superstructure' ? 0.45 : 0.62,
+      metalness: kind === 'accent' ? 0.35 : 0.04,
     });
   }
 
