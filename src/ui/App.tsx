@@ -13,7 +13,7 @@ import { getRuntime } from './runtime';
 import { useLab, type MobilePanel } from './store';
 import './styles.css';
 
-const CAMERA_CYCLE: CameraMode[] = ['orbit', 'top', 'follow', 'bridge'];
+const CAMERA_CYCLE: CameraMode[] = ['orbit', 'top', 'follow', 'bridge', 'plane'];
 const OVERLAY_CYCLE: OverlayMode[] = ['none', 'height', 'steepness', 'foam'];
 
 function isTyping(target: EventTarget | null): boolean {
@@ -72,7 +72,9 @@ function useGlobalShortcuts(): void {
             lab.selection?.kind === 'vessel'
               ? lab.selection.id
               : (lab.experiment.vessels[0]?.id ?? null);
-          const options = CAMERA_CYCLE.filter((m) => vesselId || m === 'orbit' || m === 'top');
+          const options = CAMERA_CYCLE.filter(
+            (m) => vesselId || m === 'orbit' || m === 'top' || m === 'plane',
+          );
           const next = options[(options.indexOf(lab.camera) + 1) % options.length]!;
           lab.setCamera(next, next === 'follow' || next === 'bridge' ? vesselId : lab.cameraTarget);
           lab.notify('info', `Camera: ${next}`);

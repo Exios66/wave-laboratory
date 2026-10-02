@@ -862,6 +862,40 @@ input[type='range'] {
   cursor: not-allowed;
 }
 
+.hud__plane {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgb(8 14 26 / 0.78);
+  color: #e6edf7;
+  border: 1px solid rgb(148 163 184 / 0.35);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  min-height: 32px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.hud__plane[aria-pressed='true'] {
+  background: #38bdf8;
+  color: #04263a;
+  font-weight: 650;
+}
+
+.hud__ride {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.hud__ride span {
+  opacity: 0.75;
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  .hud__ride span {
+    display: none;
+  }
+}
+
 .hud select {
   background: rgb(8 14 26 / 0.85);
   color: #e6edf7;
@@ -1481,7 +1515,8 @@ kbd {
   .input,
   .tree__select,
   .tabs [role='tab'],
-  .segmented button {
+  .segmented button,
+  .hud__plane {
     min-height: 44px;
   }
   .hud select {
@@ -1504,7 +1539,8 @@ kbd {
 
 /* Camera and overlay controls sit on the 3D view, so they stay shorter than form fields. */
 @media (max-width: 900px) and (pointer: coarse) {
-  .hud .segmented button {
+  .hud .segmented button,
+  .hud__plane {
     min-height: 32px;
     padding: 2px 8px;
     font-size: 13px;

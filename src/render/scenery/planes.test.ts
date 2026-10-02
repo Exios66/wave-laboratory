@@ -4,11 +4,13 @@ import {
   AIRCRAFT,
   CrossingScheduler,
   PLANE_SCHEDULE,
+  RIDE,
   crossingInterval,
   crossingPose,
   memberOpacity,
   meanCrossingInterval,
   planCrossing,
+  planRide,
   shimmerAmount,
   type Crossing,
   type PlanePose,
@@ -235,5 +237,107 @@ describe('apparition', () => {
         }
       }
     }
+  });
+});
+
+describe('riding a flight', () => {
+  const FLEET = { x: 40, z: -25 };
+
+  it('circles the fleet at the ride radius and altitude, holding formation steady', () => {
+    const c = planRide(new Pcg32(11), FLEET, 0, 1);
+    expect(c.flicker).toBe(0);
+    expect(c.laggard).toBe(-1);
+    const p = pose();
+    for (let tau = 0; tau < 200; tau += 7) {
+      crossingPose(c, 0, tau, p);
+      expect(Math.hypot(p.x - FLEET.x, p.z - FLEET.z)).toBeCloseTo(RIDE.radius, -1);
+      expect(p.y).toBeGreaterThan(RIDE.minAltitude - 5);
+      expect(p.y).toBeLessThan(RIDE.maxAltitude + 5);
+    }
+  });
+
+  it('starts on the circuit at the bearing asked for, flying along it', () => {
+    const c = planRide(new Pcg32(2), FLEET, 0, 1, Math.PI / 2);
+    const a = crossingPose(c, 0, 0, pose());
+    const b = crossingPose(c, 0, 1, pose());
+    // Within the leader's few metres of wander.
+    expect(Math.abs(a.x - FLEET.x)).toBeLessThan(5);
+    expect(Math.abs(a.z - (FLEET.z + RIDE.radius))).toBeLessThan(5);
+    // Moving tangentially: about one cruise speed along the circle, not toward the centre.
+    expect(Math.hypot(b.x - a.x, b.z - a.z)).toBeCloseTo(c.speed, -1);
+    expect(Math.abs(b.z - a.z)).toBeLessThan(5);
+  });
+
+  it('stays solid for as long as the camera is aboard, then dissolves', () => {
+    const s = new CrossingScheduler(5);
+    let t = 0;
+    for (; t < 600; t += 0.1) s.updateRide(t, 0.1, true, FLEET, 1);
+    const ride = s.ride!;
+    expect(ride).not.toBeNull();
+    expect(s.active).toContain(ride);
+    expect(memberOpacity(ride, 0, t - ride.startT)).toBeCloseTo(1, 5);
+    for (const end = t + RIDE.fadeOut + 1; t < end; t += 0.1) s.updateRide(t, 0.1, false, FLEET, 1);
+    expect(s.ride).toBeNull();
+    expect(s.active).not.toContain(ride);
+  });
+
+  it('comes back to the same flight when the camera returns while it is dissolving', () => {
+    const s = new CrossingScheduler(5);
+    s.updateRide(0, 0.1, true, FLEET, 1);
+    const first = s.ride;
+    s.updateRide(10, 0.1, false, FLEET, 1);
+    s.updateRide(12, 0.1, true, FLEET, 1);
+    expect(s.ride).toBe(first);
+    expect(memberOpacity(first!, 0, 12 - first!.startT)).toBeCloseTo(1, 5);
+  });
+
+  it('follows the fleet as it sails', () => {
+    const s = new CrossingScheduler(5);
+    s.updateRide(0, 0.1, true, { x: 0, z: 0 }, 1);
+    for (let t = 0.1; t < 200; t += 0.1) s.updateRide(t, 0.1, true, { x: 500, z: 0 }, 1);
+    expect(s.ride!.orbit!.cx).toBeGreaterThan(490);
+  });
+
+  it('carries its circuit to a far point picked on the chart at an aircraft’s pace', () => {
+    const s = new CrossingScheduler(5);
+    s.updateRide(0, 0.1, true, { x: 0, z: 0 }, 1);
+    let last = 0;
+    for (let t = 0.1; t < 10; t += 0.1) {
+      s.updateRide(t, 0.1, true, { x: 6000, z: 0 }, 1);
+      const cx = s.ride!.orbit!.cx;
+      expect(cx - last).toBeLessThanOrEqual(RIDE.maxShiftSpeed * 0.1 + 1e-6);
+      last = cx;
+    }
+    expect(last).toBeGreaterThan(RIDE.maxShiftSpeed * 9);
+  });
+
+  it('never changes the sky’s own schedule, and does not count toward its limit', () => {
+    const plain = simulate(9, 0.5).started.map((c) => c.startT);
+    const s = new CrossingScheduler(9);
+    const withRide: number[] = [];
+    const seen = new Set<number>();
+    let busiest = 0;
+    for (let t = 0; t < 1800; t += 0.1) {
+      s.updateRide(t, 0.1, true, { x: 0, z: 0 }, 1);
+      s.update(t, VIEW, 1);
+      busiest = Math.max(busiest, s.active.filter((c) => c !== s.ride).length);
+      for (const c of s.active) {
+        if (c !== s.ride && !seen.has(c.id)) {
+          seen.add(c.id);
+          withRide.push(c.startT);
+        }
+      }
+    }
+    expect(withRide).toEqual(plain);
+    expect(busiest).toBeLessThanOrEqual(PLANE_SCHEDULE.maxConcurrent);
+  });
+
+  it('keeps the ride but schedules nothing new while the lost flights are switched off', () => {
+    const s = new CrossingScheduler(3);
+    for (let t = 0; t < 600; t += 0.1) {
+      s.updateRide(t, 0.1, true, FLEET, 1);
+      s.update(t, VIEW, 1, false);
+    }
+    expect(s.active).toEqual([s.ride]);
   });
 });

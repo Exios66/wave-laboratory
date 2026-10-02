@@ -64,6 +64,8 @@ export interface LabState {
   overlay: OverlayMode;
   camera: CameraMode;
   cameraTarget: string | null;
+  /** The camera to go back to when leaving the plane view (never `plane`). */
+  groundCamera: CameraMode;
 
   theme: ThemePreference;
   performance: PerformanceMode;
@@ -91,6 +93,8 @@ export interface LabState {
   setTimeScale(scale: number): void;
   setOverlay(mode: OverlayMode): void;
   setCamera(mode: CameraMode, target?: string | null): void;
+  /** Ride one of the lost flights over the lab, or come back down to the previous view. */
+  togglePlaneView(): void;
   setTheme(theme: ThemePreference): void;
   setPerformance(mode: PerformanceMode): void;
   setAmbience(patch: Partial<AmbienceSettings>): void;
@@ -201,6 +205,7 @@ export const useLab = create<LabState>()((set, get) => ({
   overlay: 'none',
   camera: 'orbit',
   cameraTarget: null,
+  groundCamera: 'orbit',
 
   theme: readTheme(),
   performance: readPerformance(),
@@ -250,7 +255,9 @@ export const useLab = create<LabState>()((set, get) => ({
       status: loadingStatus(s.status),
       selection: null,
       cameraTarget: null,
-      camera: s.camera === 'orbit' || s.camera === 'top' ? s.camera : 'orbit',
+      camera:
+        s.camera === 'orbit' || s.camera === 'top' || s.camera === 'plane' ? s.camera : 'orbit',
+      groundCamera: s.groundCamera === 'top' ? 'top' : 'orbit',
     }));
     if (message) get().notify('success', message);
   },
@@ -301,7 +308,21 @@ export const useLab = create<LabState>()((set, get) => ({
     set({ overlay });
   },
   setCamera(camera, target) {
-    set((s) => ({ camera, cameraTarget: target === undefined ? s.cameraTarget : target }));
+    set((s) => ({
+      camera,
+      cameraTarget: target === undefined ? s.cameraTarget : target,
+      groundCamera: camera === 'plane' ? s.groundCamera : camera,
+    }));
+  },
+  togglePlaneView() {
+    const s = get();
+    if (s.camera !== 'plane') {
+      s.setCamera('plane');
+      return;
+    }
+    const back = s.groundCamera;
+    const needsVessel = back === 'follow' || back === 'bridge';
+    s.setCamera(needsVessel && !s.cameraTarget ? 'orbit' : back);
   },
   setTheme(theme) {
     try {

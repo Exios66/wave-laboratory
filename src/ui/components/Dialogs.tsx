@@ -54,7 +54,7 @@ const SHORTCUTS: [string, string][] = [
   ['.', 'Step 0.1 s (while paused)'],
   ['R', 'Restart the experiment from t = 0'],
   ['[ / ]', 'Slower / faster simulation'],
-  ['C', 'Cycle camera (orbit, top, follow, bridge)'],
+  ['C', 'Cycle camera (orbit, top, follow, bridge, plane)'],
   ['O', 'Cycle surface overlay'],
   ['F', 'Follow the selected vessel'],
   ['Esc', 'Clear selection / close dialog'],

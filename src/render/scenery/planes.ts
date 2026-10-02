@@ -133,6 +133,11 @@ export interface Crossing {
   laggard: number;
   /** Fraction of the duration at which the laggard is gone. */
   laggardGoneAt: number;
+  /**
+   * Set on a flight the camera rides: it circles this centre (Three.js x, z) instead of
+   * crossing the sky, and the centre may move to keep over the fleet.
+   */
+  orbit?: { cx: number; cz: number };
 }
 
 export interface PlanePose {
@@ -279,6 +284,64 @@ export function planCrossing(
   };
 }
 
+export const RIDE = {
+  /** Radius of the circuit flown around the fleet [m]. */
+  radius: 800,
+  /** Altitude band of a ride [m]. */
+  minAltitude: 260,
+  maxAltitude: 360,
+  /** Seconds a ride takes to condense, and to dissolve after the camera leaves. */
+  fadeIn: 3,
+  fadeOut: 8,
+  /** Time constant with which the circuit's centre follows the fleet [s]. */
+  followS: 20,
+  /** Fastest the circuit's centre moves, e.g. after a point is picked on the chart [m/s]. */
+  maxShiftSpeed: 120,
+} as const;
+
+/**
+ * Plan a flight for the camera to ride: one of the lost flights, circling `centre` (the fleet)
+ * at a few hundred metres. It starts on the circuit due `bearing` [rad, Three.js atan2(z, x)]
+ * of the centre, and holds steady (no flicker, nobody lost) so the view is calm. The duration
+ * is only a start: the layer extends it for as long as the camera stays aboard.
+ */
+export function planRide(
+  rng: Pcg32,
+  centre: { x: number; z: number },
+  startT: number,
+  calm: number,
+  bearing = rng.nextFloat() * Math.PI * 2,
+  id = 0,
+): Crossing {
+  const kind = chooseAircraft(rng, calm);
+  const speed = AIRCRAFT[kind].speed;
+  const dir = rng.nextFloat() < 0.5 ? 1 : -1;
+  const turnRate = (dir * speed) / RIDE.radius;
+  // Tangent to the circuit at the start point, turning about the centre.
+  const heading0 = bearing + (dir * Math.PI) / 2;
+  const x0 = centre.x + Math.cos(bearing) * RIDE.radius;
+  const z0 = centre.z + Math.sin(bearing) * RIDE.radius;
+  return {
+    id,
+    kind,
+    startT,
+    duration: 60,
+    x0,
+    z0,
+    altitude: uniform(rng, RIDE.minAltitude, RIDE.maxAltitude),
+    heading0,
+    turnRate,
+    speed,
+    fadeIn: RIDE.fadeIn,
+    fadeOut: RIDE.fadeOut,
+    members: formation(rng, kind),
+    flicker: 0,
+    laggard: -1,
+    laggardGoneAt: 1,
+    orbit: { cx: centre.x, cz: centre.z },
+  };
+}
+
 /** Distance the laggard has dropped back after `tau` seconds [m]. */
 function lagDistance(c: Crossing, member: number, tau: number): number {
   if (member !== c.laggard) return 0;
@@ -298,7 +361,11 @@ export function crossingPose(c: Crossing, member: number, tau: number, out: Plan
   const h = c.heading0 + w * tau;
   let px: number;
   let pz: number;
-  if (Math.abs(w) < 1e-7) {
+  if (c.orbit && Math.abs(w) >= 1e-7) {
+    // Same arc as below, written about its (movable) centre.
+    px = c.orbit.cx + (v / w) * Math.sin(h);
+    pz = c.orbit.cz - (v / w) * Math.cos(h);
+  } else if (Math.abs(w) < 1e-7) {
     px = c.x0 + Math.cos(h) * v * tau;
     pz = c.z0 + Math.sin(h) * v * tau;
   } else {
@@ -354,12 +421,17 @@ export function shimmerAmount(c: Crossing, member: number, tau: number): number 
  */
 export class CrossingScheduler {
   readonly active: Crossing[] = [];
+  /** The flight the camera rides (also in `active`), or null. */
+  ride: Crossing | null = null;
   private readonly rng: Pcg32;
+  /** Rides draw from their own stream so they never change the sky's schedule. */
+  private readonly rideRng: Pcg32;
   private nextAt: number;
   private nextId = 1;
 
   constructor(seed: number, startT = 0) {
     this.rng = new Pcg32(seed, 19);
+    this.rideRng = new Pcg32(seed, 41);
     this.nextAt = startT + this.firstDelay();
   }
 
@@ -368,10 +440,59 @@ export class CrossingScheduler {
     return uniform(this.rng, a, b);
   }
 
-  /** Forget every crossing and wait the first-crossing delay again (layer switched on). */
+  /** Drop every crossing but the ride (the lost flights were switched off). */
+  clear(): void {
+    this.active.length = 0;
+    if (this.ride) this.active.push(this.ride);
+  }
+
+  /** Forget every crossing (but a ride) and wait the first-crossing delay again (layer on). */
   reset(t: number): void {
     this.active.length = 0;
+    if (this.ride) this.active.push(this.ride);
     this.nextAt = t + this.firstDelay();
+  }
+
+  /**
+   * Keep (or stop) a flight for the camera to ride at wall time `t`. While `riding`, the ride
+   * is started if there is none, revived if it was dissolving, and kept from ending; its
+   * circuit's centre eases toward `centre`. When the camera leaves, it dissolves.
+   */
+  updateRide(
+    t: number,
+    dt: number,
+    riding: boolean,
+    centre: { x: number; z: number },
+    calm: number,
+  ): Crossing | null {
+    let c = this.ride;
+    if (c && t >= c.startT + c.duration) {
+      this.active.splice(this.active.indexOf(c), 1);
+      c = this.ride = null;
+    }
+    if (!riding) {
+      if (c) c.duration = Math.min(c.duration, t - c.startT + c.fadeOut);
+      return null;
+    }
+    if (!c) {
+      c = this.ride = planRide(this.rideRng, centre, t, calm, undefined, this.nextId++);
+      this.active.push(c);
+    }
+    const tau = t - c.startT;
+    c.duration = Math.max(c.duration, tau + c.fadeOut + 30);
+    if (c.orbit) {
+      // Ease toward the new centre, but no faster than an aircraft could carry the circuit.
+      const dx = centre.x - c.orbit.cx;
+      const dz = centre.z - c.orbit.cz;
+      const dist = Math.hypot(dx, dz);
+      const k = 1 - Math.exp(-Math.max(0, dt) / RIDE.followS);
+      const step = Math.min(dist * k, RIDE.maxShiftSpeed * Math.max(0, dt));
+      if (dist > 1e-9) {
+        c.orbit.cx += (dx / dist) * step;
+        c.orbit.cz += (dz / dist) * step;
+      }
+    }
+    return c;
   }
 
   /** Wall time the next crossing is due [s]. */
@@ -379,14 +500,22 @@ export class CrossingScheduler {
     return this.nextAt;
   }
 
-  /** Advance to wall time `t`: retire finished crossings, start a new one when due. */
-  update(t: number, view: PlaneView, calm: number): void {
+  /**
+   * Advance to wall time `t`: retire finished crossings, start a new one when due. With
+   * `spawn` false (the lost flights are switched off) nothing new is scheduled.
+   */
+  update(t: number, view: PlaneView, calm: number, spawn = true): void {
     for (let i = this.active.length - 1; i >= 0; i--) {
       const c = this.active[i]!;
-      if (t >= c.startT + c.duration) this.active.splice(i, 1);
+      if (t >= c.startT + c.duration) {
+        this.active.splice(i, 1);
+        if (c === this.ride) this.ride = null;
+      }
     }
-    if (t < this.nextAt) return;
-    if (this.active.length >= PLANE_SCHEDULE.maxConcurrent) {
+    if (!spawn || t < this.nextAt) return;
+    // The ridden flight is extra: it never holds back the sky's own crossings.
+    const crossing = this.active.length - (this.ride ? 1 : 0);
+    if (crossing >= PLANE_SCHEDULE.maxConcurrent) {
       // The sky is busy enough; look again a little later.
       this.nextAt = t + 10;
       return;
@@ -650,7 +779,8 @@ export class PlaneLayer implements SceneryLayer {
       dc3: buildAirframe('dc3'),
       tudor: buildAirframe('tudor'),
     };
-    const poolSize = PLANE_SCHEDULE.maxConcurrent * MAX_FLIGHT_SIZE;
+    // One flight more than the sky schedules, for the one the camera may be riding.
+    const poolSize = (PLANE_SCHEDULE.maxConcurrent + 1) * MAX_FLIGHT_SIZE;
     for (let i = 0; i < poolSize; i++) this.slots.push(this.createSlot());
   }
 
@@ -728,12 +858,44 @@ export class PlaneLayer implements SceneryLayer {
 
   setEnabled(enabled: boolean): void {
     if (enabled && !this.enabled) this.needsReset = true;
+    if (!enabled && this.enabled) {
+      this.scheduler.clear();
+      this.bindSlots();
+    }
     this.enabled = enabled;
-    this.object.visible = enabled;
+    this.object.visible = enabled || this.scheduler.ride !== null;
+  }
+
+  /**
+   * Keep a flight circling `centre` (Three.js x, z: the fleet) for the camera to ride, or let
+   * it dissolve when `riding` is false. Call once a frame, before `ridePose`, with the same
+   * wall time the frame's `update` gets. Works whether or not the lost flights are switched on.
+   */
+  updateRide(
+    t: number,
+    dt: number,
+    riding: boolean,
+    centre: { x: number; z: number },
+    calm: number,
+  ): void {
+    this.scheduler.updateRide(t, dt, riding, centre, calm);
+    this.object.visible = this.enabled || this.scheduler.ride !== null;
+  }
+
+  /** Pose of the ridden flight's leader at wall time `t`, or null when there is no ride. */
+  ridePose(t: number, out: PlanePose): PlanePose | null {
+    const c = this.scheduler.ride;
+    return c ? crossingPose(c, 0, t - c.startT, out) : null;
+  }
+
+  /** Name of the ridden flight, for the view's caption. */
+  get rideLabel(): string | null {
+    const c = this.scheduler.ride;
+    return c ? AIRCRAFT[c.kind].label : null;
   }
 
   update(frame: SceneryFrame): void {
-    if (!this.enabled) return;
+    if (!this.enabled && !this.scheduler.ride) return;
     const t = frame.wallT;
     if (this.needsReset) {
       this.scheduler.reset(t);
@@ -746,7 +908,7 @@ export class PlaneLayer implements SceneryLayer {
     this.view.camZ = cam.position.z;
     this.view.forwardX = this.fwd.x;
     this.view.forwardZ = this.fwd.z;
-    this.scheduler.update(t, this.view, frame.calm);
+    this.scheduler.update(t, this.view, frame.calm, this.enabled);
     this.bindSlots();
 
     const fog = (this.object.parent as THREE.Scene | null)?.fog;
@@ -808,7 +970,8 @@ export class PlaneLayer implements SceneryLayer {
         slot.shimmer.scale.setScalar(
           AIRCRAFT_DRAW_SCALE * span * (2.2 + 0.4 * Math.sin(t * 3.1 + slot.member)),
         );
-        slot.shimmerMat.opacity = sh * 0.32 * (0.35 + 0.65 * daylight);
+        // Faded right by the lens, so riding a flight as it condenses is not a white-out.
+        slot.shimmerMat.opacity = sh * 0.32 * (0.35 + 0.65 * daylight) * smoothstep(60, 400, dist);
         slot.shimmerMat.color.copy(SHIMMER_COLOR).lerp(this.haze, 0.35);
       }
     }
