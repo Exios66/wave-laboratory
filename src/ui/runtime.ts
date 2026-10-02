@@ -10,7 +10,12 @@ import type { LabRendererApi } from '../render/api';
 import { SimClient } from '../sim/SimClient';
 import type { FromWorker } from '../sim/types';
 import type { VesselCommand } from '../vessel/api';
-import { detectDeviceProfile, effectiveQuality, ResolutionGovernor } from './deviceProfile';
+import {
+  detectDeviceProfile,
+  effectiveQuality,
+  graphicsBudget,
+  ResolutionGovernor,
+} from './deviceProfile';
 import { useLab } from './store';
 import { telemetry } from './telemetry';
 
@@ -75,6 +80,9 @@ export class LabRuntime {
         if (s.selection !== prev.selection) {
           this.renderer.setSelection(selectionId(s.selection));
         }
+        if (s.experiment.weather !== prev.experiment.weather) {
+          this.renderer.setWeather(s.experiment.weather);
+        }
         if (s.experiment.environment !== prev.experiment.environment) {
           this.renderer.setEnvironment(s.experiment.environment);
         }
@@ -100,6 +108,7 @@ export class LabRuntime {
     telemetry.clear();
     const quality = this.targetQuality();
     this.visualQuality = quality;
+    this.renderer?.setQuality(quality);
     this.client.load(s.experiment, quality);
   }
 
@@ -110,17 +119,18 @@ export class LabRuntime {
       this.visualQuality = quality;
       this.client.setVisualQuality(quality);
     }
+    this.renderer?.setQuality(quality);
     this.configureGovernor();
     if (this.canvas) this.resize(this.canvas);
   }
 
   private configureGovernor(): void {
-    const mode = useLab.getState().performance;
+    const budget = graphicsBudget(useLab.getState().performance, detectDeviceProfile());
     const g = this.governor;
     g.maxScale = 1;
-    g.minScale = mode === 'quality' ? 0.75 : 0.5;
-    g.targetFps = mode === 'saver' ? 30 : 55;
-    g.scale = Math.min(g.scale, g.maxScale);
+    g.minScale = budget.minScale;
+    g.targetFps = budget.targetFps;
+    g.scale = Math.min(Math.max(g.scale, g.minScale), g.maxScale);
     useLab.getState().setRenderScale(g.scale);
   }
 
@@ -138,6 +148,7 @@ export class LabRuntime {
       return;
     }
     const s = useLab.getState();
+    this.renderer.setQuality(this.targetQuality());
     this.renderer.setOverlay(s.overlay);
     this.renderer.setCamera(s.camera, s.cameraTarget);
     this.renderer.setSelection(selectionId(s.selection));
@@ -176,9 +187,7 @@ export class LabRuntime {
     const parent = canvas.parentElement ?? canvas;
     const rect = parent.getBoundingClientRect();
     const s = useLab.getState();
-    const profile = detectDeviceProfile();
-    const cap =
-      s.performance === 'quality' ? 2 : s.performance === 'saver' ? 1 : profile.maxPixelRatio;
+    const cap = graphicsBudget(s.performance, detectDeviceProfile()).maxPixelRatio;
     const ratio = Math.min(window.devicePixelRatio || 1, cap) * this.governor.scale;
     this.renderer?.resize(
       Math.max(1, Math.floor(rect.width)),
@@ -193,6 +202,7 @@ export class LabRuntime {
     if (!r || !loaded) return;
     const exp = useLab.getState().experiment;
     r.setOcean(loaded.ocean);
+    r.setWeather(exp.weather);
     r.setEnvironment(exp.environment);
     r.setVessels(loaded.vessels);
     r.setProbes(exp.probes);

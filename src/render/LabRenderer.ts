@@ -5,9 +5,22 @@
 import * as THREE from 'three';
 import { rotate, type Quat, type Vec3 } from '../core/vec';
 import type { GpuOceanData } from '../ocean/gpuData';
-import type { Environment, ProbeConfig } from '../schema/experiment';
+import {
+  DEFAULT_WEATHER,
+  type Environment,
+  type OceanQuality,
+  type ProbeConfig,
+  type Weather,
+} from '../schema/experiment';
 import type { SimFrame } from '../sim/types';
-import type { VesselDefinition } from '../vessel/api';
+import type { VesselDefinition, VisualMaterial } from '../vessel/api';
+import {
+  GUST_MODES,
+  rainVisibilityKm,
+  WeatherField,
+  whitecapFraction,
+  type WindSample,
+} from '../weather/weather';
 import type { CameraMode, LabRendererApi, OverlayMode, PickResult, RendererStats } from './api';
 import { GpuOcean } from './ocean/GpuOcean';
 import { OCEAN_FRAG, OCEAN_VERT, SKY_FRAG, SKY_VERT } from './ocean/shaders';
@@ -24,6 +37,10 @@ import {
   type SceneryLayer,
 } from './scenery/types';
 import { WildlifeLayer } from './scenery/wildlife';
+import { createRadialOceanGeometry, OCEAN_DENSITY, OCEAN_SLICES } from './scene/oceanMesh';
+import { RainField, SprayPool } from './scene/particles';
+import { RigView } from './scene/rig';
+import { flightDeckTexture, jollyRogerTexture } from './scene/textures';
 
 export interface LabRendererOptions {
   onContextLost?: () => void;
@@ -36,24 +53,64 @@ const Q_WORLD_TO_THREE = new THREE.Quaternion().setFromAxisAngle(
 );
 const Q_THREE_TO_WORLD = Q_WORLD_TO_THREE.clone().invert();
 
-const HULL_COLORS: Record<string, number> = {
+const HULL_COLORS: Record<VisualMaterial, number> = {
   hull: 0xffffff,
   deck: 0x4b5568,
   superstructure: 0xe8eef6,
   glass: 0x9bd7f5,
   cargo: 0xb45309,
   accent: 0xd97706,
+  wood: 0x5a3b22,
+  gold: 0xd4a72c,
+  flightdeck: 0x3b4047,
+  sail: 0xe6dcc3,
+  flag: 0x0b0b0b,
 };
 
-const PAINT_BOTTOM = new THREE.Color(0x7f1d1d);
-const PAINT_BOOT = new THREE.Color(0x1c1917);
-const PAINT_TOP = new THREE.Color(0x1e3a5f);
+/** Per-quality budgets for the effects. */
+const BUDGET: Record<
+  OceanQuality,
+  { rain: number; spray: number; octaves: number; detail: number }
+> = {
+  low: { rain: 1200, spray: 500, octaves: 3, detail: 3 },
+  medium: { rain: 3500, spray: 1400, octaves: 4, detail: 4 },
+  high: { rain: 7000, spray: 2600, octaves: 5, detail: 4 },
+  ultra: { rain: 11000, spray: 4000, octaves: 6, detail: 4 },
+};
+
+/** Rendering never looks further than this through the haze [m]. */
+const MAX_VIEW = 14_000;
 
 interface VesselView {
   id: string;
   definition: VesselDefinition;
   group: THREE.Group;
   materials: THREE.MeshStandardMaterial[];
+  textures: THREE.Texture[];
+  rig: RigView | null;
+}
+
+function srgbToLinear(c: number): number {
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+const smooth = (e0: number, e1: number, x: number): number => {
+  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
+
+/** Horizon colour, matching `horizonColor()` in the sky shader (linear RGB). */
+function horizonColor(cloud: number, daylight: number, flash: number, out: THREE.Color) {
+  const mix = (a: number, b: number, t: number) => a + (b - a) * t;
+  const c = [0.78, 0.84, 0.9].map(srgbToLinear);
+  const g = [0.5, 0.54, 0.58].map(srgbToLinear);
+  const st = [0.26, 0.29, 0.32].map(srgbToLinear);
+  const flashRgb = [0.55, 0.6, 0.75];
+  const t1 = smooth(0.2, 0.75, cloud);
+  const t2 = smooth(0.75, 1, cloud);
+  const ch = (i: number) =>
+    mix(mix(c[i]!, g[i]!, t1), st[i]!, t2) * daylight + flashRgb[i]! * flash * 0.6;
+  return out.setRGB(ch(0), ch(1), ch(2));
 }
 
 function worldToThree(v: Vec3, out: THREE.Vector3): THREE.Vector3 {
@@ -63,31 +120,6 @@ function worldToThree(v: Vec3, out: THREE.Vector3): THREE.Vector3 {
 function attitudeToThree(q: Quat, out: THREE.Quaternion): THREE.Quaternion {
   out.set(q.x, q.y, q.z, q.w);
   return out.premultiply(Q_WORLD_TO_THREE).multiply(Q_THREE_TO_WORLD);
-}
-
-/** Grid in the XZ plane, dense near the camera and stretched out to the horizon. */
-function createOceanGeometry(segments: number, extent: number): THREE.BufferGeometry {
-  const geo = new THREE.PlaneGeometry(2, 2, segments, segments);
-  const pos = geo.getAttribute('position');
-  const half = extent / 2;
-  // Keep a linear term so the centre cells stay finite, then pack the rest of the
-  // vertices toward the middle. The mesh is recentred on the camera every frame.
-  const warp = (u: number) => {
-    const a = Math.abs(u);
-    return Math.sign(u) * a * (0.42 + 0.58 * a);
-  };
-  if (pos instanceof THREE.BufferAttribute) {
-    for (let i = 0; i < pos.count; i++) {
-      pos.setX(i, warp(pos.getX(i)) * half);
-      pos.setY(i, warp(pos.getY(i)) * half);
-    }
-    pos.needsUpdate = true;
-  }
-  geo.rotateX(-Math.PI / 2);
-  geo.computeBoundingSphere();
-  const du = 2 / segments;
-  geo.userData.cell = Math.abs(warp(du)) * half;
-  return geo;
 }
 
 function rendererTier(gl: WebGL2RenderingContext): 'light' | 'full' {
@@ -129,6 +161,22 @@ export class LabRenderer implements LabRendererApi {
     this.sailors,
     this.planes,
   ];
+  private readonly fog = new THREE.FogExp2(0xc8d6e5, 1e-4);
+  private quality: OceanQuality = 'high';
+  private rain: RainField;
+  private spray: SprayPool;
+  private weather: Weather = DEFAULT_WEATHER;
+  private env: Environment | null = null;
+  private weatherField: WeatherField | null = null;
+  private readonly windSample: WindSample = { u: 0, v: 0, speed: 0, squall: 0 };
+  private readonly windThree = new THREE.Vector3();
+  private readonly fogColor = new THREE.Color();
+  private sunBase = 2.4;
+  private lastRenderT = Number.NaN;
+  private daylight = 1;
+  /** Last frame's weather at the camera, as 0–1 storm intensity and wind [m/s]. */
+  private weatherStorm = 0;
+  private localWind = 0;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
   private readonly vessels = new Map<string, VesselView>();
@@ -164,7 +212,6 @@ export class LabRenderer implements LabRendererApi {
   private fpsFrames = 0;
   private fpsElapsed = 0;
   private disposed = false;
-  private env: Environment | null = null;
   private hs = 1;
   private ambience: AmbienceSettings = { ...DEFAULT_AMBIENCE };
   private timeOfDay: number | null = null;
@@ -207,12 +254,28 @@ export class LabRenderer implements LabRendererApi {
 
     this.camera = new THREE.PerspectiveCamera(48, 1, 0.2, 40000);
     this.ocean = new GpuOcean(this.renderer, texType);
+    this.quality = tier === 'light' ? 'medium' : 'high';
+    Object.assign(this.ocean.uniforms, {
+      uMeshScale: { value: 1 },
+      uDetailCascades: { value: 4 },
+      uCloud: { value: 0.25 },
+      uFlash: { value: 0 },
+      uSkyTime: { value: 0 },
+      uCloudDrift: { value: new THREE.Vector2() },
+      uCloudOctaves: { value: 5 },
+      uWhitecap: { value: 0 },
+      uWindDir: { value: new THREE.Vector2(1, 0) },
+      uRain: { value: 0 },
+      uAdvect: { value: 8 },
+      uGust: { value: Array.from({ length: GUST_MODES }, () => new THREE.Vector4()) },
+      uGustCount: { value: 0 },
+      uSquall: { value: new THREE.Vector4(-1e9, -1e9, -1e9, 0) },
+      uSquallOn: { value: 0 },
+      uSquallDur: { value: 240 },
+    });
 
-    const segments = tier === 'light' ? 160 : 420;
-    const extent = tier === 'light' ? 2200 : 2800;
-    const geo = createOceanGeometry(segments, extent);
     this.oceanMesh = new THREE.Mesh(
-      geo,
+      createRadialOceanGeometry(OCEAN_SLICES[this.quality]),
       new THREE.ShaderMaterial({
         uniforms: this.ocean.uniforms,
         vertexShader: OCEAN_VERT,
@@ -222,13 +285,21 @@ export class LabRenderer implements LabRendererApi {
       }),
     );
     this.oceanMesh.frustumCulled = false;
-    this.oceanMesh.userData.cell = geo.userData.cell;
     this.scene.add(this.oceanMesh);
 
+    const u = this.ocean.uniforms;
     this.sky = new THREE.Mesh(
-      new THREE.SphereGeometry(8000, 24, 16),
+      new THREE.SphereGeometry(8000, 32, 20),
       new THREE.ShaderMaterial({
-        uniforms: { uSunDir: this.ocean.uniforms.uSunDir! },
+        uniforms: {
+          uSunDir: u.uSunDir!,
+          uCloud: u.uCloud!,
+          uFlash: u.uFlash!,
+          uSkyTime: u.uSkyTime!,
+          uCloudDrift: u.uCloudDrift!,
+          uCloudOctaves: u.uCloudOctaves!,
+          uFogDensity: u.uFogDensity!,
+        },
         vertexShader: SKY_VERT,
         fragmentShader: SKY_FRAG,
         side: THREE.BackSide,
@@ -240,17 +311,13 @@ export class LabRenderer implements LabRendererApi {
     this.sky.renderOrder = -1;
     this.sky.frustumCulled = false;
     this.scene.add(this.sky);
+    this.scene.fog = this.fog;
 
     this.hemi = new THREE.HemisphereLight(0xc5ddf2, 0x1c3344, 0.9);
     this.scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(0xfff4e0, 2.4);
     this.sun.position.set(400, 800, 200);
     this.scene.add(this.sun);
-    // Scenery fades into the same haze as the sea (ocean fog is 1 − exp(−d²·density)).
-    this.scene.fog = new THREE.FogExp2(
-      (this.ocean.uniforms.uFogColor!.value as THREE.Color).clone(),
-      Math.sqrt(this.ocean.uniforms.uFogDensity!.value as number),
-    );
     this.lighting = new SkyLighting({
       renderer: this.renderer,
       scene: this.scene,
@@ -261,6 +328,12 @@ export class LabRenderer implements LabRendererApi {
     });
     for (const layer of this.layers) this.scene.add(layer.object);
     this.applyAmbience();
+
+    const budget = BUDGET[this.quality];
+    this.rain = new RainField(budget.rain);
+    this.spray = new SprayPool(budget.spray);
+    this.scene.add(this.rain.object, this.spray.object);
+    this.applyQualityUniforms();
 
     this.onLost = (ev: Event) => {
       ev.preventDefault();
@@ -336,6 +409,8 @@ export class LabRenderer implements LabRendererApi {
 
   setEnvironment(env: Environment): void {
     this.env = env;
+    this.weatherField = new WeatherField(this.weather, env);
+    this.uploadGusts();
     this.ocean.setWaveParams(env.choppiness, env.depth);
     (this.ocean.uniforms.uWind!.value as number) = env.windSpeed;
     this.updateLighting(0);
@@ -364,12 +439,206 @@ export class LabRenderer implements LabRendererApi {
 
   private updateLighting(dt: number) {
     if (!this.env) return null;
-    return this.lighting.update({
+    const state = this.lighting.update({
       env: this.env,
       timeOfDay: this.ambience.dayNight ? this.timeOfDay : null,
       calm: this.calm,
       dt,
     });
+    // updateWeather() dims these for cloud each frame, so hand it the clear-sky values.
+    this.sunBase = this.sun.intensity;
+    this.daylight = state.daylight;
+    return state;
+  }
+
+  setWeather(weather: Weather): void {
+    this.weather = weather;
+    if (this.env) {
+      this.weatherField = new WeatherField(weather, this.env);
+      this.uploadGusts();
+    }
+  }
+
+  setQuality(quality: OceanQuality): void {
+    if (quality === this.quality) return;
+    this.quality = quality;
+    this.oceanMesh.geometry.dispose();
+    this.oceanMesh.geometry = createRadialOceanGeometry(OCEAN_SLICES[quality]);
+    const budget = BUDGET[quality];
+    this.scene.remove(this.rain.object, this.spray.object);
+    this.rain.dispose();
+    this.spray.dispose();
+    this.rain = new RainField(budget.rain);
+    this.spray = new SprayPool(budget.spray);
+    this.scene.add(this.rain.object, this.spray.object);
+    this.applyQualityUniforms();
+  }
+
+  private applyQualityUniforms(): void {
+    const b = BUDGET[this.quality];
+    this.ocean.uniforms.uCloudOctaves!.value = b.octaves;
+    this.ocean.uniforms.uDetailCascades!.value = b.detail;
+  }
+
+  /** Gust modes for the water's cat's paws (same Fourier modes the vessels feel). */
+  private uploadGusts(): void {
+    const wf = this.weatherField;
+    const u = this.ocean.uniforms;
+    const slots = u.uGust!.value as THREE.Vector4[];
+    const modes = wf?.modes ?? [];
+    for (let i = 0; i < GUST_MODES; i++) {
+      const m = modes[i];
+      slots[i]!.set(m ? 2 * Math.PI * m.f : 0, m?.au ?? 0, m?.phaseU ?? 0, m?.cross ?? 0);
+    }
+    const lowEnd = this.quality === 'low';
+    u.uGustCount!.value = lowEnd ? 0 : modes.length;
+    u.uAdvect!.value = wf?.advection ?? 8;
+    if (wf) (u.uWindDir!.value as THREE.Vector2).set(wf.dirX, wf.dirY);
+    u.uSquallOn!.value = wf?.weather.squalls.enabled ? 1 : 0;
+    u.uSquallDur!.value = (wf?.weather.squalls.durationMin ?? 4) * 60;
+  }
+
+  /** Per-frame weather at the camera: lights, sky, fog, rain, lightning and spindrift. */
+  private updateWeather(t: number, dt: number): void {
+    const wf = this.weatherField;
+    const u = this.ocean.uniforms;
+    const cam = this.camera.position;
+    const wx = cam.x;
+    const wy = -cam.z;
+    let cloud = this.weather.cloudCover;
+    let rain = this.weather.rainMmH;
+    let flash = 0;
+    let wind = this.env?.windSpeed ?? 0;
+    if (wf) {
+      wf.windAt(wx, wy, t, this.windSample);
+      wind = this.windSample.speed;
+      cloud = wf.cloudAt(wx, wy, t);
+      rain = wf.rainAt(wx, wy, t);
+      flash = wf.lightning(t, this.windSample.squall, rain);
+      this.windThree.set(this.windSample.u, 0, -this.windSample.v);
+      // The three squall fronts nearest in time (the shader evaluates them per pixel).
+      const sq = this.weather.squalls;
+      if (sq.enabled) {
+        const interval = sq.intervalMin * 60;
+        const k0 = Math.floor(t / interval);
+        const v = u.uSquall!.value as THREE.Vector4;
+        const tk = (k: number) => (k < 0 ? -1e9 : wf.squallTime(k));
+        v.set(tk(k0 - 1), tk(k0), tk(k0 + 1), 0);
+      }
+    } else {
+      this.windThree.set(0, 0, 0);
+    }
+    u.uCloud!.value = cloud;
+    u.uFlash!.value = flash;
+    u.uRain!.value = rain;
+    u.uWind!.value = wind;
+    u.uWhitecap!.value = whitecapFraction(wind);
+    u.uSkyTime!.value = t;
+    const drift = u.uCloudDrift!.value as THREE.Vector2;
+    // Cloud deck coordinates are in km; it drifts at ~1.5× the surface wind.
+    const mean = wf ? wf.meanSpeed : 0;
+    drift.set((wf?.dirX ?? 0) * mean * 1.5 * t * 1e-3, -(wf?.dirY ?? 0) * mean * 1.5 * t * 1e-3);
+    const visibility = rainVisibilityKm(this.weather.visibilityKm, rain) * 1000;
+    const density = 1.98 / Math.min(visibility, MAX_VIEW);
+    u.uFogDensity!.value = density;
+    this.fog.density = density;
+    const light = this.daylight * (1 - 0.55 * cloud);
+    this.localWind = wind;
+    this.weatherStorm = Math.max(
+      smooth(0.55, 1, cloud),
+      Math.min(1, rain / 6),
+      this.windSample.squall,
+    );
+    horizonColor(cloud, this.daylight, flash, this.fogColor);
+    this.fog.color.copy(this.fogColor);
+    this.renderer.setClearColor(this.fogColor, 1);
+    this.sun.intensity = this.sunBase * (1 - 0.85 * smooth(0.3, 1, cloud));
+    this.hemi.intensity = 0.9 * (0.45 + 0.55 * light) + flash * 2.5;
+    this.renderer.toneMappingExposure = 1.05 * (1 + 0.35 * cloud);
+
+    const camDt = Number.isFinite(dt) ? Math.min(0.1, Math.max(0, dt)) : 0;
+    this.rain.update(t, rain, this.windThree, light);
+    this.emitSpray(camDt, wind);
+    const pixelScale =
+      this.renderer.getDrawingBufferSize(this.tmp2).y /
+      (2 * Math.tan((this.camera.fov * Math.PI) / 360));
+    this.spray.update(camDt, this.windThree, light, pixelScale);
+  }
+
+  private readonly tmp2 = new THREE.Vector2();
+
+  /** Bow spray from the vessels and spindrift off the crests in a gale. */
+  private emitSpray(dt: number, wind: number): void {
+    if (dt <= 0) return;
+    const frame = this.frame;
+    const budget = this.spray.capacity / 2600;
+    for (const state of frame?.vessels ?? []) {
+      const view = this.vessels.get(state.id);
+      if (!view) continue;
+      const def = view.definition;
+      const kn = Math.max(0, state.speedKn);
+      const heave = Math.min(1, Math.abs(state.bowAccel) / 9.81);
+      const intensity =
+        Math.min(1, kn / 18) * 0.5 +
+        heave * 0.6 +
+        (state.slamming ? 1.2 : 0) +
+        (state.greenWater ? 0.8 : 0);
+      if (intensity < 0.05) continue;
+      const rate = intensity * 700 * budget * Math.sqrt(def.beam / 10);
+      const n = Math.min(200, Math.floor(rate * dt + Math.random()));
+      if (n <= 0) continue;
+      const bow = rotate(state.attitude, {
+        x: def.points.bow.x - def.length * 0.04,
+        y: 0,
+        z: def.points.bow.z - def.depth * 0.6,
+      });
+      const fwd = rotate(state.attitude, { x: 1, y: 0, z: 0 });
+      const port = rotate(state.attitude, { x: 0, y: 1, z: 0 });
+      const v = state.velocity;
+      const up = 3 + 9 * intensity;
+      for (const side of [1, -1]) {
+        const out = 2 + 5 * intensity;
+        this.spray.emit(
+          {
+            x: state.position.x + bow.x + port.x * side * def.beam * 0.3,
+            y: state.position.z + bow.z,
+            z: -(state.position.y + bow.y + port.y * side * def.beam * 0.3),
+            vx: v.x * 0.6 + port.x * side * out + fwd.x * 1.5,
+            vy: up,
+            vz: -(v.y * 0.6 + port.y * side * out + fwd.y * 1.5),
+            spread: 1.2 + 2 * intensity,
+            size: (0.18 + def.beam * 0.012) * (1 + intensity),
+            life: 0.9 + 0.8 * intensity,
+          },
+          Math.ceil(n / 2),
+        );
+      }
+    }
+    // Spindrift: from Beaufort 8 the wind tears spray off the breaking crests.
+    if (wind > 16 && this.frame) {
+      const strength = Math.min(1, (wind - 16) / 14);
+      const n = Math.floor(strength * 500 * budget * dt + Math.random());
+      const focus = this.tmp;
+      const hs = this.ocean.uniforms.uHs!.value as number;
+      for (let i = 0; i < n; i++) {
+        const r = 30 + Math.random() * 220;
+        const a = Math.random() * Math.PI * 2;
+        this.spray.emit(
+          {
+            x: focus.x + r * Math.cos(a),
+            y: Math.random() * hs * 0.5,
+            z: focus.z + r * Math.sin(a),
+            vx: this.windThree.x * 0.5,
+            vy: 1 + Math.random() * 3,
+            vz: this.windThree.z * 0.5,
+            spread: 1.5,
+            size: 0.4 + strength * 0.6,
+            life: 1.5 + strength,
+          },
+          1,
+        );
+      }
+    }
   }
 
   setVessels(vessels: readonly { id: string; definition: VesselDefinition }[]): void {
@@ -495,21 +764,7 @@ export class LabRenderer implements LabRendererApi {
       attitudeToThree(state.attitude, view.group.quaternion);
     }
     view.group.userData.capsized = state.capsized;
-    const spray = view.group.getObjectByName('spray');
-    if (spray) {
-      const kn = Math.max(0, state.speedKn);
-      const amount = Math.min(1, kn / 12);
-      spray.visible = kn > 0.4;
-      spray.scale.set(
-        view.definition.beam * (0.12 + 0.28 * amount),
-        view.definition.draft * (0.2 + 0.45 * amount),
-        view.definition.beam * (0.16 + 0.3 * amount),
-      );
-      const mat = (spray as THREE.Mesh).material;
-      if (!Array.isArray(mat) && mat instanceof THREE.MeshStandardMaterial) {
-        mat.opacity = 0.12 + 0.55 * amount;
-      }
-    }
+    view.rig?.update(state.sailSet, state.braceDeg, state.apparentWindAngleDeg, state.apparentWind);
   }
 
   setOverlay(mode: OverlayMode): void {
@@ -540,12 +795,16 @@ export class LabRenderer implements LabRendererApi {
     this.updateCamera();
     this.updateScenery(t, t0);
     this.sky.position.copy(this.camera.position);
-    const cell = this.oceanMesh.userData.cell as number;
-    this.oceanMesh.position.set(
-      Math.round(this.camera.position.x / cell) * cell,
-      0,
-      Math.round(this.camera.position.z / cell) * cell,
-    );
+    // The radial mesh follows the camera and is scaled with its height above the water, so
+    // the triangles stay about the same size on screen from any view (no top-down blockiness).
+    const height = Math.max(1, Math.abs(this.camera.position.y));
+    const scale = THREE.MathUtils.clamp(height * OCEAN_DENSITY[this.quality], 0.05, 10);
+    this.oceanMesh.scale.setScalar(scale);
+    this.oceanMesh.position.set(this.camera.position.x, 0, this.camera.position.z);
+    this.ocean.uniforms.uMeshScale!.value = scale;
+    const dt = t - this.lastRenderT;
+    this.lastRenderT = t;
+    this.updateWeather(t, dt);
     this.renderer.render(this.scene, this.camera);
     const now = performance.now();
     this.stats.frameMs = now - t0;
@@ -601,8 +860,9 @@ export class LabRenderer implements LabRendererApi {
       this.lastRenderAt > 0 ? Math.min(0.1, Math.max(0, (now - this.lastRenderAt) / 1000)) : 0;
     this.lastRenderAt = now;
     this.wallT += dt;
-    const windSpeed = this.env?.windSpeed ?? 0;
-    const target = calmFromConditions(this.hs, windSpeed, this.storminess ?? 0);
+    const windSpeed = this.weatherField ? this.localWind : (this.env?.windSpeed ?? 0);
+    const storm = Math.max(this.weatherStorm, this.storminess ?? 0);
+    const target = calmFromConditions(this.hs, windSpeed, storm);
     this.calm = this.calmPrimed ? ease(this.calm, target, dt, 6) : target;
     this.calmPrimed = true;
     const light = this.updateLighting(dt);
@@ -709,6 +969,8 @@ export class LabRenderer implements LabRendererApi {
     (this.oceanMesh.material as THREE.Material).dispose();
     this.sky.geometry.dispose();
     (this.sky.material as THREE.Material).dispose();
+    this.rain.dispose();
+    this.spray.dispose();
     this.renderer.dispose();
   }
 
@@ -717,10 +979,12 @@ export class LabRenderer implements LabRendererApi {
     group.userData.pickKind = 'vessel';
     group.userData.pickId = id;
     const materials: THREE.MeshStandardMaterial[] = [];
-    const hullMat = this.material('hull');
+    const textures: THREE.Texture[] = [];
+    const palette = definition.palette;
+    const hullMat = this.material('hull', palette);
     hullMat.vertexColors = true;
-    hullMat.roughness = 0.42;
-    hullMat.metalness = 0.12;
+    hullMat.roughness = definition.sails ? 0.75 : 0.42;
+    hullMat.metalness = definition.sails ? 0 : 0.12;
     materials.push(hullMat);
     group.add(
       this.meshFromHull(
@@ -729,58 +993,75 @@ export class LabRenderer implements LabRendererApi {
         hullMat,
         id,
         definition.draft - definition.kg,
+        definition.paint,
       ),
     );
-    const sprayMat = new THREE.MeshStandardMaterial({
-      color: 0xf8fafc,
-      transparent: true,
-      opacity: 0.2,
-      roughness: 0.15,
-      metalness: 0,
-      depthWrite: false,
-    });
-    materials.push(sprayMat);
-    const spray = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), sprayMat);
-    spray.name = 'spray';
-    const bow = definition.points.bow;
-    spray.position.set(bow.x + definition.length * 0.02, bow.z, -bow.y);
-    spray.scale.set(definition.beam * 0.22, definition.draft * 0.35, definition.beam * 0.28);
-    group.add(spray);
 
+    const shared = new Map<string, THREE.MeshStandardMaterial>();
     for (const box of definition.superstructure) {
-      const mat = this.material(box.material);
-      materials.push(mat);
+      // Masts of a rigged ship are drawn round by the rig; their boxes only count as windage.
+      if (definition.sails && box.material === 'wood' && box.size.x < 1 && box.size.y < 1) continue;
+      let mat = shared.get(box.material);
+      if (!mat) {
+        mat = this.material(box.material, palette);
+        if (box.material === 'glass') {
+          mat.transparent = true;
+          mat.opacity = 0.45;
+          mat.roughness = 0.05;
+        }
+        if (box.material === 'flag') {
+          const tex = jollyRogerTexture();
+          textures.push(tex);
+          mat.map = tex;
+          mat.color.set(0xffffff);
+          mat.side = THREE.DoubleSide;
+        }
+        if (box.material === 'flightdeck') {
+          const tex = flightDeckTexture();
+          textures.push(tex);
+          mat.map = tex;
+          mat.color.set(0xffffff);
+        }
+        materials.push(mat);
+        shared.set(box.material, mat);
+      }
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(box.size.x, box.size.z, box.size.y), mat);
       mesh.position.set(box.center.x, box.center.z, -box.center.y);
+      if (box.yawDeg) mesh.rotation.y = THREE.MathUtils.degToRad(box.yawDeg);
       mesh.userData.pickKind = 'vessel';
       mesh.userData.pickId = id;
-      if (box.material === 'glass') {
-        mat.transparent = true;
-        mat.opacity = 0.45;
-        mat.roughness = 0.05;
-      }
       group.add(mesh);
     }
 
-    const prop = definition.points.propeller;
-    const propMat = this.material('accent');
-    materials.push(propMat);
-    const disc = new THREE.Mesh(
-      new THREE.CylinderGeometry(
-        Math.max(0.15, definition.propulsion.propellerDiameter / 2),
-        Math.max(0.15, definition.propulsion.propellerDiameter / 2),
-        0.12,
-        14,
-      ),
-      propMat,
-    );
-    disc.rotation.z = Math.PI / 2;
-    disc.position.set(prop.x, prop.z, -prop.y);
-    disc.userData.pickKind = 'vessel';
-    disc.userData.pickId = id;
-    group.add(disc);
+    let rig: RigView | null = null;
+    if (definition.sails) {
+      rig = new RigView(
+        definition.sails,
+        { wood: palette.wood ?? HULL_COLORS.wood, sail: palette.sail ?? HULL_COLORS.sail },
+        id,
+      );
+      group.add(rig.group);
+    } else {
+      const prop = definition.points.propeller;
+      const propMat = this.material('accent', {});
+      materials.push(propMat);
+      const disc = new THREE.Mesh(
+        new THREE.CylinderGeometry(
+          Math.max(0.15, definition.propulsion.propellerDiameter / 2),
+          Math.max(0.15, definition.propulsion.propellerDiameter / 2),
+          0.12,
+          14,
+        ),
+        propMat,
+      );
+      disc.rotation.z = Math.PI / 2;
+      disc.position.set(prop.x, prop.z, -prop.y);
+      disc.userData.pickKind = 'vessel';
+      disc.userData.pickId = id;
+      group.add(disc);
+    }
 
-    return { id, definition, group, materials };
+    return { id, definition, group, materials, textures, rig };
   }
 
   private meshFromHull(
@@ -789,7 +1070,11 @@ export class LabRenderer implements LabRendererApi {
     material: THREE.Material,
     id: string,
     waterlineZ: number,
+    paint: VesselDefinition['paint'],
   ): THREE.Mesh {
+    const bottom = new THREE.Color(paint.bottom);
+    const boot = new THREE.Color(paint.boot);
+    const top = new THREE.Color(paint.topside);
     const positions = new Float32Array(src.length);
     const colors = new Float32Array(src.length);
     for (let i = 0; i < src.length; i += 3) {
@@ -797,8 +1082,7 @@ export class LabRenderer implements LabRendererApi {
       positions[i + 1] = src[i + 2]!;
       positions[i + 2] = -src[i + 1]!;
       const z = src[i + 2]!;
-      const paint =
-        z < waterlineZ - 0.15 ? PAINT_BOTTOM : z < waterlineZ + 0.35 ? PAINT_BOOT : PAINT_TOP;
+      const paint = z < waterlineZ - 0.15 ? bottom : z < waterlineZ + 0.35 ? boot : top;
       colors[i] = paint.r;
       colors[i + 1] = paint.g;
       colors[i + 2] = paint.b;
@@ -814,7 +1098,10 @@ export class LabRenderer implements LabRendererApi {
     return mesh;
   }
 
-  private material(kind: string): THREE.MeshStandardMaterial {
+  private material(
+    kind: VisualMaterial,
+    palette: Partial<Record<VisualMaterial, number>>,
+  ): THREE.MeshStandardMaterial {
     if (kind === 'hull') {
       return new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
@@ -825,9 +1112,10 @@ export class LabRenderer implements LabRendererApi {
       });
     }
     return new THREE.MeshStandardMaterial({
-      color: HULL_COLORS[kind] ?? HULL_COLORS.hull,
-      roughness: kind === 'superstructure' ? 0.45 : 0.62,
-      metalness: kind === 'accent' ? 0.35 : 0.04,
+      color: palette[kind] ?? HULL_COLORS[kind],
+      roughness:
+        kind === 'superstructure' ? 0.45 : kind === 'gold' ? 0.35 : kind === 'wood' ? 0.8 : 0.62,
+      metalness: kind === 'accent' ? 0.35 : kind === 'gold' ? 0.75 : 0.04,
     });
   }
 
@@ -837,6 +1125,8 @@ export class LabRenderer implements LabRendererApi {
       if (child instanceof THREE.Mesh) child.geometry.dispose();
     });
     for (const mat of view.materials) mat.dispose();
+    for (const tex of view.textures) tex.dispose();
+    view.rig?.dispose();
   }
 
   private applySelection(): void {

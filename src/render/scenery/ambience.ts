@@ -7,12 +7,13 @@ function smoothstep(a: number, b: number, x: number): number {
 
 /**
  * Target calm from the sea state. 1 = flat calm fair weather, 0 = storm.
- * A sea of about 1 m H_s in a breeze is still fully "calm"; it is gone by 2.5 m or a gale.
+ * Up to about 1.8 m H_s in a fresh breeze is still fully "calm"; a moderate 2.5 m sea is
+ * mostly fair, and it is gone by 4 m or a gale.
  * `storminess` (0–1), when given by a weather system, can only make things rougher.
  */
 export function calmFromConditions(hs: number, windSpeed: number, storminess = 0): number {
-  const severity = Math.max(hs / 2.5, windSpeed / 15, storminess);
-  return 1 - smoothstep(0.4, 1, severity);
+  const severity = Math.max(hs / 4, windSpeed / 18, storminess);
+  return 1 - smoothstep(0.45, 1, severity);
 }
 
 /** Ease `current` toward `target` with time constant `tau` seconds. */

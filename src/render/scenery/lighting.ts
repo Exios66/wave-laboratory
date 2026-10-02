@@ -55,7 +55,8 @@ export class SkyLighting {
     this.parts.sun.position.copy(sun).multiplyScalar(2000);
     this.parts.sun.intensity = THREE.MathUtils.clamp(0.35 + env.sunElevationDeg / 28, 0.25, 2.6);
     this.parts.sun.color.set(env.sunElevationDeg < 8 ? 0xffb27a : 0xfff4e0);
-    this.state.daylight = THREE.MathUtils.clamp((env.sunElevationDeg + 6) / 16, 0, 1);
+    // Same curve as daylight() in the sky shader.
+    this.state.daylight = THREE.MathUtils.clamp(sun.y * 4 + 0.25, 0.08, 1);
     this.state.timeOfDay = input.timeOfDay ?? 12;
     return this.state;
   }

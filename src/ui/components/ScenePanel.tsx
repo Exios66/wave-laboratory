@@ -1,4 +1,5 @@
-import type { VesselType, WaveSystem } from '../../schema/experiment';
+import { beaufortFromWind } from '../../core/units';
+import type { VesselType, WaveSystem, Weather } from '../../schema/experiment';
 import { newProbe, newVessel, newWaveSystem, VESSEL_TYPE_LABELS } from '../factories';
 import { useLab, type Selection } from '../store';
 import { Icon, type IconName } from './icons';
@@ -9,14 +10,24 @@ function isSelected(sel: Selection, kind: string, id?: string): boolean {
   return id === undefined || ('id' in sel && sel.id === id);
 }
 
+function weatherMeta(wind: number, w: Weather): string {
+  const parts = [`Bf ${beaufortFromWind(wind)}`];
+  if (w.squalls.enabled) parts.push('squalls');
+  else if (w.rainMmH > 0.5) parts.push('rain');
+  else if (w.visibilityKm < 1) parts.push('fog');
+  return parts.join(' · ');
+}
+
 function waveMeta(w: WaveSystem): string {
   switch (w.kind) {
     case 'spectrum':
       return `Hs ${w.hs.toFixed(1)} m · Tp ${w.tp.toFixed(0)} s`;
     case 'wind':
-      return `${w.windSpeed.toFixed(0)} m/s wind`;
+      return w.followWeather ? 'Follows the weather wind' : `${w.windSpeed.toFixed(0)} m/s wind`;
     case 'regular':
       return `H ${w.height.toFixed(1)} m · T ${w.period.toFixed(0)} s`;
+    case 'focused':
+      return `Crest ${w.crestHeight.toFixed(1)} m at ${w.focusTime.toFixed(0)} s`;
   }
 }
 
@@ -128,6 +139,13 @@ export function ScenePanel() {
               current={isSelected(selection, 'environment')}
               onSelect={() => lab().select({ kind: 'environment' })}
             />
+            <TreeItem
+              icon="cloud"
+              label="Weather"
+              meta={weatherMeta(exp.environment.windSpeed, exp.weather)}
+              current={isSelected(selection, 'weather')}
+              onSelect={() => lab().select({ kind: 'weather' })}
+            />
           </ul>
         </section>
 
@@ -146,6 +164,7 @@ export function ScenePanel() {
                 { label: 'Spectrum (Hs, Tp)', onSelect: () => addWave('spectrum') },
                 { label: 'Wind sea (wind, fetch)', onSelect: () => addWave('wind') },
                 { label: 'Regular waves (H, T)', onSelect: () => addWave('regular') },
+                { label: 'Rogue wave (focused group)', onSelect: () => addWave('focused') },
               ]}
             />
           </div>

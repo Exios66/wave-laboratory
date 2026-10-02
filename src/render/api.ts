@@ -3,7 +3,7 @@
  * `LabRenderer.ts`; nothing outside `src/render` may import Three.js directly.
  */
 import type { GpuOceanData } from '../ocean/gpuData';
-import type { Environment, ProbeConfig } from '../schema/experiment';
+import type { Environment, OceanQuality, ProbeConfig, Weather } from '../schema/experiment';
 import type { SimFrame } from '../sim/types';
 import type { VesselDefinition } from '../vessel/api';
 import type { AmbienceSettings } from './scenery/types';
@@ -42,6 +42,10 @@ export interface LabRendererApi {
    * away and darken the mood; null derives the mood from wind and sea state alone.
    */
   setStorminess(storminess: number | null): void;
+  /** Weather to draw (clouds, rain, fog, lightning, gusts, squalls). */
+  setWeather(weather: Weather): void;
+  /** Graphics level: mesh density, detail layers and particle budgets. */
+  setQuality(quality: OceanQuality): void;
   setVessels(vessels: readonly { id: string; definition: VesselDefinition }[]): void;
   setProbes(probes: readonly ProbeConfig[]): void;
   /** Latest simulation state; the ocean is rendered at frame.t so it matches the physics. */

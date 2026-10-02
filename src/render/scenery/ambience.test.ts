@@ -7,11 +7,14 @@ describe('calmFromConditions', () => {
   });
   it('is stormy in a gale or a big sea', () => {
     expect(calmFromConditions(1, 20)).toBe(0);
-    expect(calmFromConditions(3, 4)).toBe(0);
+    expect(calmFromConditions(4.5, 4)).toBe(0);
   });
   it('lets a weather system make it rougher but not calmer', () => {
     expect(calmFromConditions(0.5, 4, 1)).toBe(0);
-    expect(calmFromConditions(3, 4, 0)).toBe(0);
+    expect(calmFromConditions(4.5, 4, 0)).toBe(0);
+  });
+  it('keeps a moderate 2.5 m sea mostly fair', () => {
+    expect(calmFromConditions(2.5, 11)).toBeGreaterThan(0.6);
   });
   it('falls monotonically as the sea builds', () => {
     let last = 2;

@@ -13,7 +13,8 @@ import { makeVessel, report, run } from './testUtil';
 vi.setConfig({ testTimeout: 300_000 });
 
 describe('propulsion and steering', () => {
-  for (const type of VesselTypeSchema.options) {
+  // The sailing ship has no engine (see vessel.wind.validation.ts for its sailing tests).
+  for (const type of VesselTypeSchema.options.filter((t) => t !== 'pirate-ship')) {
     it(`${type} reaches a plausible steady speed under full throttle`, () => {
       const def = createVesselDefinition(type);
       const vmaxKn = def.maxSpeed / KNOT;
