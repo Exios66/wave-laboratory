@@ -81,13 +81,15 @@ export class SailorLayer implements SceneryLayer {
     const count = Math.min(10, Math.max(2, Math.round(def.length / 22)));
     const bow = def.points.bow;
     const zDeck = deckHeight(def);
-    // Keep clear of the stern propeller and the stem; stay on the open foredeck for freighters.
+    // Keep clear of the stern propeller and the stem.
     const aftX = -def.length * 0.18;
     const fwdX = Math.min(bow.x - def.length * 0.06, def.length * 0.38);
+    // Wide freighters: walk the side catwalks outside the cargo footprint.
+    const sideBias = def.beam > 12 ? 0.38 : 0.18;
     for (let i = 0; i < count; i++) {
       const seed = Math.imul(Math.round(def.length * 1000) + i, 2654435761) >>> 0;
       const mesh = this.makeSailor(seed);
-      const lane = (i % 2 === 0 ? 1 : -1) * def.beam * (0.18 + hash01(seed + 3) * 0.16);
+      const lane = (i % 2 === 0 ? 1 : -1) * def.beam * (sideBias + hash01(seed + 3) * 0.06);
       const sailor: Sailor = {
         mesh,
         vesselId: v.id,
@@ -99,8 +101,15 @@ export class SailorLayer implements SceneryLayer {
       };
       mesh.position.set(aftX, zDeck, -lane);
       // Readable at ship scales without looking giant on small craft.
-      const scale = Math.min(2.2, Math.max(0.9, def.beam * 0.11));
+      const scale = Math.min(2.8, Math.max(1.1, def.beam * 0.14));
       mesh.scale.setScalar(scale);
+      // Draw above nearby deck plates so figures are not buried in cargo.
+      mesh.traverse((c) => {
+        if (c instanceof THREE.Mesh) {
+          c.renderOrder = 2;
+          c.material.depthTest = true;
+        }
+      });
       v.group.add(mesh);
       this.sailors.push(sailor);
     }

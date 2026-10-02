@@ -28,7 +28,7 @@ export class PlaneLayer implements SceneryLayer {
   readonly object = new THREE.Group();
   private readonly pool = new GeometryPool();
   private readonly flights: Flight[] = [];
-  private nextSpawnAt = 6;
+  private nextSpawnAt = 3;
   private spawnIndex = 0;
   private readonly fuselage = this.pool.share(new THREE.CylinderGeometry(0.35, 0.55, 4.2, 6));
   private readonly wing = this.pool.share(new THREE.BoxGeometry(7.5, 0.12, 1.1));
@@ -54,8 +54,8 @@ export class PlaneLayer implements SceneryLayer {
     const haunt = (1 - frame.daylight) * 0.55 + (1 - frame.calm) * 0.25 + 0.2;
     if (this.flights.length === 0 && frame.wallT >= this.nextSpawnAt) {
       this.spawn(frame, haunt);
-      // Next pass: 45–180 s of wall time, biased shorter when haunted.
-      const gap = 45 + hash01(this.spawnIndex * 97) * (180 - haunt * 90);
+      // Next pass: 35–140 s of wall time, biased shorter when haunted.
+      const gap = 35 + hash01(this.spawnIndex * 97) * (140 - haunt * 70);
       this.nextSpawnAt = frame.wallT + gap;
     }
     for (let i = this.flights.length - 1; i >= 0; i--) {
