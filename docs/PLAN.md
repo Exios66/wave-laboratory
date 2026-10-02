@@ -10,7 +10,8 @@ Status: v0.1 in the repository · Last updated: 2026-10-02
 
 The first build implements the core of Phases 0–4 and part of Phase 7. Checks and publishing
 are local: `pnpm check` and `pnpm test:e2e` on a developer machine, and `pnpm deploy:pages`
-commits the static build to the `gh-pages` branch. There is no GitHub Actions workflow.
+commits the static build into `docs/` on `main`. There is no GitHub Actions workflow and no
+`gh-pages` branch.
 
 | Area                                                                                                                     | Status                 |
 | ------------------------------------------------------------------------------------------------------------------------ | ---------------------- |
