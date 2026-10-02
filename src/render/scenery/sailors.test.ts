@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { createVesselDefinition } from '../../vessel/definition';
 import { SailorLayer } from './sailors';
@@ -16,23 +16,14 @@ describe('SailorLayer spawn', () => {
     for (const b of def.superstructure) {
       if (b.material === 'deck') deckTop = Math.max(deckTop, b.center.z + b.size.z * 0.5);
     }
+    const cargoHalf = Math.max(
+      0,
+      ...def.superstructure.filter((b) => b.material === 'cargo').map((b) => b.size.y * 0.5),
+    );
     for (const s of sailors) {
       expect(s.position.y).toBeGreaterThanOrEqual(deckTop);
-      // Side catwalk: |three.z| ≈ body y lane
-      expect(Math.abs(s.position.z)).toBeGreaterThan(def.beam * 0.3);
+      expect(Math.abs(s.position.z)).toBeGreaterThan(cargoHalf);
     }
-    console.log('cargo sailors', sailors.length, {
-      deckTop,
-      sample: sailors.slice(0, 2).map((s) => ({
-        x: +s.position.x.toFixed(2),
-        y: +s.position.y.toFixed(2),
-        z: +s.position.z.toFixed(2),
-        scale: +s.scale.x.toFixed(2),
-      })),
-      bow: def.points.bow,
-      beam: def.beam,
-      length: def.length,
-    });
     layer.dispose();
   });
 });

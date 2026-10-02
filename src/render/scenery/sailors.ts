@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import type { VesselDefinition } from '../../vessel/api';
 import type { SceneryFrame, SceneryLayer, SceneryVessel } from './types';
-import { disposeObject3D, GeometryPool, hash01, makeMat } from './util';
+import { disposeObject3D, GeometryPool, hash01 } from './util';
 
 interface Sailor {
   mesh: THREE.Group;
@@ -119,15 +119,22 @@ export class SailorLayer implements SceneryLayer {
     const g = new THREE.Group();
     g.name = 'sailor';
     const bodyColor = BODY_COLORS[Math.floor(hash01(seed) * BODY_COLORS.length)]!;
-    const body = new THREE.Mesh(
-      this.bodyGeo,
-      makeMat(bodyColor, { roughness: 0.55, emissive: bodyColor, emissiveIntensity: 0.12 }),
-    );
+    // Unlit so figures stay readable under day/night and in storms.
+    const bodyMat = new THREE.MeshBasicMaterial({ color: bodyColor });
+    const headMat = new THREE.MeshBasicMaterial({ color: 0xffe4c8 });
+    const body = new THREE.Mesh(this.bodyGeo, bodyMat);
     body.position.y = 0.55;
-    const head = new THREE.Mesh(this.headGeo, makeMat(0xe8c4a2, { roughness: 0.65 }));
+    const head = new THREE.Mesh(this.headGeo, headMat);
     head.position.y = 1.15;
-    g.add(body, head);
-    g.userData.mats = [body.material, head.material];
+    // Beacon so orbit cameras can still pick them out on large freighters.
+    const beacon = new THREE.Mesh(
+      this.headGeo,
+      new THREE.MeshBasicMaterial({ color: 0xffff66 }),
+    );
+    beacon.position.y = 1.55;
+    beacon.scale.setScalar(0.55);
+    g.add(body, head, beacon);
+    g.userData.mats = [bodyMat, headMat, beacon.material];
     return g;
   }
 
