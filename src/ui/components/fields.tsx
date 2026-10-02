@@ -67,6 +67,8 @@ export function NumberField({
   const commitText = () => {
     const v = Number(text.replace(',', '.'));
     if (text.trim() === '' || !Number.isFinite(v)) {
+      // Keep the message but stop editing, so a new value from the store is shown again.
+      editing.current = false;
       setError(`Enter a number between ${min} and ${max}.`);
       return;
     }
@@ -105,7 +107,11 @@ export function NumberField({
               setText(v.toFixed(decimals));
             }}
             onPointerUp={(e) => commit(Number((e.target as HTMLInputElement).value))}
-            onKeyUp={(e) => commit(Number((e.target as HTMLInputElement).value))}
+            onKeyUp={(e) => {
+              // Only keys that moved the slider commit; a Tab keyup arriving on the slider must
+              // not write back the slider's clamped, step-snapped copy of the value.
+              if (editing.current) commit(Number((e.target as HTMLInputElement).value));
+            }}
             onBlur={(e) => {
               if (editing.current) commit(Number(e.target.value));
             }}

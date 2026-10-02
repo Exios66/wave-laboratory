@@ -71,8 +71,8 @@ For a single Airy wave this produces the exact Gerstner trochoid; the Eulerian m
 **Jacobian / folding:** `J = (1 + ∂Dₓ/∂x)(1 + ∂D_y/∂y) − (∂Dₓ/∂y)²`. `J < 0` means the surface
 has folded (a breaking crest).
 
-Vessel forces sample the sea on a moving patch of up to 220 columns (0.35 m minimum
-spacing), so waves of a few hull-breadths contribute to the pressure integral instead of
+Vessel forces sample the sea on a moving patch of up to 280 columns (minimum spacing
+max(0.25 m, 0.012 L)), so waves of a few hull-breadths contribute to the pressure integral instead of
 being averaged away.
 
 **What the GPU actually draws.** `render/ocean` inverse-FFTs η and the packed horizontal
@@ -86,7 +86,9 @@ orbital velocity and the other rows of the table above stay on the CPU.
     θ = k (d̂·x₀) − ω t + φ,   η = a cos θ,   D = −λ a coth(kh) sin θ · d̂
 
 When choppiness λ > 0 a second-order Stokes harmonic is added, a₂ cos 2θ, with
-a₂ = (k a² / 4) (3 − σ²) / σ³ and σ = tanh(kh). That raises crests and lifts troughs.
+a₂ = (k a² / 4) (3 − σ²) / σ³ and σ = tanh(kh), held at a/4. That raises crests and
+lifts troughs. The cap is where the harmonic would put a second crest in the trough, the
+shallow-water regime (Ursell number ≳ 26) where Stokes theory no longer applies.
 It is omitted for λ = 0 so a pure Airy wave stays linear. The harmonic averages to zero,
 so the Eulerian mean level of the choppy wave is still −k a² / 2.
 
@@ -100,7 +102,8 @@ where `head(ζ)` is the sum over cascades of the depth-attenuated dynamic head. 
 evaluates it exactly at three levels `k_ref·|ζ| = 0.5, 1.5, 3.5` (k_ref = energy-weighted mean
 wavenumber of the cascade), interpolates linearly between levels and decays as `e^{k_ref ζ}`
 below. Particle velocities use the surface orbital velocity attenuated by `e^{k_ref ζ}`
-(deep-water approximation per cascade). Regular components are evaluated exactly.
+(deep-water approximation per cascade). Regular components are evaluated exactly, with
+vertical velocity attenuated by sinh(k(z+h))/sinh(kh) so it vanishes at the seabed.
 
 Fields are evaluated at snapshot instants (default every 1/20 s) and interpolated linearly in
 time. η uses bicubic Hermite interpolation with spectrally exact derivatives (< 0.5 % error at
@@ -139,6 +142,60 @@ loses freeboard. The boot-top paint stays at the design waterline.
 - **Pierson–Moskowitz / Bretschneider**: JONSWAP with γ = 1, normalised to H_s.
 - **TMA**: multiplied by the Kitaigorodskii depth factor when depth < 1000 m; H_s re-normalised.
 - **Wind sea**: Hasselmann et al. (1973) fetch-limited growth, capped by the fully developed
-  Pierson–Moskowitz limit (H_s ≈ 0.209 U²/g).
+  Pierson–Moskowitz limit (H_s ≈ 0.209 U²/g): when the fetch-limited H_s reaches the
+  fully developed one, the fully developed sea is used, so a longer fetch never gives a smaller sea.
 - **Spreading**: cos-2s, Mitsuyasu (frequency-dependent s), Donelan–Banner sech², all
   normalised to ∫D dθ = 1.
+
+## Focused (rogue) waves
+
+A `focused` wave system is a NewWave group (Tromans, Anaturk & Hagemeijer 1991): 40 linear
+components between 0.6 ω_p and 3 ω_p with amplitudes `a_n = A_c S(ω_n)Δω / Σ S(ω_m)Δω`
+(JONSWAP shape, γ = 3.3) and phases chosen so every crest coincides at the focus point and time
+(`k·x_f − ω t_f + φ = 0`). Frequencies are jittered inside their bins so the group does not
+refocus periodically. The components are evaluated exactly like regular waves and add to the
+spectral sea, so the crest height at the focus is A_c above the background sea.
+
+## Weather (`src/weather`)
+
+Everything is a pure function of (seed, x, y, t), so the worker, the renderer and the tests see
+the same weather.
+
+- **Mean wind** is the environment's U₁₀ and compass "from" direction.
+- **Gusts:** longitudinal and lateral turbulence u′, v′ is a sum of 24 Fourier modes drawn
+  from the von Kármán spectrum `S_u(f) = 4σ_u²(L/U) / (1 + 70.8 (fL/U)²)^(5/6)` with
+  L = 180 m, σ_u = I·U (I = gustiness) and σ_v = 0.75 σ_u (ESDU 85020). The field is advected
+  with the mean wind (Taylor's frozen turbulence) and varies across the wind, so gusts arrive
+  as moving patches. The truncated band is rescaled so σ_u is exactly the requested value.
+- **Squalls:** fronts move downwind at the mean wind speed (at least 2 m/s), arriving on
+  average every `intervalMin`. Each has a sharp gust-front rise, a plateau, and a slower decay
+  over `durationMin`. Inside a squall the wind is multiplied by up to `strength`, turbulence
+  rises by half, the wind veers clockwise by up to `veerDeg`, rain rises by max(25, 2R) mm/h and
+  cloud cover goes to 95 %.
+- **Rain and visibility:** Koschmieder's law with rain extinction
+  `β = 3.912/V_clear + 0.25 R^0.63 km⁻¹`.
+- **Whitecaps:** coverage `W = 3.84·10⁻⁶ U₁₀^3.41` (Monahan & O'Muircheartaigh 1980), capped
+  at 1.
+- **Lightning:** a Poisson-like process (one hash per 0.25 s slot) whose rate rises with rain
+  and squalls. It is visual only.
+- **Wind sea following the weather:** a `wind` wave system with `followWeather` takes its U₁₀
+  and direction from the environment, so the fetch-limited JONSWAP sea grows and turns with the
+  wind you set. Gusts and squalls act on the vessels and the picture, not on the spectrum.
+
+## Wind loads and sails (`src/vessel/windLoads.ts`)
+
+Wind acts on every vessel at the air velocity relative to the ship, V_a, in the body frame.
+
+- **Windage** (Isherwood/Blendermann-type drag, Fossen 2011 §10.1):
+  `X = ½ρ_a C_X A_F |V_a| V_ax`, `Y = ½ρ_a C_Y A_L |V_a| V_ay` with C_X = 0.7, C_Y = 0.9.
+  The lateral force acts at the centroid of the lateral area shifted 0.15 L toward the windward
+  end (Hughes 1930), which gives the weather-vaning yaw moment. The heeling moment is that force
+  times the centroid height. Frontal and lateral areas are rasterised from each hull and its
+  superstructure.
+- **Square sails:** one aerodynamic surface of area A_s set to a fraction `set` with
+  `C_L(α) = 1.25 sin 2α · f(α)` and `C_D(α) = 0.08 + 1.2 sin² α`. f rises smoothly from 0 at
+  α = 8° to 1 at 20° because a square sail luffs at small angles of attack. Lift is
+  perpendicular and drag parallel to the apparent wind, and the force falls with cos² of heel.
+  The crew braces the yards between a minimum angle and square to maximise drive, which
+  reproduces a square-rigger's inability to point higher than about 60° off the wind. With the
+  autopilot on, the crew reefs above 13 m/s apparent wind (about Beaufort 6).

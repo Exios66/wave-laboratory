@@ -71,7 +71,13 @@ export class LabRuntime {
     this.unsubscribers.push(
       useLab.subscribe((s, prev) => {
         if (s.revision !== this.loadedRevision) this.load();
-        else if (s.performance !== prev.performance) this.applyPerformanceMode();
+        else {
+          if (s.performance !== prev.performance) this.applyPerformanceMode();
+          // Visual-only weather edits do not reload; the worker still needs them for its readouts.
+          if (s.experiment.weather !== prev.experiment.weather) {
+            this.client.setWeather(s.experiment.weather);
+          }
+        }
         if (!this.renderer) return;
         if (s.overlay !== prev.overlay) this.renderer.setOverlay(s.overlay);
         if (s.duckMode !== prev.duckMode) this.renderer.setDuckMode(s.duckMode);
@@ -258,9 +264,12 @@ export class LabRuntime {
     this.client.command(vesselId, cmd);
   }
 
+  /**
+   * Start again from t = 0 with the experiment as it is now, including edits applied live
+   * (heading, speed, autopilot, weather) that did not reload the simulation.
+   */
   restart(): void {
-    telemetry.clear();
-    this.client.reset();
+    this.load();
   }
 
   dispose(): void {

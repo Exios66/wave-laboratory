@@ -82,7 +82,7 @@ function hash01(seed: number, i: number): number {
 }
 
 export class WeatherField {
-  readonly weather: Weather;
+  weather: Weather;
   /** Mean 10 m wind speed [m/s] and the unit vector it blows toward. */
   readonly meanSpeed: number;
   readonly dirX: number;
@@ -102,6 +102,20 @@ export class WeatherField {
     this.seed = weather.seed >>> 0;
     this.advection = Math.max(2, this.meanSpeed);
     this.modes = buildGustModes(weather.gustiness, this.advection, this.seed);
+  }
+
+  /**
+   * Change the purely visual parts of the weather (rain, cloud, visibility, lightning) without
+   * rebuilding the gusts or squalls, so a running simulation keeps its time and state.
+   */
+  setAtmosphere(w: Pick<Weather, 'rainMmH' | 'cloudCover' | 'visibilityKm' | 'lightning'>): void {
+    this.weather = {
+      ...this.weather,
+      rainMmH: w.rainMmH,
+      cloudCover: w.cloudCover,
+      visibilityKm: w.visibilityKm,
+      lightning: w.lightning,
+    };
   }
 
   /** Time the k-th squall front passes the origin [s]. */

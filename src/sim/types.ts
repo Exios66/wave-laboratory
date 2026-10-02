@@ -1,7 +1,7 @@
 /** Types shared by the simulation worker, its client and the UI. */
 import type { GpuOceanData } from '../ocean/gpuData';
 import type { SampleBlock } from './recorder';
-import type { Experiment, OceanQuality } from '../schema/experiment';
+import type { Experiment, OceanQuality, Weather } from '../schema/experiment';
 import type { VesselCommand, VesselDefinition, VesselTelemetry } from '../vessel/api';
 
 export interface ProbeReading {
@@ -50,7 +50,7 @@ export type ToWorker =
   | { type: 'visual'; quality: OceanQuality }
   | { type: 'advance'; dt: number }
   | { type: 'step'; count: number }
-  | { type: 'reset' }
+  | { type: 'weather'; weather: Weather }
   | { type: 'command'; vesselId: string; command: VesselCommand };
 
 /** Messages worker → main thread. */

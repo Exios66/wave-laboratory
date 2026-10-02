@@ -25,7 +25,11 @@ export function stokesSecondAmplitude(amplitude: number, k: number, depth: numbe
   const sigma = tanhKh(k, depth);
   if (!(sigma > 1e-4) || !(k > 0)) return 0;
   const s2 = sigma * sigma;
-  return ((k * amplitude * amplitude) / 4) * ((3 - s2) / (s2 * sigma));
+  const a2 = ((k * amplitude * amplitude) / 4) * ((3 - s2) / (s2 * sigma));
+  // Beyond a₂ = a/4 the harmonic puts a second crest in the trough: the shallow-water regime
+  // (Ursell number ≳ 26) where Stokes theory no longer applies. Hold it at that limit instead of
+  // letting it grow without bound as tanh(kh) → 0.
+  return Math.min(a2, amplitude / 4);
 }
 
 /** Angular frequency ω(k) [rad/s]. */
@@ -78,6 +82,18 @@ export function pressureAttenuation(k: number, z: number, h: number): number {
   const zc = Math.max(z, -h);
   const num = Math.exp(k * zc) * (1 + Math.exp(-2 * k * (zc + h)));
   const den = 1 + Math.exp(-2 * k * h);
+  return num / den;
+}
+
+/**
+ * Vertical particle-velocity attenuation `sinh(k(z+h)) / sinh(kh)` (linear theory), written
+ * without overflow. It is 1 at the surface and 0 at the seabed.
+ */
+export function verticalAttenuation(k: number, z: number, h: number): number {
+  const zc = Math.max(z, -h);
+  if (k * h < 1e-6) return (zc + h) / h;
+  const num = Math.exp(k * zc) * (1 - Math.exp(-2 * k * (zc + h)));
+  const den = 1 - Math.exp(-2 * k * h);
   return num / den;
 }
 

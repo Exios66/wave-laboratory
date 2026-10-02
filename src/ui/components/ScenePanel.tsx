@@ -82,34 +82,32 @@ export function ScenePanel() {
 
   const addWave = (kind: WaveSystem['kind']) => {
     const w = newWaveSystem(kind, exp.waves.length);
-    lab().updateExperiment((d) => {
+    const added = lab().updateExperiment((d) => {
       d.waves.push(w);
     });
-    lab().select({ kind: 'wave', id: w.id });
+    if (added) lab().select({ kind: 'wave', id: w.id });
   };
   const addVessel = (type: VesselType) => {
     const v = newVessel(type, exp.vessels.length);
-    lab().updateExperiment((d) => {
+    const added = lab().updateExperiment((d) => {
       d.vessels.push(v);
     });
-    lab().select({ kind: 'vessel', id: v.id });
+    if (added) lab().select({ kind: 'vessel', id: v.id });
   };
   const addProbe = () => {
     const p = newProbe(exp.probes.length);
-    lab().updateExperiment((d) => {
+    const added = lab().updateExperiment((d) => {
       d.probes.push(p);
     });
-    lab().select({ kind: 'probe', id: p.id });
+    if (added) lab().select({ kind: 'probe', id: p.id });
   };
   const remove = (kind: 'waves' | 'vessels' | 'probes', id: string, label: string) => {
-    lab().updateExperiment((d) => {
-      (d[kind] as { id: string }[]).splice(
-        (d[kind] as { id: string }[]).findIndex((x) => x.id === id),
-        1,
-      );
+    const removed = lab().updateExperiment((d) => {
+      const list = d[kind] as { id: string }[];
+      const i = list.findIndex((x) => x.id === id);
+      if (i >= 0) list.splice(i, 1);
     });
-    if (selection && 'id' in selection && selection.id === id) lab().select(null);
-    lab().notify('info', `Removed ${label}. Undo with Ctrl+Z.`);
+    if (removed) lab().notify('info', `Removed ${label}. Undo with Ctrl+Z.`);
   };
 
   return (

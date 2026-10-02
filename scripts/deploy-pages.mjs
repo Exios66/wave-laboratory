@@ -3,14 +3,15 @@
  * Publish the production build onto this branch — no GitHub Actions and no gh-pages branch.
  *
  *   pnpm deploy:pages            build and commit the site here
- *   pnpm deploy:pages --dry-run  build the site files but do not commit
+ *   pnpm deploy:pages --dry-run  build the site into a temporary folder; touch nothing here
  *
  * GitHub Pages is "Deploy from a branch" → main → / (root). The same files are copied
  * into docs/ next to the markdown notes.
  * Asset paths are relative, so the site works at any URL prefix.
  */
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const dryRun = process.argv.includes('--dry-run');
@@ -44,7 +45,16 @@ console.info('› Building…');
 run('pnpm', ['run', 'build']);
 const indexHtml = builtIndex();
 
+/**
+ * Replace the site in `dir`. The new files are staged next to it first, so a failed copy never
+ * leaves a half-deleted site behind.
+ */
 const copySite = (dir, { preserve }) => {
+  const staged = mkdtempSync(join(tmpdir(), 'wave-lab-site-'));
+  cpSync(join(dist, 'assets'), join(staged, 'assets'), {
+    recursive: true,
+    filter: (src) => !src.endsWith('.map'),
+  });
   if (existsSync(dir)) {
     for (const entry of readdirSync(dir)) {
       if (preserve?.has(entry)) continue;
@@ -58,23 +68,24 @@ const copySite = (dir, { preserve }) => {
       }
     }
   }
-  cpSync(join(dist, 'assets'), join(dir, 'assets'), {
-    recursive: true,
-    filter: (src) => !src.endsWith('.map'),
-  });
+  cpSync(join(staged, 'assets'), join(dir, 'assets'), { recursive: true });
+  rmSync(staged, { recursive: true, force: true });
   cpSync(indexHtml, join(dir, 'index.html'));
   cpSync(indexHtml, join(dir, '404.html'));
   writeFileSync(join(dir, '.nojekyll'), '');
 };
 
+if (dryRun) {
+  // Never touch the committed site on a dry run: lay it out in a scratch folder instead.
+  const preview = mkdtempSync(join(tmpdir(), 'wave-lab-pages-'));
+  copySite(preview, {});
+  console.info(`› Dry run: the site was built into ${preview}; nothing here changed.`);
+  process.exit(0);
+}
+
 // Pages is configured as main / (root). docs/ gets the same build.
 copySite(root, {});
 copySite(docs, { preserve: KEEP });
-
-if (dryRun) {
-  console.info('› Dry run: docs/ updated, not committed.');
-  process.exit(0);
-}
 
 run('git', ['add', '--all', 'docs', 'index.html', '404.html', '.nojekyll', 'assets']);
 const changed = out('git', [

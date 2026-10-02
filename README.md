@@ -11,13 +11,22 @@ oceanographic wave spectra, drop ships into it, and measure how they handle the 
   Doppler shifts the whole sea and sets the ships. The dispersion relation
   includes finite depth and surface tension. The surface is synthesised from four FFT
   cascades (1 km swells down to centimetre ripples) with choppy (Lagrangian) displacement.
+- **Rogue waves:** a NewWave focused group (Tromans et al. 1991) can raise a Draupner-class
+  crest at a chosen place and time inside any sea.
+- **Weather:** gusts drawn from the von Kármán turbulence spectrum and carried downwind as
+  moving patches, squall fronts with a wind jump, veer and downpour, rain, cloud, fog and
+  lightning. A wind sea can follow the weather so the sea builds and turns with the wind, and
+  whitecap coverage follows Monahan's law. One-click situations go from calm to hurricane.
 - **Ships:** 6-DOF rigid-body dynamics. Forces come from pressure integration over the
   instantaneous wetted hull (hydrostatics + Froude–Krylov), sampled on up to 280 water
   columns, plus added mass, radiation and viscous damping, propulsion, rudder and autopilot.
-  Slamming, green water and capsize are detected. The hull you see is lofted more finely than
-  the physics mesh, with antifouling below the waterline, deck cargo and a foam wake that
-  does not feed back into the forces. A loading setting (light ballast to overloaded) sets the
-  displacement, and the ship floats at the matching draft.
+  Wind acts on every hull through its frontal and side areas, and the square-rigged pirate ship
+  sails on the wind alone, bracing and reefing as the wind changes. The fleet runs from a
+  lifeboat to a VLCC oil tanker and a Nimitz-class aircraft carrier. Slamming, green water and
+  capsize are detected. The hull you see is lofted more finely than the physics mesh, with
+  antifouling below the waterline, deck cargo and a foam wake that does not feed back into
+  the forces. A loading setting (light ballast to overloaded) sets the displacement, and the
+  ship floats at the matching draft.
 - **Instruments:** wave gauges, vessel motion recorders, Welch spectra, zero-crossing
   statistics, motion-sickness incidence and CSV export.
 - **What you see is what the ships feel.** The GPU renderer inverse-FFTs the same h₀ amplitudes
@@ -64,8 +73,8 @@ into [`docs/`](docs/) beside the markdown notes.
 [`vite.index.html`](vite.index.html); `pnpm dev` serves that file at `/`.
 
 1. `pnpm deploy:pages` builds the app and commits `index.html`, `assets/` and `docs/` on the
-   current branch. Use `--dry-run` to update the files without committing. Merge that commit
-   to `main`.
+   current branch. `--dry-run` builds the site into a temporary folder and changes nothing in
+   the repository. Merge that commit to `main`.
 2. Pages source, already set: **Settings → Pages → Deploy from a branch → `main` → `/ (root)`**.
 
 The site is served at `https://exios66.github.io/wave-laboratory/`. The build uses relative
@@ -73,14 +82,17 @@ paths, so it also works from any other static host or sub-folder.
 
 ## Using the lab
 
-1. Pick a **preset** or start a **new** experiment. The built-in presets are: moderate sea with
-   a container ship, North Sea winter storm, Southern Ocean swell plus wind sea, a Wigley hull
-   in a regular-wave tank, a box barge in beam seas, TMA swell in shallow water, and calm
-   harbour ripples.
+1. Pick a **preset** or start a **new** experiment. The built-in presets include a moderate
+   sea with a container ship, a rogue wave meeting a ship, a hurricane with a tanker and a
+   carrier, a pirate ship on a beam reach, a squall line, a North Sea winter storm, a Southern
+   Ocean swell plus wind sea, a Wigley hull in a regular-wave tank, a box barge in beam seas,
+   TMA swell in shallow water, and calm harbour ripples.
 2. In the **Scene** panel, add wave systems, vessels and wave gauges. Select anything to edit
    it in the **Inspector**. The inspector shows the WMO sea state (from Hs rounded to the
    nearest centimetre), Beaufort wind, and model-validity warnings. Tapping a vessel or gauge
-   on a phone opens the inspector.
+   on a phone opens the inspector. Select **Weather** in the Scene panel to pick a situation
+   (calm to hurricane, squall line, fog bank) or tune gustiness, squalls, rain, cloud,
+   visibility and lightning. The view shows the live wind and any squall or rain.
 3. Use the **dock** to play, pause, step or change speed, and to view time series, spectra and
    statistics. Chart legends sit under each plot. Statistics can be exported as CSV.
 4. **Save** the experiment as JSON, or **share** it as a link. Experiments are deterministic:
@@ -99,7 +111,8 @@ src/
   core/         maths, RNG, fixed-step clock, units
   schema/       versioned experiment format (Zod) and presets
   ocean/        dispersion, spectra, spreading, cascades, CPU FFT field
-  vessel/       hull geometry, hydrostatics, hydrodynamics, propulsion, control
+  vessel/       hull geometry, hydrostatics, hydrodynamics, wind loads, sails, control
+  weather/      gusts, squalls, rain, lightning and weather presets
   instruments/  signal analysis (PSD, statistics, MSI)
   sim/          simulation kernel, Web Worker, client
   render/       Three.js/WebGL 2 renderer (GPU FFT ocean in render/ocean, vessels, cameras)

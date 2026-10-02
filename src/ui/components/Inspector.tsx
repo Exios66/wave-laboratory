@@ -168,7 +168,7 @@ function EnvironmentInspector({ env, quality }: { env: Environment; quality: Oce
           label="Water depth"
           value={env.depth}
           min={2}
-          max={4000}
+          max={11000}
           step={1}
           unit="m"
           unitLabel="metres"
@@ -200,7 +200,7 @@ function EnvironmentInspector({ env, quality }: { env: Environment; quality: Oce
           label="Wind speed (10 m)"
           value={env.windSpeed}
           min={0}
-          max={40}
+          max={45}
           step={0.5}
           unit="m/s"
           unitLabel="metres per second"
@@ -627,7 +627,7 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
               label="Wind speed (10 m)"
               value={wave.windSpeed}
               min={1}
-              max={40}
+              max={45}
               step={0.5}
               unit="m/s"
               unitLabel="metres per second"
@@ -638,7 +638,7 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
             label="Fetch"
             value={wave.fetchKm}
             min={0.5}
-            max={2000}
+            max={5000}
             step={0.5}
             unit="km"
             unitLabel="kilometres"
@@ -678,7 +678,7 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
             label="Focus time"
             value={wave.focusTime}
             min={0}
-            max={600}
+            max={3600}
             step={5}
             unit="s"
             unitLabel="seconds"
@@ -689,7 +689,7 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
             label="Focus east (x)"
             value={wave.focusX}
             min={-2000}
-            max={2000}
+            max={5000}
             step={5}
             unit="m"
             unitLabel="metres"
@@ -699,7 +699,7 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
             label="Focus north (y)"
             value={wave.focusY}
             min={-2000}
-            max={2000}
+            max={5000}
             step={5}
             unit="m"
             unitLabel="metres"
@@ -932,8 +932,7 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
           unit="°"
           unitLabel="degrees"
           onCommit={(v) => {
-            update((x) => void (x.headingDeg = v), false);
-            live({ headingDeg: v });
+            if (update((x) => void (x.headingDeg = v), false)) live({ headingDeg: v });
           }}
           hint="Compass course the bow points toward. Applied live."
         />
@@ -941,13 +940,12 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
           label="Speed"
           value={vessel.speedKn}
           min={0}
-          max={Math.max(5, Math.round(((def?.maxSpeed ?? 10) / 0.5144) * 1.1))}
+          max={Math.min(40, Math.max(5, Math.round(((def?.maxSpeed ?? 10) / 0.5144) * 1.1)))}
           step={0.5}
           unit="kn"
           unitLabel="knots"
           onCommit={(v) => {
-            update((x) => void (x.speedKn = v), false);
-            live({ speedKn: v });
+            if (update((x) => void (x.speedKn = v), false)) live({ speedKn: v });
           }}
         />
         {!vessel.autopilot && (

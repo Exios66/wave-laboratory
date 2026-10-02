@@ -41,3 +41,16 @@ describe('experiment schema', () => {
     expect(presetExperiment().name).not.toBe('changed');
   });
 });
+
+describe('hostile input', () => {
+  it('rejects ids that could break CSV headers and far-away positions', () => {
+    const exp = structuredClone(presetExperiment('moderate-sea'));
+    exp.vessels[0]!.id = '=HYPERLINK("x"),a';
+    expect(parseExperiment(exp).ok).toBe(false);
+    const far = structuredClone(presetExperiment('moderate-sea'));
+    far.vessels[0]!.x = 1e300;
+    expect(parseExperiment(far).ok).toBe(false);
+    expect(decodeExperiment('A'.repeat(300_000)).ok).toBe(false);
+    expect(decodeExperiment(encodeExperiment(presetExperiment('moderate-sea'))).ok).toBe(true);
+  });
+});

@@ -98,13 +98,12 @@ function useGlobalShortcuts(): void {
           const sel = lab.selection;
           if (!sel || sel.kind === 'environment' || sel.kind === 'weather') return;
           const key = sel.kind === 'wave' ? 'waves' : sel.kind === 'vessel' ? 'vessels' : 'probes';
-          lab.updateExperiment((d) => {
+          const removed = lab.updateExperiment((d) => {
             const list = d[key] as { id: string }[];
             const i = list.findIndex((x) => x.id === sel.id);
             if (i >= 0) list.splice(i, 1);
           });
-          lab.select(null);
-          lab.notify('info', 'Item removed. Undo with Ctrl+Z.');
+          if (removed) lab.notify('info', 'Item removed. Undo with Ctrl+Z.');
           break;
         }
         case '?':
@@ -130,14 +129,20 @@ function useTheme(): void {
 
 function useInitialExperimentFromUrl(): void {
   useEffect(() => {
-    const r = experimentFromLocation();
-    if (!r) return;
-    if (r.ok)
-      useLab
-        .getState()
-        .loadExperiment(r.experiment, `Loaded shared experiment “${r.experiment.name}”`);
-    else useLab.getState().notify('error', `The shared link is invalid: ${r.errors[0] ?? ''}`);
-    history.replaceState(null, '', window.location.pathname + window.location.search);
+    const load = () => {
+      const r = experimentFromLocation();
+      if (!r) return;
+      if (r.ok)
+        useLab
+          .getState()
+          .loadExperiment(r.experiment, `Loaded shared experiment “${r.experiment.name}”`);
+      else useLab.getState().notify('error', `The shared link is invalid: ${r.errors[0] ?? ''}`);
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    };
+    load();
+    // A share link pasted into an already open tab only changes the hash.
+    window.addEventListener('hashchange', load);
+    return () => window.removeEventListener('hashchange', load);
   }, []);
 }
 

@@ -81,7 +81,8 @@ export interface LabState {
   duckMode: boolean;
 
   // actions
-  updateExperiment(recipe: (draft: Experiment) => void, opts?: { reload?: boolean }): void;
+  /** Apply an edit; returns false (and shows why) when the result fails validation. */
+  updateExperiment(recipe: (draft: Experiment) => void, opts?: { reload?: boolean }): boolean;
   loadExperiment(exp: Experiment, message?: string): void;
   undo(): void;
   redo(): void;
@@ -109,6 +110,32 @@ export interface LabState {
 }
 
 const HISTORY_LIMIT = 100;
+
+/** Reloading never hides an "unsupported" (no WebGL 2) state. */
+function loadingStatus(status: SimStatus): SimStatus {
+  return status === 'unsupported' ? status : 'loading';
+}
+
+/**
+ * Selection and camera target must name something that exists. After an edit, undo or redo
+ * removes an item, drop the dangling id (and fall back to the orbit camera if it was followed).
+ */
+function dropMissingTargets(
+  exp: Experiment,
+  s: Pick<LabState, 'selection' | 'cameraTarget' | 'camera'>,
+): Partial<LabState> {
+  const out: Partial<LabState> = {};
+  const sel = s.selection;
+  if (sel && 'id' in sel) {
+    const list = sel.kind === 'wave' ? exp.waves : sel.kind === 'vessel' ? exp.vessels : exp.probes;
+    if (!list.some((x) => x.id === sel.id)) out.selection = null;
+  }
+  if (s.cameraTarget && !exp.vessels.some((v) => v.id === s.cameraTarget)) {
+    out.cameraTarget = null;
+    if (s.camera === 'follow' || s.camera === 'bridge') out.camera = 'orbit';
+  }
+  return out;
+}
 let noticeId = 0;
 
 function readPerformance(): PerformanceMode {
@@ -193,7 +220,7 @@ export const useLab = create<LabState>()((set, get) => ({
     const parsed = parseExperiment(draft);
     if (!parsed.ok) {
       get().notify('error', `Change rejected: ${parsed.errors[0] ?? 'invalid value'}`);
-      return;
+      return false;
     }
     const reload = opts?.reload ?? true;
     set((s) => ({
@@ -202,8 +229,10 @@ export const useLab = create<LabState>()((set, get) => ({
       future: [],
       dirty: true,
       revision: reload ? s.revision + 1 : s.revision,
-      status: reload ? 'loading' : s.status,
+      status: reload ? loadingStatus(s.status) : s.status,
+      ...dropMissingTargets(parsed.experiment, s),
     }));
+    return true;
   },
 
   loadExperiment(exp, message) {
@@ -218,7 +247,7 @@ export const useLab = create<LabState>()((set, get) => ({
       future: [],
       dirty: false,
       revision: s.revision + 1,
-      status: 'loading',
+      status: loadingStatus(s.status),
       selection: null,
       cameraTarget: null,
       camera: s.camera === 'orbit' || s.camera === 'top' ? s.camera : 'orbit',
@@ -235,8 +264,9 @@ export const useLab = create<LabState>()((set, get) => ({
       past: past.slice(0, -1),
       future: [experiment, ...future].slice(0, HISTORY_LIMIT),
       revision: s.revision + 1,
-      status: 'loading',
+      status: loadingStatus(s.status),
       dirty: true,
+      ...dropMissingTargets(prev, s),
     }));
     get().notify('info', 'Undone');
   },
@@ -250,8 +280,9 @@ export const useLab = create<LabState>()((set, get) => ({
       past: [...past, experiment].slice(-HISTORY_LIMIT),
       future: future.slice(1),
       revision: s.revision + 1,
-      status: 'loading',
+      status: loadingStatus(s.status),
       dirty: true,
+      ...dropMissingTargets(next, s),
     }));
     get().notify('info', 'Redone');
   },
@@ -324,7 +355,12 @@ export const useLab = create<LabState>()((set, get) => ({
   },
 
   simLoaded(vesselDefinitions, diagnostics) {
-    set({ vesselDefinitions, diagnostics, status: 'ready', error: null });
+    // A missing WebGL 2 renderer stays reported: the simulation alone cannot show anything.
+    set((s) =>
+      s.status === 'unsupported'
+        ? { vesselDefinitions, diagnostics }
+        : { vesselDefinitions, diagnostics, status: 'ready', error: null },
+    );
   },
   simFrame(frame) {
     set({ frame });

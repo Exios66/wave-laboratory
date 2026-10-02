@@ -328,8 +328,9 @@ vec3 regularSample(vec2 worldXY, float h, out vec4 slope) {
     float c = cos(theta);
     float coth = b.z;
     float sigma = 1.0 / max(coth, 1.0e-3);
+    // Same as stokesSecondAmplitude(): held at a/4 so shallow water gets no second crest.
     float a2 = (uLambda > 0.001 && b.w > 0.5)
-      ? (a.z * amp * amp * 0.25) * (3.0 - sigma * sigma) / (sigma * sigma * sigma)
+      ? min((a.z * amp * amp * 0.25) * (3.0 - sigma * sigma) / (sigma * sigma * sigma), 0.25 * amp)
       : 0.0;
     float horiz = -uLambda * amp * coth * s;
     d.x += horiz * b.x;

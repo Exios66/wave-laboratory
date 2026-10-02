@@ -250,7 +250,7 @@ export class Vessel {
     }
     if (this.autopilotOn) {
       // Start with the steady-state thrust for the initial speed (no start-up transient).
-      const r = this.s.u / def.maxSpeed;
+      const r = Math.min(1, Math.max(0, this.s.u / def.maxSpeed));
       this.throttle = r * r;
       this.thrust = this.throttle * def.propulsion.maxThrust;
     }
