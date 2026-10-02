@@ -3,6 +3,7 @@ import { LabRenderer } from '../../render/LabRenderer';
 import type { CameraMode, OverlayMode } from '../../render/api';
 import { getRuntime } from '../runtime';
 import { useLab } from '../store';
+import { dayPhase, formatClock } from './clock';
 import { fmt } from './fields';
 
 const CAMERAS: { mode: CameraMode; label: string; needsVessel: boolean }[] = [
@@ -131,6 +132,7 @@ function Hud() {
               <dt>Hs</dt>
               <dd>{fmt(hs, 2, 'm')}</dd>
             </div>
+            <HudClock />
             {lagging && (
               <div>
                 <dt className="visually-hidden">Status</dt>
@@ -203,6 +205,48 @@ function Hud() {
         </div>
         {overlay !== 'none' && <Legend mode={overlay} />}
       </div>
+    </div>
+  );
+}
+
+const PHASE_LABEL = { night: 'night', dawn: 'dawn', day: 'daytime', dusk: 'dusk' } as const;
+
+/** Clock time of the day:night cycle with a sun or moon glyph. Hidden when the cycle is off. */
+function HudClock() {
+  const on = useLab((s) => s.ambience.dayNight);
+  const clock = useLab((s) => formatClock(s.timeOfDay));
+  const phase = useLab((s) => dayPhase(s.timeOfDay));
+  if (!on) return null;
+  const moon = phase === 'night';
+  return (
+    <div className="hud__clock" title="Time of day (Settings → Day & night)">
+      <dt>
+        <svg
+          viewBox="0 0 16 16"
+          width="13"
+          height="13"
+          aria-hidden="true"
+          focusable="false"
+          style={{ verticalAlign: '-2px' }}
+        >
+          {moon ? (
+            <path d="M10.5 1.5a6.5 6.5 0 1 0 4 11.2A5.5 5.5 0 0 1 10.5 1.5z" fill="#c7d2fe" />
+          ) : (
+            <g fill="none" stroke={phase === 'day' ? '#fcd34d' : '#fb923c'} strokeWidth="1.6">
+              <circle cx="8" cy="8" r="3.2" fill={phase === 'day' ? '#fcd34d' : '#fb923c'} />
+              <path
+                d="M8 .8v2.2M8 13v2.2M.8 8H3M13 8h2.2M2.9 2.9l1.6 1.6M11.5 11.5l1.6 1.6M2.9 13.1l1.6-1.6M11.5 4.5l1.6-1.6"
+                strokeLinecap="round"
+              />
+            </g>
+          )}
+        </svg>
+        <span className="visually-hidden">Time of day</span>
+      </dt>
+      <dd>
+        <time>{clock}</time>
+        <span className="visually-hidden">, {PHASE_LABEL[phase]}</span>
+      </dd>
     </div>
   );
 }

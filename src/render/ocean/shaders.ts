@@ -132,6 +132,11 @@ void main() {
 `;
 
 const SKY = /* glsl */ `
+// Day:night and weather (see scenery/lighting.ts). All 0 = the plain clear-day sky.
+uniform float uNight;
+uniform float uDusk;
+uniform float uOvercast;
+uniform vec3 uMoonDir;
 vec3 srgbToLinear(vec3 c) {
   vec3 lo = c / 12.92;
   vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
@@ -142,11 +147,42 @@ vec3 skyColor(vec3 dir, vec3 sun) {
   vec3 horizon = srgbToLinear(vec3(0.78, 0.84, 0.90));
   vec3 zenith = srgbToLinear(vec3(0.16, 0.38, 0.72));
   vec3 below = srgbToLinear(vec3(0.45, 0.55, 0.62));
-  vec3 col = dir.y >= 0.0 ? mix(horizon, zenith, pow(clamp(dir.y, 0.0, 1.0), 0.55)) : mix(horizon, below, clamp(-dir.y, 0.0, 1.0));
-  float sunDisc = pow(max(dot(normalize(dir), sun), 0.0), 1400.0);
-  float glow = pow(max(dot(normalize(dir), sun), 0.0), 8.0);
-  col += srgbToLinear(vec3(1.0, 0.96, 0.88)) * sunDisc;
-  col += srgbToLinear(vec3(1.0, 0.85, 0.65)) * glow * 0.28;
+  float up = pow(clamp(dir.y, 0.0, 1.0), 0.55);
+  vec3 col = dir.y >= 0.0 ? mix(horizon, zenith, up) : mix(horizon, below, clamp(-dir.y, 0.0, 1.0));
+  vec3 nd = normalize(dir);
+  if (uDusk > 0.001) {
+    // Golden hour: warm band low in the sky, strongest toward the sun, violet-blue above.
+    vec2 hd = normalize(nd.xz + vec2(1e-5));
+    vec2 hs = normalize(sun.xz + vec2(1e-5));
+    float toward = 0.5 + 0.5 * dot(hd, hs);
+    float low = 1.0 - smoothstep(-0.05, 0.45, abs(nd.y));
+    vec3 warm = mix(srgbToLinear(vec3(0.98, 0.72, 0.52)), srgbToLinear(vec3(1.0, 0.52, 0.26)), toward);
+    col = mix(col, warm, uDusk * low * mix(0.45, 0.95, toward * toward));
+    col = mix(col, srgbToLinear(vec3(0.30, 0.34, 0.62)), uDusk * up * 0.35);
+  }
+  float sd = max(dot(nd, sun), 0.0);
+  float sunVis = 1.0 - uOvercast * 0.85;
+  float sunGate = 1.0 - uNight * (1.0 - smoothstep(-0.06, 0.0, sun.y));
+  float sunDisc = pow(sd, 1400.0) * sunGate;
+  float glow = pow(sd, 8.0);
+  vec3 glowCol = mix(srgbToLinear(vec3(1.0, 0.85, 0.65)), srgbToLinear(vec3(1.0, 0.55, 0.25)), uDusk);
+  if (uNight > 0.001) {
+    vec3 nHorizon = srgbToLinear(vec3(0.15, 0.20, 0.30));
+    vec3 nZenith = srgbToLinear(vec3(0.04, 0.07, 0.15));
+    vec3 nCol = dir.y >= 0.0 ? mix(nHorizon, nZenith, up) : mix(nHorizon, nZenith, clamp(-dir.y, 0.0, 1.0));
+    col = mix(col, nCol, uNight);
+    float md = max(dot(nd, uMoonDir), 0.0);
+    float moonUp = smoothstep(-0.04, 0.02, uMoonDir.y) * uNight * (1.0 - uOvercast * 0.9);
+    col += srgbToLinear(vec3(0.85, 0.90, 1.0)) * (smoothstep(0.99965, 0.99985, md) * 0.9 + pow(md, 60.0) * 0.06) * moonUp;
+  }
+  if (uOvercast > 0.001) {
+    vec3 gH = srgbToLinear(vec3(0.55, 0.58, 0.61));
+    vec3 gZ = srgbToLinear(vec3(0.36, 0.39, 0.44));
+    vec3 grey = mix(gH, gZ, clamp(abs(dir.y), 0.0, 1.0)) * (1.0 - 0.82 * uNight);
+    col = mix(col, grey, uOvercast * 0.85);
+  }
+  col += srgbToLinear(vec3(1.0, 0.96, 0.88)) * sunDisc * sunVis * sunVis;
+  col += glowCol * glow * (0.28 + 0.35 * uDusk) * sunVis * (1.0 - uNight * (1.0 - smoothstep(-0.2, 0.0, sun.y)));
   return col;
 }
 `;
@@ -244,6 +280,8 @@ uniform float uHs;
 uniform float uOverlay;
 uniform vec3 uFogColor;
 uniform float uFogDensity;
+uniform float uWaterDim;
+uniform float uGlintDim;
 uniform float uWakeCount;
 uniform vec4 uWakeA[4];
 uniform vec4 uWakeB[4];
@@ -324,16 +362,20 @@ void main() {
   float crest = clamp(vEta / max(uHs, 0.4) * 0.5 + 0.5, 0.0, 1.0);
   vec3 deep = srgbToLinear(vec3(0.015, 0.07, 0.12));
   vec3 shallow = srgbToLinear(vec3(0.04, 0.38, 0.46));
-  vec3 water = mix(deep, shallow, crest);
+  vec3 water = mix(deep, shallow, crest) * (1.0 - uWaterDim);
+  water = mix(water, vec3(dot(water, vec3(0.2126, 0.7152, 0.0722))), uOvercast * 0.55);
   vec3 col = mix(water, reflection, fresnel);
   float sun = max(dot(normalize(R), uSunDir), 0.0);
   float spec = pow(sun, 90.0) * 0.35 + pow(sun, 1400.0);
-  col += srgbToLinear(vec3(1.0, 0.97, 0.90)) * spec * (0.4 + 0.6 * fresnel);
-  col += srgbToLinear(vec3(0.10, 0.40, 0.38)) * pow(crest, 2.0) * (1.0 - fresnel) * 0.45;
+  vec3 glint = mix(srgbToLinear(vec3(1.0, 0.97, 0.90)), srgbToLinear(vec3(1.0, 0.68, 0.40)), uDusk);
+  col += glint * spec * (0.4 + 0.6 * fresnel) * (1.0 - uGlintDim);
+  float moonGlint = pow(max(dot(normalize(R), uMoonDir), 0.0), 220.0) * uNight * (1.0 - uOvercast);
+  col += srgbToLinear(vec3(0.75, 0.82, 0.95)) * moonGlint * 0.5 * step(0.0, uMoonDir.y);
+  col += srgbToLinear(vec3(0.10, 0.40, 0.38)) * pow(crest, 2.0) * (1.0 - fresnel) * 0.45 * (1.0 - uWaterDim);
   float foamGate = mix(0.45, 0.75, clamp(uWind / 28.0, 0.0, 1.0));
   float foam = 1.0 - smoothstep(foamGate - 0.35, foamGate, vJacobian);
   foam = clamp(foam + smoothstep(0.22, 0.45, vSlope) * 0.35 + wakeFoam(worldXY), 0.0, 1.0);
-  col = mix(col, srgbToLinear(vec3(0.90, 0.94, 0.96)), foam * 0.9);
+  col = mix(col, srgbToLinear(vec3(0.90, 0.94, 0.96)) * (1.0 - uWaterDim * 0.85), foam * 0.9);
 
   if (uOverlay > 0.5 && uOverlay < 1.5) {
     float u = clamp(vEta / max(0.25, uHs * 0.75) * 0.5 + 0.5, 0.0, 1.0);
@@ -375,10 +417,24 @@ void main() {
 
 export const SKY_FRAG = /* glsl */ `
 uniform vec3 uSunDir;
+uniform float uStars;
 varying vec3 vDir;
 ${SKY}
+// Cheap procedural star field on the dome (not in the sea: reflected stars only shimmer).
+float stars(vec3 d) {
+  vec3 p = d * 260.0;
+  vec3 cell = floor(p);
+  float n = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+  if (n < 0.985) return 0.0;
+  vec3 f = fract(p) - 0.5;
+  float r = length(f);
+  return smoothstep(0.32, 0.0, r) * (n - 0.985) / 0.015;
+}
 void main() {
-  gl_FragColor = vec4(skyColor(normalize(vDir), uSunDir), 1.0);
+  vec3 dir = normalize(vDir);
+  vec3 col = skyColor(dir, uSunDir);
+  if (uStars > 0.001 && dir.y > 0.0) col += vec3(0.75, 0.8, 0.9) * stars(dir) * uStars * smoothstep(0.0, 0.18, dir.y);
+  gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
