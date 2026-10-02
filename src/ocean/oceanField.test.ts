@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { env, jonswap, regular } from '../test/fixtures';
 import { buildCascadeSpectrum, cascadeSpecs, CASCADE_SIZES } from './cascades';
-import { pressureAttenuation, wavenumberOf } from './dispersion';
+import { pressureAttenuation, stokesSecondAmplitude, wavenumberOf } from './dispersion';
 import { OceanField } from './oceanField';
 import { resolveSea } from './systems';
 
@@ -91,7 +91,14 @@ describe('OceanField', () => {
     const f = new OceanField([regular(4, 10, 270)], e);
     // The world point that the crest particle (label 0) moves to is the crest itself.
     const t = 0;
-    expect(f.surface(0, 0, t).eta).toBeCloseTo(2, 6);
+    const kExact = wavenumberOf((2 * Math.PI) / 10, {
+      gravity: e.gravity,
+      depth: e.depth,
+      tensionOverDensity: e.surfaceTension / e.waterDensity,
+    });
+    const crest = 2 + stokesSecondAmplitude(2, kExact, e.depth);
+    expect(f.surface(0, 0, t).eta).toBeCloseTo(crest, 4);
+    expect(f.surface(Math.PI / kExact, 0, t).eta).toBeGreaterThan(-2);
     // Trochoid (Gerstner) profile: sharp crests, flat troughs, and an Eulerian mean level of
     // exactly −k a²/2 — a classic analytic check of the choppy inversion.
     let sum = 0;
