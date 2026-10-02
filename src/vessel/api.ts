@@ -19,7 +19,65 @@ export interface VisualBox {
   center: Vec3;
   size: Vec3;
   /** Material hint for the renderer. */
-  material: 'hull' | 'deck' | 'superstructure' | 'glass' | 'cargo' | 'accent';
+  material: VisualMaterial;
+  /** Rotation about the vertical axis [deg] (e.g. a carrier's angled flight deck). */
+  yawDeg?: number;
+}
+
+export type VisualMaterial =
+  | 'hull'
+  | 'deck'
+  | 'superstructure'
+  | 'glass'
+  | 'cargo'
+  | 'accent'
+  | 'wood'
+  | 'gold'
+  | 'flightdeck'
+  | 'sail'
+  | 'flag';
+
+/** Hull paint: below the boot top, the boot-top band and the topsides (sRGB hex). */
+export interface HullPaint {
+  bottom: number;
+  boot: number;
+  topside: number;
+}
+
+/**
+ * Projected areas above the design waterline that catch the wind, and their centroids (body
+ * frame relative to the CoG). Computed by rasterising the hull profile and the superstructure
+ * onto the centre plane (lateral) and the midship section (frontal), so overlapping parts are
+ * counted once.
+ */
+export interface WindageSpec {
+  lateralArea: number;
+  frontalArea: number;
+  lateralCentre: Vec3;
+  frontalCentreZ: number;
+}
+
+/** One mast of a square rig (body frame relative to CoG). */
+export interface MastSpec {
+  x: number;
+  /** Foot (deck) and truck (top) heights. */
+  zFoot: number;
+  zTop: number;
+  /** Square sails from the lowest course upward: yard height, half span, depth of the sail. */
+  sails: { zYard: number; halfSpan: number; drop: number }[];
+}
+
+/**
+ * Sail plan of a square-rigged ship. The sails are one aerodynamic surface of `area` acting at
+ * `centre`; the crew braces the yards between `minBraceDeg` from the centre line and square.
+ */
+export interface SailPlan {
+  area: number;
+  centre: Vec3;
+  minBraceDeg: number;
+  masts: MastSpec[];
+  /** Bowsprit tip (jib stay) for drawing. */
+  bowsprit: Vec3;
 }
 
 export interface VesselDefinition {
@@ -57,6 +115,17 @@ export interface VesselDefinition {
   hydrostatics: DesignHydrostatics;
   /** Indices of `physicsHull` vertices on the deck edge (green-water detection). */
   deckEdgeVertices: Uint32Array;
+  windage: WindageSpec;
+  /** Sail plan (sailing ships; they have no engine). */
+  sails: SailPlan | null;
+  paint: HullPaint;
+  /**
+   * Keel/deadwood fin aft of a traditional sailing hull (lateral area [m²] and its centre x,
+   * body frame). It moves the centre of lateral resistance aft and makes the hull course-stable.
+   */
+  keelFin: { area: number; x: number } | null;
+  /** Per-material colour overrides for the superstructure (sRGB hex). */
+  palette: Partial<Record<VisualMaterial, number>>;
 }
 
 export interface VesselPoints {
@@ -159,4 +228,15 @@ export interface VesselTelemetry extends VesselKinematics {
   greenWater: boolean;
   /** Heel beyond the angle of vanishing stability or inverted. */
   capsized: boolean;
+  /** True wind at the vessel (10 m), speed [m/s] and compass bearing it comes FROM [deg]. */
+  windSpeed: number;
+  windFromDeg: number;
+  /** Apparent wind speed [m/s] and angle off the bow [deg] (+ = from port). */
+  apparentWind: number;
+  apparentWindAngleDeg: number;
+  /** Wind force on the vessel (above-water windage + sails), magnitude [N]. */
+  windForce: number;
+  /** Sails (sailing ships): fraction of canvas set 0–1 and yard brace angle [deg]. */
+  sailSet: number;
+  braceDeg: number;
 }

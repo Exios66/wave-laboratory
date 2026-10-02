@@ -49,6 +49,11 @@ export const SpectrumSystemSchema = z.object({
 export const WindSeaSystemSchema = z.object({
   ...waveSystemBase,
   kind: z.literal('wind'),
+  /**
+   * Take wind speed and direction from the weather (environment wind) instead of the values
+   * below, so the sea builds and veers with the weather you set.
+   */
+  followWeather: z.boolean().default(false),
   /** 10 m wind speed [m/s]. */
   windSpeed: finite().min(0).max(45),
   /** Fetch [km]. Sea becomes fully developed (Pierson–Moskowitz) for long fetches. */
@@ -67,15 +72,37 @@ export const RegularWaveSystemSchema = z.object({
   phaseDeg: finite().min(-360).max(360).default(0),
 });
 
+/**
+ * Focused wave group ("NewWave", Tromans et al. 1991): the linear components of a JONSWAP sea
+ * phased so that their crests coincide at one place and time. The standard deterministic
+ * model of an extreme (rogue) crest such as the 1995 Draupner wave.
+ */
+export const FocusedWaveSystemSchema = z.object({
+  ...waveSystemBase,
+  kind: z.literal('focused'),
+  /** Linear crest elevation at the focus [m]. */
+  crestHeight: finite().min(0).max(30),
+  /** Peak period of the underlying spectrum [s]. */
+  tp: finite().min(2).max(25),
+  /** Focus point [m] and time [s]. */
+  focusX: finite().min(-5000).max(5000).default(0),
+  focusY: finite().min(-5000).max(5000).default(0),
+  focusTime: finite().min(0).max(3600).default(60),
+  /** Seed for the slight frequency jitter that stops the group refocusing periodically. */
+  seed: z.number().int().min(0).max(0xffffffff).default(1),
+});
+
 export const WaveSystemSchema = z.discriminatedUnion('kind', [
   SpectrumSystemSchema,
   WindSeaSystemSchema,
   RegularWaveSystemSchema,
+  FocusedWaveSystemSchema,
 ]);
 export type WaveSystem = z.infer<typeof WaveSystemSchema>;
 export type SpectrumSystem = z.infer<typeof SpectrumSystemSchema>;
 export type WindSeaSystem = z.infer<typeof WindSeaSystemSchema>;
 export type RegularWaveSystem = z.infer<typeof RegularWaveSystemSchema>;
+export type FocusedWaveSystem = z.infer<typeof FocusedWaveSystemSchema>;
 
 export const EnvironmentSchema = z.object({
   /** Still-water depth [m]. Values ≥ 1000 behave as deep water. */
@@ -95,6 +122,46 @@ export const EnvironmentSchema = z.object({
 });
 export type Environment = z.infer<typeof EnvironmentSchema>;
 
+export const SquallSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** Mean time between squall fronts [min]. */
+  intervalMin: finite().min(2).max(120).default(12),
+  /** Duration of the strong-wind part of a squall [min]. */
+  durationMin: finite().min(0.5).max(30).default(4),
+  /** Peak wind as a multiple of the mean wind (typical 1.4–2). */
+  strength: finite().min(1).max(2.5).default(1.6),
+  /** Wind veer through a squall [deg] (positive = clockwise). */
+  veerDeg: finite().min(-90).max(90).default(30),
+});
+export type Squall = z.infer<typeof SquallSchema>;
+
+/**
+ * Weather around the mean wind of the environment. Gusts and squalls act on the vessels
+ * (windage, sails) and on the picture; rain, cloud, visibility and lightning are visual.
+ */
+export const WeatherSchema = z.object({
+  /** Longitudinal turbulence intensity σ_u / U (open sea 0.06–0.12, squally 0.2+). */
+  gustiness: finite().min(0).max(0.4).default(0.1),
+  squalls: SquallSchema.default({
+    enabled: false,
+    intervalMin: 12,
+    durationMin: 4,
+    strength: 1.6,
+    veerDeg: 30,
+  }),
+  /** Rain rate [mm/h] (moderate 2–10, heavy 10–50, violent > 50). */
+  rainMmH: finite().min(0).max(150).default(0),
+  /** Cloud cover fraction 0–1 (0 clear, 1 overcast). */
+  cloudCover: finite().min(0).max(1).default(0.25),
+  /** Meteorological visibility [km]. */
+  visibilityKm: finite().min(0.1).max(60).default(40),
+  lightning: z.boolean().default(false),
+  seed: z.number().int().min(0).max(0xffffffff).default(7),
+});
+export type Weather = z.infer<typeof WeatherSchema>;
+
+export const DEFAULT_WEATHER: Weather = WeatherSchema.parse({});
+
 export const VesselTypeSchema = z.enum([
   'box-barge',
   'wigley',
@@ -102,6 +169,9 @@ export const VesselTypeSchema = z.enum([
   'trawler',
   'patrol-boat',
   'lifeboat',
+  'oil-tanker',
+  'aircraft-carrier',
+  'pirate-ship',
 ]);
 export type VesselType = z.infer<typeof VesselTypeSchema>;
 
@@ -141,6 +211,7 @@ export const ExperimentSchema = z.object({
   name: z.string().min(1).max(80),
   description: z.string().max(2000).default(''),
   environment: EnvironmentSchema,
+  weather: WeatherSchema.default(DEFAULT_WEATHER),
   waves: z.array(WaveSystemSchema).max(8),
   vessels: z.array(VesselSchema).max(8),
   probes: z.array(ProbeSchema).max(8),

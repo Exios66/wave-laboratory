@@ -268,11 +268,34 @@ export function buildHydroModel(def: VesselDefinition, rho: number, g: number): 
     bwl,
     formFactor: formFactor(cb, lwl, bwl, T),
     blockCoefficient: cb,
-    clarke: clarkeDerivatives(lwl, bwl, T, cb),
+    clarke: withKeelFin(clarkeDerivatives(lwl, bwl, T, cb), def.keelFin, lwl),
     lateralZ: zWl - 0.5 * T,
     slamThreshold: ochiThreshold(g, lwl),
     slamRegionX: props.wlMinX + 0.7 * lwl,
     rudderLiftSlope: rudderLiftSlope(def.propulsion.rudderAspectRatio),
+  };
+}
+
+/**
+ * Add a low-aspect-ratio keel/deadwood fin to the linear manoeuvring derivatives. Its lift
+ * slope is that of a slender wing, dC_L/dβ = πΛ/2 with Λ ≈ 0.5 (Jones 1946); a fin of area A
+ * at x_f contributes Y'_v = −A C_Lβ / L², N'_v = Y'_v x_f/L, Y'_r = Y'_v x_f/L and
+ * N'_r = Y'_v (x_f/L)² (the local cross-flow is v + r x_f).
+ */
+function withKeelFin(
+  c: { yv: number; yr: number; nv: number; nr: number },
+  fin: VesselDefinition['keelFin'],
+  lwl: number,
+): { yv: number; yr: number; nv: number; nr: number } {
+  if (!fin) return c;
+  const slope = (Math.PI * 0.5) / 2;
+  const dyv = -(fin.area * slope) / (lwl * lwl);
+  const xf = fin.x / lwl;
+  return {
+    yv: c.yv + dyv,
+    nv: c.nv + dyv * xf,
+    yr: c.yr + dyv * xf,
+    nr: c.nr + dyv * xf * xf,
   };
 }
 
