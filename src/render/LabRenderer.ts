@@ -11,6 +11,18 @@ import type { VesselDefinition } from '../vessel/api';
 import type { CameraMode, LabRendererApi, OverlayMode, PickResult, RendererStats } from './api';
 import { GpuOcean } from './ocean/GpuOcean';
 import { OCEAN_FRAG, OCEAN_VERT, SKY_FRAG, SKY_VERT } from './ocean/shaders';
+import { calmFromConditions, ease } from './scenery/ambience';
+import { SeabirdLayer } from './scenery/birds';
+import { IslandLayer } from './scenery/islands';
+import { SkyLighting } from './scenery/lighting';
+import { SailorLayer } from './scenery/sailors';
+import {
+  DEFAULT_AMBIENCE,
+  type AmbienceSettings,
+  type SceneryFrame,
+  type SceneryLayer,
+} from './scenery/types';
+import { WildlifeLayer } from './scenery/wildlife';
 
 export interface LabRendererOptions {
   onContextLost?: () => void;
@@ -102,6 +114,13 @@ export class LabRenderer implements LabRendererApi {
   private readonly oceanMesh: THREE.Mesh;
   private readonly sky: THREE.Mesh;
   private readonly sun: THREE.DirectionalLight;
+  private readonly hemi: THREE.HemisphereLight;
+  private readonly lighting: SkyLighting;
+  private readonly islands = new IslandLayer();
+  private readonly wildlife = new WildlifeLayer();
+  private readonly birds = new SeabirdLayer();
+  private readonly sailors = new SailorLayer();
+  private readonly layers: SceneryLayer[] = [this.islands, this.wildlife, this.birds, this.sailors];
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
   private readonly vessels = new Map<string, VesselView>();
@@ -137,6 +156,16 @@ export class LabRenderer implements LabRendererApi {
   private fpsFrames = 0;
   private fpsElapsed = 0;
   private disposed = false;
+  private env: Environment | null = null;
+  private hs = 1;
+  private ambience: AmbienceSettings = { ...DEFAULT_AMBIENCE };
+  private timeOfDay: number | null = null;
+  private storminess: number | null = null;
+  private calm = 1;
+  private calmPrimed = false;
+  private wallT = 0;
+  private lastRenderAt = 0;
+  private readonly vesselPositions: THREE.Vector3[] = [];
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -204,10 +233,26 @@ export class LabRenderer implements LabRendererApi {
     this.sky.frustumCulled = false;
     this.scene.add(this.sky);
 
-    this.scene.add(new THREE.HemisphereLight(0xc5ddf2, 0x1c3344, 0.9));
+    this.hemi = new THREE.HemisphereLight(0xc5ddf2, 0x1c3344, 0.9);
+    this.scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(0xfff4e0, 2.4);
     this.sun.position.set(400, 800, 200);
     this.scene.add(this.sun);
+    // Scenery fades into the same haze as the sea (ocean fog is 1 − exp(−d²·density)).
+    this.scene.fog = new THREE.FogExp2(
+      (this.ocean.uniforms.uFogColor!.value as THREE.Color).clone(),
+      Math.sqrt(this.ocean.uniforms.uFogDensity!.value as number),
+    );
+    this.lighting = new SkyLighting({
+      renderer: this.renderer,
+      scene: this.scene,
+      sun: this.sun,
+      hemi: this.hemi,
+      skyMaterial: this.sky.material as THREE.ShaderMaterial,
+      oceanUniforms: this.ocean.uniforms,
+    });
+    for (const layer of this.layers) this.scene.add(layer.object);
+    this.applyAmbience();
 
     this.onLost = (ev: Event) => {
       ev.preventDefault();
@@ -278,25 +323,48 @@ export class LabRenderer implements LabRendererApi {
 
   setOcean(data: GpuOceanData): void {
     this.ocean.setData(data);
+    this.hs = data.hs;
   }
 
   setEnvironment(env: Environment): void {
+    this.env = env;
     this.ocean.setWaveParams(env.choppiness, env.depth);
-    const elev = THREE.MathUtils.degToRad(env.sunElevationDeg);
-    const az = THREE.MathUtils.degToRad(env.sunAzimuthDeg);
-    const horiz = Math.cos(elev);
-    // Azimuth is a compass bearing toward the sun: 0 north (+world y), clockwise.
-    const sun = new THREE.Vector3(Math.sin(az) * horiz, Math.sin(elev), -Math.cos(az) * horiz);
-    if (sun.lengthSq() < 1e-6) sun.set(0, 1, 0);
-    sun.normalize();
-    (this.ocean.uniforms.uSunDir!.value as THREE.Vector3).copy(sun);
     (this.ocean.uniforms.uWind!.value as number) = env.windSpeed;
-    this.sun.position.copy(sun).multiplyScalar(2000);
-    this.sun.intensity = THREE.MathUtils.clamp(0.35 + env.sunElevationDeg / 28, 0.25, 2.6);
-    this.sun.color.set(env.sunElevationDeg < 8 ? 0xffb27a : 0xfff4e0);
+    this.updateLighting(0);
+  }
+
+  setAmbience(settings: AmbienceSettings): void {
+    this.ambience = { ...settings };
+    this.applyAmbience();
+  }
+
+  setTimeOfDay(hours: number | null): void {
+    this.timeOfDay = hours;
+  }
+
+  setStorminess(storminess: number | null): void {
+    this.storminess = storminess;
+  }
+
+  private applyAmbience(): void {
+    this.islands.setEnabled(this.ambience.islands);
+    this.wildlife.setEnabled(this.ambience.wildlife);
+    this.birds.setEnabled(this.ambience.wildlife);
+    this.sailors.setEnabled(this.ambience.sailors);
+  }
+
+  private updateLighting(dt: number) {
+    if (!this.env) return null;
+    return this.lighting.update({
+      env: this.env,
+      timeOfDay: this.ambience.dayNight ? this.timeOfDay : null,
+      calm: this.calm,
+      dt,
+    });
   }
 
   setVessels(vessels: readonly { id: string; definition: VesselDefinition }[]): void {
+    for (const layer of this.layers) layer.setVessels?.([]);
     for (const view of this.vessels.values()) this.disposeVessel(view);
     this.vessels.clear();
     const probes = this.pickables.filter((obj) => obj.userData.pickKind === 'probe');
@@ -311,6 +379,8 @@ export class LabRenderer implements LabRendererApi {
       maxLength = Math.max(maxLength, definition.length);
     }
     if (!this.userMoved) this.radius = THREE.MathUtils.clamp(maxLength * 2.4, 28, 700);
+    const views = [...this.vessels.values()];
+    for (const layer of this.layers) layer.setVessels?.(views);
     this.applySelection();
   }
 
@@ -459,6 +529,7 @@ export class LabRenderer implements LabRendererApi {
     this.updateWakes();
     this.ocean.update(t);
     this.updateCamera();
+    this.updateScenery(t, t0);
     this.sky.position.copy(this.camera.position);
     const cell = this.oceanMesh.userData.cell as number;
     this.oceanMesh.position.set(
@@ -514,6 +585,43 @@ export class LabRenderer implements LabRendererApi {
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     if (!this.raycaster.ray.intersectPlane(plane, planeHit)) return null;
     return { kind: 'water', point: { x: planeHit.x, y: -planeHit.z, z: planeHit.y } };
+  }
+
+  private updateScenery(t: number, now: number): void {
+    const dt =
+      this.lastRenderAt > 0 ? Math.min(0.1, Math.max(0, (now - this.lastRenderAt) / 1000)) : 0;
+    this.lastRenderAt = now;
+    this.wallT += dt;
+    const windSpeed = this.env?.windSpeed ?? 0;
+    const target = calmFromConditions(this.hs, windSpeed, this.storminess ?? 0);
+    this.calm = this.calmPrimed ? ease(this.calm, target, dt, 6) : target;
+    this.calmPrimed = true;
+    const light = this.updateLighting(dt);
+    const vessels = this.frame?.vessels ?? [];
+    while (this.vesselPositions.length < vessels.length)
+      this.vesselPositions.push(new THREE.Vector3());
+    this.vesselPositions.length = vessels.length;
+    vessels.forEach((v, i) => {
+      const view = this.vessels.get(v.id);
+      if (view) this.vesselPositions[i]!.copy(view.group.position);
+      else worldToThree(v.position, this.vesselPositions[i]!);
+    });
+    const frame: SceneryFrame = {
+      t,
+      dt,
+      wallT: this.wallT,
+      camera: this.camera,
+      calm: this.calm,
+      daylight: light?.daylight ?? 1,
+      timeOfDay: light?.timeOfDay ?? 12,
+      sunDir: light?.sunDir ?? (this.ocean.uniforms.uSunDir!.value as THREE.Vector3),
+      windSpeed,
+      windDirectionDeg: this.env?.windDirectionDeg ?? 0,
+      hs: this.hs,
+      vessels,
+      vesselPositions: this.vesselPositions,
+    };
+    for (const layer of this.layers) layer.update(frame);
   }
 
   /** Visual Kelvin-ish foam. It does not feed back into the hull forces. */
@@ -579,7 +687,13 @@ export class LabRenderer implements LabRendererApi {
     this.canvas.removeEventListener('pointerup', this.onPointerUp);
     this.canvas.removeEventListener('pointercancel', this.onPointerUp);
     this.canvas.removeEventListener('wheel', this.onWheel);
+    for (const layer of this.layers) layer.setVessels?.([]);
     for (const view of this.vessels.values()) this.disposeVessel(view);
+    for (const layer of this.layers) {
+      this.scene.remove(layer.object);
+      layer.dispose();
+    }
+    this.lighting.dispose();
     this.setProbes([]);
     this.ocean.dispose();
     this.oceanMesh.geometry.dispose();
