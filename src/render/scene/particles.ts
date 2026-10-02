@@ -93,8 +93,42 @@ export interface SprayEmitter {
   life: number;
 }
 
+/** Look and motion of a particle pool (defaults: white sea spray). */
+export interface ParticleStyle {
+  /** Fraction of gravity felt; negative rises (hot smoke). */
+  gravity: number;
+  /** Air drag rate toward the wind [1/s]. */
+  drag: number;
+  /** Colour in full daylight (linear RGB) and the fraction kept at night. */
+  color: [number, number, number];
+  night: number;
+  /** Peak opacity and how much a particle grows over its life. */
+  alpha: number;
+  growth: number;
+}
+
+const SPRAY_STYLE: ParticleStyle = {
+  gravity: 0.8,
+  drag: 1.4,
+  color: [0.95, 0.95, 0.95],
+  night: 0.42,
+  alpha: 0.4,
+  growth: 1.5,
+};
+
+/** Dark, buoyant smoke from a damaged ship, bent downwind. */
+export const SMOKE_STYLE: ParticleStyle = {
+  gravity: -0.035,
+  drag: 0.7,
+  color: [0.2, 0.19, 0.18],
+  night: 0.3,
+  alpha: 0.55,
+  growth: 4,
+};
+
 /** A pool of spray sprites integrated on the CPU (ballistic with air drag toward the wind). */
 export class SprayPool {
+  private readonly style: ParticleStyle;
   readonly object: THREE.Points;
   private readonly material: THREE.ShaderMaterial;
   private readonly pos: Float32Array;
@@ -107,8 +141,9 @@ export class SprayPool {
   private next = 0;
   readonly capacity: number;
 
-  constructor(capacity: number) {
+  constructor(capacity: number, style: ParticleStyle = SPRAY_STYLE) {
     this.capacity = capacity;
+    this.style = style;
     this.pos = new Float32Array(capacity * 3);
     this.vel = new Float32Array(capacity * 3);
     this.age = new Float32Array(capacity).fill(1e9);
@@ -164,7 +199,8 @@ export class SprayPool {
 
   /** Advance by dt with air drag relaxing toward the wind (three.js coordinates). */
   update(dt: number, wind: THREE.Vector3, light: number, pixelScale: number): void {
-    const drag = 1 - Math.exp(-dt * 1.4);
+    const st = this.style;
+    const drag = 1 - Math.exp(-dt * st.drag);
     let alive = 0;
     for (let i = 0; i < this.capacity; i++) {
       const a = (this.age[i]! += dt);
@@ -178,13 +214,13 @@ export class SprayPool {
       const j = 3 * i;
       this.vel[j]! += (wind.x - this.vel[j]!) * drag;
       this.vel[j + 2]! += (wind.z - this.vel[j + 2]!) * drag;
-      this.vel[j + 1]! -= 9.81 * dt * 0.8;
+      this.vel[j + 1]! -= 9.81 * dt * st.gravity;
       this.pos[j]! += this.vel[j]! * dt;
       this.pos[j + 1]! += this.vel[j + 1]! * dt;
       this.pos[j + 2]! += this.vel[j + 2]! * dt;
       const u = a / life;
-      this.alpha[i] = 0.4 * Math.min(1, u * 8) * (1 - u) * (1 - u);
-      this.sizeAttr[i] = this.size[i]! * (1 + 1.5 * u);
+      this.alpha[i] = st.alpha * Math.min(1, u * 8) * (1 - u) * (1 - u);
+      this.sizeAttr[i] = this.size[i]! * (1 + st.growth * u);
     }
     this.object.visible = alive > 0;
     const geo = this.object.geometry;
@@ -192,7 +228,12 @@ export class SprayPool {
     geo.getAttribute('aAlpha').needsUpdate = true;
     geo.getAttribute('aSize').needsUpdate = true;
     this.material.uniforms.uPixelScale!.value = pixelScale;
-    (this.material.uniforms.uColor!.value as THREE.Color).setScalar(0.4 + 0.55 * light);
+    const k = st.night + (1 - st.night) * light;
+    (this.material.uniforms.uColor!.value as THREE.Color).setRGB(
+      st.color[0] * k,
+      st.color[1] * k,
+      st.color[2] * k,
+    );
   }
 
   dispose(): void {
