@@ -20,9 +20,10 @@ function floatTarget(
   n: number,
   filter: THREE.MagnificationTextureFilter,
   wrap: THREE.Wrapping,
+  type: THREE.TextureDataType,
 ): THREE.WebGLRenderTarget {
   const rt = new THREE.WebGLRenderTarget(n, n, {
-    type: THREE.FloatType,
+    type,
     format: THREE.RGBAFormat,
     magFilter: filter,
     minFilter: filter,
@@ -62,6 +63,7 @@ export class GpuOcean {
   private readonly combineMat: THREE.ShaderMaterial;
   private readonly black = blackTexture();
   private readonly sampleFilter: THREE.MagnificationTextureFilter;
+  private readonly texType: THREE.TextureDataType;
   private scratchA: THREE.WebGLRenderTarget | null = null;
   private scratchB: THREE.WebGLRenderTarget | null = null;
   private spec: THREE.WebGLRenderTarget | null = null;
@@ -77,10 +79,14 @@ export class GpuOcean {
   private lastT = Number.NaN;
   private verified = false;
 
-  constructor(renderer: THREE.WebGLRenderer) {
+  constructor(renderer: THREE.WebGLRenderer, texType: THREE.TextureDataType = THREE.FloatType) {
     this.renderer = renderer;
+    this.texType = texType;
     const gl = renderer.getContext() as WebGL2RenderingContext;
-    const linear = gl.getExtension('OES_texture_float_linear');
+    const linear =
+      texType === THREE.HalfFloatType
+        ? gl.getExtension('OES_texture_half_float_linear')
+        : gl.getExtension('OES_texture_float_linear');
     this.sampleFilter = linear ? THREE.LinearFilter : THREE.NearestFilter;
 
     const regA = Array.from({ length: MAX_REGULAR }, () => new THREE.Vector4());
@@ -189,6 +195,15 @@ export class GpuOcean {
     this.depth = depth;
     this.uniforms.uLambda!.value = lambda;
     this.dirty = true;
+  }
+
+  /** Rebuild GPU buffers after the browser restores a lost context (a phone tab in the background). */
+  restore(): void {
+    const n = this.n;
+    if (n >= 2) this.allocate(n);
+    for (const tex of this.sources) tex.needsUpdate = true;
+    this.dirty = true;
+    this.lastT = Number.NaN;
   }
 
   update(t: number): void {
@@ -321,18 +336,20 @@ export class GpuOcean {
     if (n < 2) return;
     const nearest = THREE.NearestFilter;
     const clamp = THREE.ClampToEdgeWrapping;
-    this.scratchA = floatTarget(n, nearest, clamp);
-    this.scratchB = floatTarget(n, nearest, clamp);
-    this.spec = floatTarget(n, nearest, clamp);
-    this.complexH = floatTarget(n, nearest, clamp);
-    this.complexD = floatTarget(n, nearest, clamp);
+    this.scratchA = floatTarget(n, nearest, clamp, this.texType);
+    this.scratchB = floatTarget(n, nearest, clamp, this.texType);
+    this.spec = floatTarget(n, nearest, clamp, this.texType);
+    this.complexH = floatTarget(n, nearest, clamp, this.texType);
+    this.complexD = floatTarget(n, nearest, clamp, this.texType);
     for (let i = 0; i < MAX_CASCADES; i++) {
-      this.outputs[i] = floatTarget(n, this.sampleFilter, THREE.RepeatWrapping);
+      this.outputs[i] = floatTarget(n, this.sampleFilter, THREE.RepeatWrapping, this.texType);
     }
   }
 
   private verify(t: number): void {
     this.verified = true;
+    // Half-float targets are a compatibility path; readback of them is not reliable.
+    if (this.texType !== THREE.FloatType) return;
     const data = this.data;
     const out = this.outputs[0];
     const cascade = data?.cascades[0];

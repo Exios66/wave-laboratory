@@ -76,7 +76,16 @@ function createOceanGeometry(segments: number, extent: number): THREE.BufferGeom
 function rendererTier(gl: WebGL2RenderingContext): 'light' | 'full' {
   const ext = gl.getExtension('WEBGL_debug_renderer_info');
   const name = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
-  return /swiftshader|llvmpipe|softpipe|software/i.test(name) ? 'light' : 'full';
+  const software = /swiftshader|llvmpipe|softpipe|software/i.test(name);
+  const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  const small = Math.min(window.screen?.width ?? 1400, window.screen?.height ?? 900) < 900;
+  return software || (coarse && small) ? 'light' : 'full';
+}
+
+function oceanTextureType(gl: WebGL2RenderingContext): THREE.TextureDataType {
+  if (gl.getExtension('EXT_color_buffer_float')) return THREE.FloatType;
+  if (gl.getExtension('EXT_color_buffer_half_float')) return THREE.HalfFloatType;
+  throw new Error('This browser cannot render the ocean (missing floating-point colour buffers).');
 }
 
 export class LabRenderer implements LabRendererApi {
@@ -115,6 +124,8 @@ export class LabRenderer implements LabRendererApi {
   private dragged = false;
   private lastX = 0;
   private lastY = 0;
+  private readonly pointers = new Map<number, { x: number; y: number }>();
+  private pinchDist = 0;
   private fpsFrames = 0;
   private fpsElapsed = 0;
   private disposed = false;
@@ -135,9 +146,7 @@ export class LabRenderer implements LabRendererApi {
       powerPreference: 'high-performance',
     });
     if (!gl) throw new Error('WebGL 2 is not available in this browser.');
-    if (!gl.getExtension('EXT_color_buffer_float')) {
-      throw new Error('This browser cannot render the ocean (missing floating-point targets).');
-    }
+    const texType = oceanTextureType(gl);
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       context: gl,
@@ -151,7 +160,7 @@ export class LabRenderer implements LabRendererApi {
     this.renderer.info.autoReset = false;
 
     this.camera = new THREE.PerspectiveCamera(48, 1, 0.2, 40000);
-    this.ocean = new GpuOcean(this.renderer);
+    this.ocean = new GpuOcean(this.renderer, texType);
 
     const segments = tier === 'light' ? 128 : 288;
     const extent = tier === 'light' ? 3600 : 6400;
@@ -195,16 +204,37 @@ export class LabRenderer implements LabRendererApi {
       ev.preventDefault();
       opts.onContextLost?.();
     };
-    this.onRestored = () => opts.onContextRestored?.();
+    this.onRestored = () => {
+      this.ocean.restore();
+      opts.onContextRestored?.();
+    };
     this.onPointerDown = (ev: PointerEvent) => {
       if (ev.button !== 0) return;
-      this.dragging = true;
-      this.dragged = false;
-      this.lastX = ev.clientX;
-      this.lastY = ev.clientY;
+      this.pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
       this.canvas.setPointerCapture(ev.pointerId);
+      if (this.pointers.size === 1) {
+        this.dragging = true;
+        this.dragged = false;
+        this.lastX = ev.clientX;
+        this.lastY = ev.clientY;
+      } else {
+        this.dragged = true;
+        this.pinchDist = this.pointerSpan();
+      }
     };
     this.onPointerMove = (ev: PointerEvent) => {
+      if (!this.pointers.has(ev.pointerId)) return;
+      this.pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+      if (this.pointers.size >= 2) {
+        const dist = this.pointerSpan();
+        if (this.pinchDist > 8 && dist > 8) {
+          this.userMoved = true;
+          this.dragged = true;
+          this.radius = THREE.MathUtils.clamp(this.radius * (this.pinchDist / dist), 6, 4000);
+        }
+        this.pinchDist = dist;
+        return;
+      }
       if (!this.dragging) return;
       const dx = ev.clientX - this.lastX;
       const dy = ev.clientY - this.lastY;
@@ -216,7 +246,9 @@ export class LabRenderer implements LabRendererApi {
       this.polar = THREE.MathUtils.clamp(this.polar + dy * 0.004, 0.12, 1.42);
     };
     this.onPointerUp = (ev: PointerEvent) => {
-      this.dragging = false;
+      this.pointers.delete(ev.pointerId);
+      if (this.pointers.size < 2) this.pinchDist = 0;
+      if (this.pointers.size === 0) this.dragging = false;
       if (this.canvas.hasPointerCapture(ev.pointerId))
         this.canvas.releasePointerCapture(ev.pointerId);
     };
@@ -409,6 +441,14 @@ export class LabRenderer implements LabRendererApi {
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     if (!this.raycaster.ray.intersectPlane(plane, planeHit)) return null;
     return { kind: 'water', point: { x: planeHit.x, y: -planeHit.z, z: planeHit.y } };
+  }
+
+  private pointerSpan(): number {
+    const pts = [...this.pointers.values()];
+    const a = pts[0];
+    const b = pts[1];
+    if (!a || !b) return 0;
+    return Math.hypot(a.x - b.x, a.y - b.y);
   }
 
   nudgeCamera(action: 'left' | 'right' | 'up' | 'down' | 'in' | 'out' | 'reset'): void {

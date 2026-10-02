@@ -31,8 +31,13 @@ export function windFromBeaufort(bf: number): number {
   return mid[i]!;
 }
 
-/** WMO sea state code (0–9) from significant wave height [m]. */
+/**
+ * WMO sea state code (0–9) from significant wave height [m].
+ * The height is rounded to the nearest centimetre first, matching the inspector readout, so a
+ * value that displays as 2.50 m stays in Moderate (code 4) instead of tipping into Rough.
+ */
 export function wmoSeaState(hs: number): { code: number; label: string } {
+  const shown = Math.round(hs * 100) / 100;
   const table: [number, string][] = [
     [0, 'Calm (glassy)'],
     [0.1, 'Calm (rippled)'],
@@ -45,7 +50,7 @@ export function wmoSeaState(hs: number): { code: number; label: string } {
     [14, 'Very high'],
   ];
   for (let i = 0; i < table.length; i++) {
-    if (hs <= table[i]![0]) return { code: i, label: table[i]![1] };
+    if (shown <= table[i]![0]) return { code: i, label: table[i]![1] };
   }
   return { code: 9, label: 'Phenomenal' };
 }

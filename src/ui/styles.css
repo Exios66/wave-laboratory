@@ -874,7 +874,12 @@ input[type='range'] {
 }
 .chart__plot {
   flex: 1;
-  min-height: 0;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+}
+.u-legend {
+  flex: none;
 }
 
 .charts-row {
@@ -1169,6 +1174,10 @@ kbd {
     overflow-x: auto;
     scrollbar-width: none;
   }
+  .tabs [role='tab'] {
+    white-space: nowrap;
+    padding: 6px 8px;
+  }
 
   .hud {
     padding: var(--space-2);
@@ -1224,7 +1233,9 @@ kbd {
   .input,
   .tree__select,
   .tabs [role='tab'],
-  .segmented button,
+  .segmented button {
+    min-height: 44px;
+  }
   .hud select {
     min-height: 44px;
   }
@@ -1240,5 +1251,19 @@ kbd {
   }
   input[type='range'] {
     min-height: 36px;
+  }
+}
+
+/* Camera and overlay controls sit on the 3D view, so they stay shorter than form fields. */
+@media (max-width: 900px) and (pointer: coarse) {
+  .hud .segmented button {
+    min-height: 32px;
+    padding: 2px 8px;
+    font-size: 13px;
+  }
+  .hud select {
+    min-height: 32px;
+    padding: 2px 8px;
+    font-size: 16px;
   }
 }
