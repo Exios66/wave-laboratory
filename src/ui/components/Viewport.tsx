@@ -6,6 +6,7 @@ import { getRuntime } from '../runtime';
 import { useLab } from '../store';
 import { dayPhase, formatClock } from './clock';
 import { fmt } from './fields';
+import { Minimap } from './Minimap';
 
 const CAMERAS: { mode: CameraMode; label: string; needsVessel: boolean }[] = [
   { mode: 'orbit', label: 'Orbit', needsVessel: false },
@@ -214,7 +215,10 @@ function Hud() {
           {status === 'error' && `Simulation error: ${error ?? 'unknown'}`}
           {status === 'ready' && 'Simulation running'}
         </div>
-        {overlay !== 'none' && <Legend mode={overlay} />}
+        <div className="hud__corner">
+          {overlay !== 'none' && <Legend mode={overlay} />}
+          <Minimap />
+        </div>
       </div>
     </div>
   );

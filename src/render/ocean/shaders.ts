@@ -638,23 +638,120 @@ void main() {
 export const SKY_FRAG = /* glsl */ `
 uniform float uFogDensity;
 uniform float uStars;
+uniform mat3 uCelestial;
+uniform vec3 uGalPole;
+uniform vec3 uGalCentre;
 varying vec3 vDir;
 ${SKY}
-// Cheap procedural star field on the dome (not in the sea: reflected stars only shimmer).
-float stars(vec3 d) {
-  vec3 p = d * 260.0;
+float hash13(vec3 p) {
+  p = fract(p * 0.1031);
+  p += dot(p, p.zyx + 31.32);
+  return fract((p.x + p.y) * p.z);
+}
+float vnoise3(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  vec3 u = f * f * (3.0 - 2.0 * f);
+  float n000 = hash13(i);
+  float n100 = hash13(i + vec3(1.0, 0.0, 0.0));
+  float n010 = hash13(i + vec3(0.0, 1.0, 0.0));
+  float n110 = hash13(i + vec3(1.0, 1.0, 0.0));
+  float n001 = hash13(i + vec3(0.0, 0.0, 1.0));
+  float n101 = hash13(i + vec3(1.0, 0.0, 1.0));
+  float n011 = hash13(i + vec3(0.0, 1.0, 1.0));
+  float n111 = hash13(i + vec3(1.0, 1.0, 1.0));
+  return mix(
+    mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y),
+    mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y),
+    u.z);
+}
+float fbm3(vec3 p) {
+  float sum = 0.0;
+  float amp = 0.5;
+  for (int i = 0; i < 4; i++) {
+    sum += amp * vnoise3(p);
+    p = p * 2.03 + vec3(1.7, 9.2, 3.1);
+    amp *= 0.5;
+  }
+  return sum;
+}
+// One layer of procedural stars on a grid of cells over the star frame: one candidate star per
+// cell, kept when its hash beats the threshold. Returns colour-weighted brightness.
+vec3 starLayer(vec3 c, float scale, float keep, float twinkleT) {
+  vec3 p = c * scale;
   vec3 cell = floor(p);
-  float n = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
-  if (n < 0.985) return 0.0;
-  float r = length(fract(p) - 0.5);
-  return smoothstep(0.32, 0.0, r) * (n - 0.985) / 0.015;
+  float n = hash13(cell);
+  if (n < keep) return vec3(0.0);
+  vec3 jitter = vec3(hash13(cell + 11.3), hash13(cell + 27.1), hash13(cell + 43.7)) * 0.5 + 0.25;
+  float r = length(fract(p) - jitter);
+  float mag = (n - keep) / (1.0 - keep);
+  float core = smoothstep(0.22, 0.0, r) * (0.25 + 0.75 * mag * mag);
+  float tw = 0.78 + 0.22 * sin(twinkleT * (2.0 + 5.0 * fract(n * 91.7)) + n * 400.0);
+  // Blue-white to warm orange, most stars near white.
+  float temp = fract(n * 53.1);
+  vec3 tint = temp < 0.2 ? vec3(1.0, 0.78, 0.6) : temp < 0.5 ? vec3(1.0, 0.95, 0.88) : vec3(0.78, 0.86, 1.0);
+  return tint * core * tw;
+}
+// The Milky Way: a band along the galactic plane, broad and bright toward the core, with
+// star clouds, a dark dust rift down the middle and dust lanes breaking it up.
+// Returns linear radiance; 'density' (0-1) says how crowded with stars the band is here.
+vec3 milkyWay(vec3 c, out float density) {
+  vec3 east = normalize(cross(uGalPole, uGalCentre));
+  float lat = asin(clamp(dot(c, uGalPole), -1.0, 1.0));
+  density = 0.0;
+  if (abs(lat) > 0.8) return vec3(0.0);
+  float lon = atan(dot(c, east), dot(c, uGalCentre));
+  float toCore = exp(-lon * lon / (2.0 * 0.75 * 0.75));
+  // Warp the band so it meanders rather than running as a perfect great circle.
+  float warp = (fbm3(c * 2.2) - 0.5) * 0.1;
+  float l = lat + warp;
+  float width = 0.1 + 0.12 * toCore;
+  float band = exp(-l * l / (2.0 * width * width));
+  // The bulge: a fat glow around the core.
+  float bulge = exp(-(l * l * 1.8 + lon * lon * 0.8) / (2.0 * 0.15 * 0.15));
+  // Knotty star clouds at two scales.
+  float clouds = fbm3(c * 8.0);
+  float fine = fbm3(c * 44.0);
+  float knots = smoothstep(0.35, 0.8, clouds) * (0.3 + 0.7 * smoothstep(0.32, 0.72, fine));
+  float glow = band * (0.15 + 0.85 * knots) * (0.45 + 0.9 * toCore);
+  glow += bulge * (0.8 + 0.6 * fine);
+  // The Great Rift: a ragged dark lane just off the plane, widest toward the core.
+  float riftOff = l - 0.02 - 0.03 * sin(lon * 2.3) - (fbm3(c * 14.0) - 0.5) * 0.05;
+  float riftW = 0.022 + 0.03 * toCore;
+  float rift = exp(-riftOff * riftOff / (2.0 * riftW * riftW));
+  rift *= smoothstep(0.3, 0.6, fbm3(c * 5.0 + 4.0)) * smoothstep(2.4, 0.3, abs(lon));
+  // Filaments of dust across the band.
+  float dust = smoothstep(0.52, 0.72, fbm3(c * 13.0 + 9.0)) * band;
+  glow *= (1.0 - 0.92 * rift) * (1.0 - 0.7 * dust);
+  density = clamp(band * (0.4 + 0.6 * knots) * (1.0 - 0.8 * rift) * (1.0 - 0.5 * dust), 0.0, 1.0);
+  vec3 armCol = vec3(0.66, 0.74, 1.0);
+  vec3 coreCol = vec3(1.0, 0.8, 0.56);
+  vec3 col = mix(armCol, coreCol, clamp(toCore * 0.7 + bulge * 0.8, 0.0, 1.0));
+  // Pink glow of emission nebulae dotted along the plane.
+  float neb = smoothstep(0.66, 0.86, fbm3(c * 10.0 + 21.0)) * band * (1.0 - rift);
+  return col * glow + vec3(0.95, 0.3, 0.45) * neb * 0.3;
 }
 void main() {
   vec3 dir = normalize(vDir);
   vec3 col = skyColor(dir, uSunDir);
   if (uStars > 0.001 && dir.y > 0.0) {
-    float seen = uStars * (1.0 - cloudDensity(dir)) * (1.0 - overcastAmount()) * smoothstep(0.0, 0.18, dir.y);
-    col += vec3(0.75, 0.8, 0.9) * stars(dir) * seen;
+    float seen = uStars * (1.0 - cloudDensity(dir)) * (1.0 - overcastAmount());
+    // Extinction: everything dims and reddens toward the horizon.
+    float alt = smoothstep(0.0, 0.25, dir.y);
+    seen *= mix(0.15, 1.0, alt);
+    // A bright moon washes out the faint glow (but not the stars) .
+    float moonWash = smoothstep(-0.05, 0.3, uMoonDir.y);
+    vec3 c = uCelestial * dir;
+    float density;
+    vec3 mw = milkyWay(c, density);
+    col += mw * 0.1 * seen * (1.0 - 0.3 * moonWash);
+    vec3 st = starLayer(c, 260.0, 0.982, uSkyTime) * 1.0;
+    st += starLayer(c, 520.0, mix(0.993, 0.955, density), uSkyTime * 1.3) * 0.45;
+    st += starLayer(c, 900.0, mix(0.999, 0.93, density), uSkyTime * 0.7) * 0.25 * (1.0 - 0.5 * moonWash);
+    // Unresolved star dust: a fine sparkle that makes the band grainy rather than misty.
+    st += starLayer(c, 380.0, mix(1.0, 0.7, density), 0.0) * 0.8 * density;
+    st += starLayer(c.zxy, 470.0, mix(1.0, 0.75, density), 0.0) * 0.6 * density;
+    col += st * 0.85 * seen * vec3(1.0, mix(0.85, 1.0, alt), mix(0.7, 1.0, alt));
   }
   // Low visibility (rain, fog) hides the horizon and the lower sky.
   float haze = clamp(uFogDensity * 4000.0, 0.0, 1.0);
