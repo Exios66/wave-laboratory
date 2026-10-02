@@ -1,5 +1,6 @@
 /** Little sailors walking the decks. */
 import * as THREE from 'three';
+import type { VesselDefinition } from '../../vessel/api';
 import type { SceneryFrame, SceneryLayer, SceneryVessel } from './types';
 import { disposeObject3D, GeometryPool, hash01, makeMat } from './util';
 
@@ -15,14 +16,24 @@ interface Sailor {
   fwd: THREE.Vector3;
 }
 
-const BODY_COLORS = [0x1e3a5f, 0x334155, 0x0f766e, 0x7c2d12, 0x1d4ed8];
+/** High-vis gear so the figures read against dark decks. */
+const BODY_COLORS = [0xf59e0b, 0xea580c, 0xdc2626, 0x2563eb, 0x0f766e];
+
+/** Walkable deck height in body frame (above any flat `deck` plates). */
+function deckHeight(def: VesselDefinition): number {
+  let z = def.points.bow.z;
+  for (const b of def.superstructure) {
+    if (b.material === 'deck') z = Math.max(z, b.center.z + b.size.z * 0.5);
+  }
+  return z + 0.08;
+}
 
 export class SailorLayer implements SceneryLayer {
   readonly object = new THREE.Group();
   private readonly pool = new GeometryPool();
   private readonly sailors: Sailor[] = [];
-  private readonly bodyGeo = this.pool.share(new THREE.CapsuleGeometry(0.18, 0.55, 3, 6));
-  private readonly headGeo = this.pool.share(new THREE.SphereGeometry(0.16, 8, 6));
+  private readonly bodyGeo = this.pool.share(new THREE.CapsuleGeometry(0.22, 0.7, 3, 6));
+  private readonly headGeo = this.pool.share(new THREE.SphereGeometry(0.2, 8, 6));
 
   constructor() {
     this.object.name = 'sailors';
@@ -58,41 +69,37 @@ export class SailorLayer implements SceneryLayer {
       const y = THREE.MathUtils.lerp(s.aft.y, s.fwd.y, u) + s.lane;
       const z = THREE.MathUtils.lerp(s.aft.z, s.fwd.z, u);
       s.mesh.position.set(x, z, -y);
-      // Face the walk direction (body x → three x; body y → −three z).
       const goingFwd = s.phase < 1;
       s.mesh.rotation.y = goingFwd ? 0 : Math.PI;
-      // Soft bob with the gait.
-      const bob = Math.sin(s.phase * Math.PI * 2) * 0.04;
+      const bob = Math.sin(s.phase * Math.PI * 2) * 0.05;
       s.mesh.position.y += bob;
     }
   }
 
   private spawnForVessel(v: SceneryVessel): void {
     const def = v.definition;
-    // Tiny craft get one hand; freighters get a watch section.
-    const count = Math.min(8, Math.max(1, Math.round(def.length / 28)));
+    const count = Math.min(10, Math.max(2, Math.round(def.length / 22)));
     const bow = def.points.bow;
-    const bridge = def.points.bridge;
-    const deckZ = Math.max(bow.z, bridge.z) * 0.15 + Math.min(bow.z, bridge.z) * 0.85;
-    // Stay clear of the stern propeller and the stem.
-    const aftX = -def.length * 0.28;
-    const fwdX = Math.min(bow.x - def.length * 0.08, def.length * 0.32);
+    const zDeck = deckHeight(def);
+    // Keep clear of the stern propeller and the stem; stay on the open foredeck for freighters.
+    const aftX = -def.length * 0.18;
+    const fwdX = Math.min(bow.x - def.length * 0.06, def.length * 0.38);
     for (let i = 0; i < count; i++) {
-      const seed = Math.imul(def.length * 1000 + i, 2654435761) >>> 0;
+      const seed = Math.imul(Math.round(def.length * 1000) + i, 2654435761) >>> 0;
       const mesh = this.makeSailor(seed);
-      const lane = (i % 2 === 0 ? 1 : -1) * def.beam * (0.12 + hash01(seed + 3) * 0.18);
+      const lane = (i % 2 === 0 ? 1 : -1) * def.beam * (0.18 + hash01(seed + 3) * 0.16);
       const sailor: Sailor = {
         mesh,
         vesselId: v.id,
         phase: hash01(seed + 1),
-        speed: 0.08 + hash01(seed + 2) * 0.07,
+        speed: 0.1 + hash01(seed + 2) * 0.08,
         lane,
-        aft: new THREE.Vector3(aftX, 0, deckZ),
-        fwd: new THREE.Vector3(fwdX, 0, deckZ + (bridge.z - deckZ) * 0.15),
+        aft: new THREE.Vector3(aftX, 0, zDeck),
+        fwd: new THREE.Vector3(fwdX, 0, zDeck),
       };
-      // Body-frame: three.js group axes already match LabRenderer vessel groups.
-      mesh.position.set(aftX, deckZ, 0);
-      const scale = Math.min(1.35, Math.max(0.55, def.beam * 0.08));
+      mesh.position.set(aftX, zDeck, -lane);
+      // Readable at ship scales without looking giant on small craft.
+      const scale = Math.min(2.2, Math.max(0.9, def.beam * 0.11));
       mesh.scale.setScalar(scale);
       v.group.add(mesh);
       this.sailors.push(sailor);
@@ -103,10 +110,13 @@ export class SailorLayer implements SceneryLayer {
     const g = new THREE.Group();
     g.name = 'sailor';
     const bodyColor = BODY_COLORS[Math.floor(hash01(seed) * BODY_COLORS.length)]!;
-    const body = new THREE.Mesh(this.bodyGeo, makeMat(bodyColor, { roughness: 0.7 }));
-    body.position.y = 0.45;
+    const body = new THREE.Mesh(
+      this.bodyGeo,
+      makeMat(bodyColor, { roughness: 0.55, emissive: bodyColor, emissiveIntensity: 0.12 }),
+    );
+    body.position.y = 0.55;
     const head = new THREE.Mesh(this.headGeo, makeMat(0xe8c4a2, { roughness: 0.65 }));
-    head.position.y = 0.95;
+    head.position.y = 1.15;
     g.add(body, head);
     g.userData.mats = [body.material, head.material];
     return g;
@@ -117,12 +127,6 @@ export class SailorLayer implements SceneryLayer {
       s.mesh.parent?.remove(s.mesh);
       const mats = s.mesh.userData.mats as THREE.Material[] | undefined;
       if (mats) for (const m of mats) m.dispose();
-      // Geometries are pooled; only dispose unique materials.
-      s.mesh.traverse((c) => {
-        if (c instanceof THREE.Mesh) {
-          /* geometries shared via pool */
-        }
-      });
     }
     this.sailors.length = 0;
   }

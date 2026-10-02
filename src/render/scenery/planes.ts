@@ -28,7 +28,7 @@ export class PlaneLayer implements SceneryLayer {
   readonly object = new THREE.Group();
   private readonly pool = new GeometryPool();
   private readonly flights: Flight[] = [];
-  private nextSpawnAt = 12;
+  private nextSpawnAt = 6;
   private spawnIndex = 0;
   private readonly fuselage = this.pool.share(new THREE.CylinderGeometry(0.35, 0.55, 4.2, 6));
   private readonly wing = this.pool.share(new THREE.BoxGeometry(7.5, 0.12, 1.1));

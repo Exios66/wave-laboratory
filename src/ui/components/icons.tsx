@@ -26,7 +26,8 @@ type IconName =
   | 'eye-off'
   | 'camera'
   | 'warning'
-  | 'more';
+  | 'more'
+  | 'settings';
 
 const paths: Record<IconName, ReactElement> = {
   logo: <path d="M2 15c3-5 6-5 9 0s6 5 9 0 2-2 2-2v8H2z" fill="currentColor" stroke="none" />,
@@ -96,6 +97,12 @@ const paths: Record<IconName, ReactElement> = {
       <circle cx="5" cy="12" r="1.6" fill="currentColor" />
       <circle cx="12" cy="12" r="1.6" fill="currentColor" />
       <circle cx="19" cy="12" r="1.6" fill="currentColor" />
+    </>
+  ),
+  settings: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.05 5.05l1.56 1.56M17.4 17.4l1.56 1.56M5.05 18.95l1.56-1.56M17.4 6.6l1.56-1.56" />
     </>
   ),
 };

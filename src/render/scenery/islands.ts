@@ -3,8 +3,15 @@ import * as THREE from 'three';
 import type { SceneryFrame, SceneryLayer } from './types';
 import { disposeObject3D, GeometryPool, hash2, makeMat } from './util';
 
-const CHUNK = 900;
-const VIEW_CHUNKS = 2;
+const CHUNK = 320;
+const VIEW_CHUNKS = 3;
+
+/** Always-on islands just outside the starting ring — readable through fog at first glance. */
+const LANDMARKS: IslandSpec[] = [
+  { key: 'landmark:ne', wx: 220, wz: -180, scale: 22, seed: 101 },
+  { key: 'landmark:nw', wx: -260, wz: -140, scale: 18, seed: 202 },
+  { key: 'landmark:se', wx: 160, wz: 240, scale: 26, seed: 303 },
+];
 
 interface IslandSpec {
   key: string;
@@ -55,6 +62,15 @@ export class IslandLayer implements SceneryLayer {
 
   private rebuild(cx: number, cz: number): void {
     const wanted = new Set<string>();
+    // Landmark islands near the origin so the first viewport always has something on the horizon.
+    for (const spec of LANDMARKS) {
+      wanted.add(spec.key);
+      if (!this.live.has(spec.key)) {
+        const g = this.buildIsland(spec);
+        this.live.set(spec.key, g);
+        this.object.add(g);
+      }
+    }
     for (let ix = cx - VIEW_CHUNKS; ix <= cx + VIEW_CHUNKS; ix++) {
       for (let iz = cz - VIEW_CHUNKS; iz <= cz + VIEW_CHUNKS; iz++) {
         const specs = this.chunkIslands(ix, iz);
@@ -88,13 +104,13 @@ export class IslandLayer implements SceneryLayer {
       if (u < 0.22) continue;
       const wx = (ix + u) * CHUNK;
       const wz = (iz + v) * CHUNK;
-      // Keep a quiet ring around the world origin.
-      if (Math.hypot(wx, wz) < 420) continue;
+      // Keep a quiet ring around the world origin so ships start in open water.
+      if (Math.hypot(wx, wz) < 160) continue;
       out.push({
         key: `${ix}:${iz}:${i}`,
         wx,
         wz,
-        scale: 18 + hash2(ix + i * 9, iz + 11) * 42,
+        scale: 12 + hash2(ix + i * 9, iz + 11) * 28,
         seed: Math.floor(hash2(ix + i, iz + 99) * 1e9),
       });
     }
