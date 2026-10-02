@@ -68,8 +68,18 @@ queries at a world position invert this by fixed-point iteration `x₀ ← x −
 For a single Airy wave this produces the exact Gerstner trochoid; the Eulerian mean level is
 `−k a²/2` (tested).
 
-**Jacobian / folding:** `J = (1 + ∂Dₓ/∂x)(1 + ∂D_y/∂y) − (∂Dₓ/∂y)²`. Foam is generated where
-`J` drops below ~0.6; `J < 0` means the surface has folded (a breaking crest).
+**Jacobian / folding:** `J = (1 + ∂Dₓ/∂x)(1 + ∂D_y/∂y) − (∂Dₓ/∂y)²`. `J < 0` means the surface
+has folded (a breaking crest).
+
+Vessel forces sample the sea on a moving patch of up to 220 columns (0.35 m minimum
+spacing), so waves of a few hull-breadths contribute to the pressure integral instead of
+being averaged away.
+
+**What the GPU actually draws.** `render/ocean` inverse-FFTs η and the packed horizontal
+displacement (Dx + i Dy) only. Slope and Jacobian for shading and the scientific overlays are
+finite differences of that displaced surface, not extra spectral FFTs. Foam ramps in as J falls
+through a wind-dependent gate (about 0.45 in calm air to about 0.75 in a strong wind). Pressure,
+orbital velocity and the other rows of the table above stay on the CPU.
 
 **Regular (Airy) components** are analytic, not in the FFT, and identical on CPU and GPU:
 

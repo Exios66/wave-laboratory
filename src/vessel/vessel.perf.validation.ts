@@ -52,7 +52,8 @@ it(
     );
     if (ms > 1) process.stdout.write('\n[vessel] WARNING: above the 1.0 ms soft budget');
     expect(ms).toBeLessThan(3);
-    expect(cols).toBeLessThanOrEqual(150);
+    // 280-column patches resolve waves of a few metres on a ship-length hull.
+    expect(cols).toBeLessThanOrEqual(320);
     expect(tm.capsized).toBe(false);
   },
 );
