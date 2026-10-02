@@ -150,6 +150,9 @@ export class LabRenderer implements LabRendererApi {
   private sunBase = 2.4;
   private lastRenderT = Number.NaN;
   private daylight = 1;
+  /** Vessels that slammed or shipped green water since the last drawn frame. */
+  private readonly sprayBursts = new Set<string>();
+  private duckMode = false;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
   private readonly vessels = new Map<string, VesselView>();
@@ -157,7 +160,6 @@ export class LabRenderer implements LabRendererApi {
   private readonly pickables: THREE.Object3D[] = [];
   private readonly tmp = new THREE.Vector3();
   private readonly look = new THREE.Vector3();
-  private duckMode = false;
   private readonly onLost: (ev: Event) => void;
   private readonly onRestored: () => void;
   private readonly onPointerDown: (ev: PointerEvent) => void;
@@ -507,7 +509,7 @@ export class LabRenderer implements LabRendererApi {
       const intensity =
         Math.min(1, kn / 18) * 0.5 +
         heave * 0.6 +
-        (state.slamming ? 1.2 : 0) +
+        (state.slamming || this.sprayBursts.has(state.id) ? 1.2 : 0) +
         (state.greenWater ? 0.8 : 0);
       if (intensity < 0.05) continue;
       const rate = intensity * 700 * budget * Math.sqrt(def.beam / 10);
@@ -540,6 +542,7 @@ export class LabRenderer implements LabRendererApi {
         );
       }
     }
+    this.sprayBursts.clear();
     // Spindrift: from Beaufort 8 the wind tears spray off the breaking crests.
     if (wind > 16 && this.frame) {
       const strength = Math.min(1, (wind - 16) / 14);
@@ -748,6 +751,17 @@ export class LabRenderer implements LabRendererApi {
     this.renderer.setSize(width, height, false);
   }
 
+  setDuckMode(on: boolean): void {
+    this.duckMode = on;
+    for (const view of this.vessels.values()) this.applyDuck(view);
+  }
+
+  private applyDuck(view: VesselView): void {
+    for (const child of view.group.children) {
+      child.visible = child.name === 'duck' ? this.duckMode : !this.duckMode;
+    }
+  }
+
   pick(x: number, y: number): PickResult | null {
     if (this.dragged) {
       this.dragged = false;
@@ -874,6 +888,9 @@ export class LabRenderer implements LabRendererApi {
         definition.paint,
       ),
     );
+    const duck = buildDuck(definition.length, definition.draft - definition.kg, id);
+    materials.push(...duck.materials);
+    group.add(duck.group);
 
     const shared = new Map<string, THREE.MeshStandardMaterial>();
     for (const box of definition.superstructure) {
@@ -939,24 +956,9 @@ export class LabRenderer implements LabRendererApi {
       group.add(disc);
     }
 
-    const duck = buildDuck(definition.length, definition.draft - definition.kg, id);
-    materials.push(...duck.materials);
-    group.add(duck.group);
-
     const view = { id, definition, group, materials, textures, rig };
     this.applyDuck(view);
     return view;
-  }
-
-  setDuckMode(on: boolean): void {
-    this.duckMode = on;
-    for (const view of this.vessels.values()) this.applyDuck(view);
-  }
-
-  private applyDuck(view: VesselView): void {
-    for (const child of view.group.children) {
-      child.visible = child.name === 'duck' ? this.duckMode : !this.duckMode;
-    }
   }
 
   private meshFromHull(

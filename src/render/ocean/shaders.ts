@@ -532,6 +532,13 @@ void main() {
   // Diffuse light through steep, thin crests, also under an overcast sky.
   float thin = clamp(length(sl.xy) * 2.5, 0.0, 1.0) * crest;
   col += srgbToLinear(vec3(0.06, 0.24, 0.24)) * thin * light * 0.6;
+  // Crest glow: sunlight through thin crests when looking toward a low sun.
+  vec3 sunFlat = normalize(vec3(uSunDir.x, 0.0, uSunDir.z) + vec3(0.0, 1e-4, 0.0));
+  float backlit = pow(clamp(dot(-V, sunFlat), 0.0, 1.0), 3.0);
+  float glowCrest = smoothstep(0.55, 1.0, crest) * smoothstep(0.05, 0.3, length(sl.xy) + 0.08);
+  float sunUp = smoothstep(-0.05, 0.25, uSunDir.y);
+  col += srgbToLinear(vec3(0.12, 0.72, 0.58)) * backlit * glowCrest * sunUp * sunVis
+    * (1.0 - fresnel) * 0.55;
 
   // Whitecaps: breaking where the surface compresses (Jacobian), with coverage that follows
   // the Monahan whitecap law for the wind, plus wind-aligned foam streaks above Beaufort 8.
