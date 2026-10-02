@@ -97,6 +97,25 @@ interface VesselView {
   shownHealth: number;
   /** Body-frame point smoke rises from (funnel or top of the superstructure). */
   smokeFrom: Vec3;
+  /** Bounds of hull and superstructure in the group's (Three.js body) axes. */
+  bounds: THREE.Box3;
+}
+
+/** Hull and superstructure bounds of a vessel, in its group's Three.js body axes. */
+function vesselBounds(def: VesselDefinition): THREE.Box3 {
+  const box = new THREE.Box3();
+  const v = new THREE.Vector3();
+  const p = def.renderHull.positions;
+  for (let i = 0; i < p.length; i += 3) box.expandByPoint(v.set(p[i]!, p[i + 2]!, -p[i + 1]!));
+  for (const b of def.superstructure) {
+    const c = b.center;
+    const h = b.size;
+    const r = Math.hypot(h.x, h.y) / 2;
+    const half = b.yawDeg ? { x: r, y: r } : { x: h.x / 2, y: h.y / 2 };
+    box.expandByPoint(v.set(c.x - half.x, c.z - h.z / 2, -(c.y - half.y)));
+    box.expandByPoint(v.set(c.x + half.x, c.z + h.z / 2, -(c.y + half.y)));
+  }
+  return box;
 }
 
 function srgbToLinear(c: number): number {
@@ -1058,6 +1077,7 @@ export class LabRenderer implements LabRendererApi {
       dt,
       wallT: this.wallT,
       camera: this.camera,
+      bridgeView: this.mode === 'bridge',
       calm: this.calm,
       daylight: light?.daylight ?? 1,
       timeOfDay: light?.timeOfDay ?? 12,
@@ -1198,6 +1218,7 @@ export class LabRenderer implements LabRendererApi {
       if (!mat) {
         mat = this.material(box.material, palette);
         if (box.material === 'glass') {
+          mat.userData.glass = true;
           mat.transparent = true;
           mat.opacity = 0.45;
           mat.roughness = 0.05;
@@ -1301,6 +1322,7 @@ export class LabRenderer implements LabRendererApi {
       baseColors: materials.map((m) => m.color.clone()),
       shownHealth: 1,
       smokeFrom,
+      bounds: vesselBounds(definition),
     };
     this.applyDuck(view);
     return view;
@@ -1372,12 +1394,21 @@ export class LabRenderer implements LabRendererApi {
   }
 
   private applySelection(): void {
+    // A light amber hint, dimmer at night (emissive ignores lighting, so a strong tint glowed
+    // in the dark), and none on the ship the Follow or Bridge camera is riding: there the
+    // selection only says which ship to follow and washed it flat amber.
+    const riding = this.mode === 'follow' || this.mode === 'bridge' ? this.focusVessel()?.id : null;
+    const tint = 0.05 + 0.13 * Math.min(1, Math.max(0, this.daylight));
     for (const view of this.vessels.values()) {
-      const selected = view.id === this.selection;
+      const selected = view.id === this.selection && view.id !== riding;
       const capsized = view.group.userData.capsized === true;
+      const glassHidden = this.mode === 'bridge' && view.id === riding;
       for (const mat of view.materials) {
         mat.emissive.set(selected ? 0xfbbf24 : capsized ? 0x7f1d1d : 0x000000);
-        mat.emissiveIntensity = selected ? 0.45 : capsized ? 0.3 : 0;
+        mat.emissiveIntensity = selected ? tint : capsized ? 0.3 : 0;
+        // From the bridge the wheelhouse windows are around the eye: drawing their tinted
+        // slab over half the view hid the sea ahead.
+        if (mat.userData.glass) mat.visible = !glassHidden;
       }
     }
     for (const [id, probe] of this.probes) {
@@ -1477,6 +1508,38 @@ export class LabRenderer implements LabRendererApi {
   }
 
   private placeOrbit(target: THREE.Vector3, azimuth: number, polar: number, radius: number): void {
+    // Back the camera out along its ray until it is outside every hull, so zooming in on a
+    // big ship never parks the lens inside it (a solid black frame).
+    let r = radius;
+    for (let i = 0; i < 40; i++) {
+      this.setOrbit(target, azimuth, polar, r);
+      if (!this.insideVessel(this.camera.position)) break;
+      r *= 1.12;
+    }
+  }
+
+  private insideVessel(p: THREE.Vector3): boolean {
+    for (const view of this.vessels.values()) {
+      if (!view.group.visible) continue;
+      view.group.updateMatrixWorld();
+      const local = this.tmpV.copy(p);
+      view.group.worldToLocal(local);
+      const b = view.bounds;
+      const m = 1.5;
+      if (
+        local.x > b.min.x - m &&
+        local.x < b.max.x + m &&
+        local.y > b.min.y - m &&
+        local.y < b.max.y + m &&
+        local.z > b.min.z - m &&
+        local.z < b.max.z + m
+      )
+        return true;
+    }
+    return false;
+  }
+
+  private setOrbit(target: THREE.Vector3, azimuth: number, polar: number, radius: number): void {
     this.camera.up.set(0, 1, 0);
     this.camera.position.set(
       target.x + radius * Math.sin(polar) * Math.sin(azimuth),

@@ -19,6 +19,8 @@ import type { SceneryFrame, SceneryLayer, SceneryVessel } from './types';
 /** Height of a person [m] and the readability upscale applied to the sprites. */
 /** Sailors closer than this to the camera are not drawn [m]. */
 const NEAR_CULL = 6;
+/** …and from a bridge camera, where a sailor a few metres ahead filled a third of the view. */
+const BRIDGE_CULL = 16;
 
 export const SAILOR_HEIGHT = 1.8;
 export const SAILOR_UPSCALE = 1.3;
@@ -956,6 +958,7 @@ export class SailorLayer implements SceneryLayer {
       this.hidden[i] = capsized || upY < 0.35 || far || !v.group.visible;
     }
 
+    const cull = frame.bridgeView ? BRIDGE_CULL : NEAR_CULL;
     const arr = attr.array as Float32Array;
     let n = 0;
     let glows = 0;
@@ -982,7 +985,7 @@ export class SailorLayer implements SceneryLayer {
       const cx = w[12]! - cam.position.x;
       const cy = w[13]! - cam.position.y;
       const cz = w[14]! - cam.position.z;
-      if (cx * cx + cy * cy + cz * cz < NEAR_CULL * NEAR_CULL) continue;
+      if (cx * cx + cy * cy + cz * cz < cull * cull) continue;
       mesh.setMatrixAt(n, this.world);
       const lit = sailor.lantern ? night * 0.75 : 0;
       arr[4 * n] = this.frameOf(sailor, night);

@@ -663,13 +663,16 @@ void main() {
   float band = vnoise(vec2(alongW * 0.03, (acrossW + wobble) * 0.6));
   float bandFade = 1.0 - smoothstep(0.4, 1.2, foot);
   float streaks = smoothstep(0.7, 0.92, band) * vnoise(vec2(alongW, acrossW) * 0.08)
-    * smoothstep(16.0, 24.0, uWind) * 0.6 * bandFade;
+    * smoothstep(16.0, 24.0, uWind) * 0.6 * bandFade
+    // Streaks come and go along their length instead of running unbroken for kilometres.
+    * smoothstep(0.25, 0.65, vnoise(vec2(alongW * 0.004, acrossW * 0.015 + 7.0)));
   float texture1 = vnoise(label * 0.9 + uTime * 0.05) * 0.6 + vnoise(label * 3.1) * 0.4;
   float foam = breaking * smoothstep(0.25, 0.75, texture1 + breaking * 0.35);
   foam += streaks * (0.5 + 0.5 * texture1);
   foam += wakeFoam(label, foot);
   foam = clamp(foam, 0.0, 1.0);
-  vec3 foamCol = srgbToLinear(vec3(0.90, 0.94, 0.96)) * (0.35 + 0.65 * light);
+  // Foam is lit like the water around it: at night only a faint grey, not a glowing band.
+  vec3 foamCol = srgbToLinear(vec3(0.90, 0.94, 0.96)) * (0.06 + 0.94 * light);
   col = mix(col, foamCol, foam * 0.92);
 
   if (uOverlay > 0.5 && uOverlay < 1.5) {
