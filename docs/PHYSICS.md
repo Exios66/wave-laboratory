@@ -109,6 +109,33 @@ Fields are evaluated at snapshot instants (default every 1/20 s) and interpolate
 time. η uses bicubic Hermite interpolation with spectrally exact derivatives (< 0.5 % error at
 the shortest physics wavelength); other fields use Catmull–Rom.
 
+## Uniform surface current
+
+The environment can carry a uniform current **U** (speed and the bearing it flows toward). Every
+wave system is specified in the frame of the moving water, and the whole sea is advected:
+
+    η(x, t) = η_water(x − U t, t),   u(x, z, t) = u_water(x − U t, z, t) + U
+
+so each component seen from a fixed point has the Doppler-shifted frequency ω = σ(k) + k·U, and
+∂η/∂t at a fixed point gains −U·∇η. The CPU field and the GPU renderer apply the same shift
+(the shader samples at `worldXY − U t`), so the FFT textures and their agreement check are
+unchanged. Vessels feel the current through their hull forces, which act on the velocity
+through the water: resistance, cross-flow drag, manoeuvring derivatives, rudder inflow and the
+autopilot's speed through the water. A drifting hull is therefore carried along, and a ship
+holding a heading is set across its track.
+
+Not modelled: refraction by current gradients, current shear with depth, and the shortening and
+steepening of waves against an opposing current. The inspector warns when an opposing current
+exceeds half the peak group velocity, and when it exceeds the group velocity (wave blocking).
+
+## Loading condition
+
+`loadFactor` scales the displacement relative to the design. The draft is found by bisection on
+the hull mesh so that the immersed volume equals `loadFactor · ∇_design` (capped just below the
+deck), and all hydrostatics, inertia and the strip model are built at that draft. KG stays
+`kgFactor · D`, so a light ship gains GM from its wider relative waterplane and a deep-loaded one
+loses freeboard. The boot-top paint stays at the design waterline.
+
 ## Spectra
 
 - **JONSWAP** `S(ω) = α g² ω⁻⁵ exp(−5/4 (ω_p/ω)⁴) γ^r`, σ = 0.07/0.09, normalised so 4√m₀ = H_s.

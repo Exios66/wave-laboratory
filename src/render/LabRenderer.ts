@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { rotate, type Quat, type Vec3 } from '../core/vec';
 import type { GpuOceanData } from '../ocean/gpuData';
+import { currentVelocity } from '../ocean/oceanField';
 import {
   DEFAULT_WEATHER,
   type Environment,
@@ -22,6 +23,7 @@ import {
   type WindSample,
 } from '../weather/weather';
 import type { CameraMode, LabRendererApi, OverlayMode, PickResult, RendererStats } from './api';
+import { buildDuck } from './effects/duck';
 import { GpuOcean } from './ocean/GpuOcean';
 import { OCEAN_FRAG, OCEAN_VERT, SKY_FRAG, SKY_VERT } from './ocean/shaders';
 import { calmFromConditions, ease } from './scenery/ambience';
@@ -191,6 +193,9 @@ export class LabRenderer implements LabRendererApi {
   private sunBase = 2.4;
   private lastRenderT = Number.NaN;
   private daylight = 1;
+  /** Vessels that slammed or shipped green water since the last drawn frame. */
+  private readonly sprayBursts = new Set<string>();
+  private duckMode = false;
   /** Time-of-day factors from SkyLighting (night, dusk, exposure and hemisphere tint). */
   private lightState: LightingState | null = null;
   /** Last frame's weather at the camera, as 0–1 storm intensity and wind [m/s]. */
@@ -434,6 +439,8 @@ export class LabRenderer implements LabRendererApi {
     this.weatherField = new WeatherField(this.weather, env);
     this.uploadGusts();
     this.ocean.setWaveParams(env.choppiness, env.depth);
+    const current = currentVelocity(env);
+    this.ocean.setCurrent(current.x, current.y);
     (this.ocean.uniforms.uWind!.value as number) = env.windSpeed;
     this.updateLighting(0);
   }
@@ -455,7 +462,8 @@ export class LabRenderer implements LabRendererApi {
     this.islands.setEnabled(this.ambience.islands);
     this.wildlife.setEnabled(this.ambience.wildlife);
     this.birds.setEnabled(this.ambience.wildlife);
-    this.sailors.setEnabled(this.ambience.sailors);
+    // Rubber ducks have no crew.
+    this.sailors.setEnabled(this.ambience.sailors && !this.duckMode);
     this.planes.setEnabled(this.ambience.planes);
   }
 
@@ -615,7 +623,7 @@ export class LabRenderer implements LabRendererApi {
       const intensity =
         Math.min(1, kn / 18) * 0.5 +
         heave * 0.6 +
-        (state.slamming ? 1.2 : 0) +
+        (state.slamming || this.sprayBursts.has(state.id) ? 1.2 : 0) +
         (state.greenWater ? 0.8 : 0);
       if (intensity < 0.05) continue;
       const rate = intensity * 700 * budget * Math.sqrt(def.beam / 10);
@@ -648,6 +656,7 @@ export class LabRenderer implements LabRendererApi {
         );
       }
     }
+    this.sprayBursts.clear();
     // Spindrift: from Beaufort 8 the wind tears spray off the breaking crests.
     if (wind > 16 && this.frame) {
       const strength = Math.min(1, (wind - 16) / 14);
@@ -865,6 +874,18 @@ export class LabRenderer implements LabRendererApi {
     this.renderer.setSize(width, height, false);
   }
 
+  setDuckMode(on: boolean): void {
+    this.duckMode = on;
+    this.applyAmbience();
+    for (const view of this.vessels.values()) this.applyDuck(view);
+  }
+
+  private applyDuck(view: VesselView): void {
+    for (const child of view.group.children) {
+      child.visible = child.name === 'duck' ? this.duckMode : !this.duckMode;
+    }
+  }
+
   pick(x: number, y: number): PickResult | null {
     if (this.dragged) {
       this.dragged = false;
@@ -1033,10 +1054,13 @@ export class LabRenderer implements LabRendererApi {
         definition.renderHull.indices,
         hullMat,
         id,
-        definition.draft - definition.kg,
+        definition.designDraft - definition.kg,
         definition.paint,
       ),
     );
+    const duck = buildDuck(definition.length, definition.draft - definition.kg, id);
+    materials.push(...duck.materials);
+    group.add(duck.group);
 
     const shared = new Map<string, THREE.MeshStandardMaterial>();
     for (const box of definition.superstructure) {
@@ -1102,7 +1126,9 @@ export class LabRenderer implements LabRendererApi {
       group.add(disc);
     }
 
-    return { id, definition, group, materials, textures, rig };
+    const view = { id, definition, group, materials, textures, rig };
+    this.applyDuck(view);
+    return view;
   }
 
   private meshFromHull(

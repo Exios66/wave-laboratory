@@ -41,12 +41,13 @@ export function createVesselDefinition(
   type: VesselType,
   scale = 1,
   kgFactor = 0.6,
+  loadFactor = 1,
 ): VesselDefinition {
   const d = hullDesign(type);
   const s = scale;
   const rho = SEAWATER_DENSITY;
   const g = STANDARD_GRAVITY;
-  const T = d.draft * s;
+  const designDraft = d.draft * s;
   const B = d.beam * s;
   const D = d.depth * s;
 
@@ -54,9 +55,11 @@ export function createVesselDefinition(
   const renderKeel = loftHull(d.shape, d.renderLoft);
   const zero = { x: 0, y: 0, z: 0 };
   const scaledKeel = transformMesh(physicsKeel.mesh, s, zero);
-
-  // Hydrostatics at the design draft in the keel frame (water plane at z = T).
   const ident = quatToMat3(quatIdentity());
+  // Loading condition: the draft at which the hull displaces loadFactor × the design volume.
+  const T = loadedDraft(scaledKeel, ident, designDraft, D, loadFactor);
+
+  // Hydrostatics at the loaded draft in the keel frame (water plane at z = T).
   const keelProps = submergedProperties(scaledKeel, ident, { x: 0, y: 0, z: -T });
   const kg = kgFactor * D;
   const cog: Vec3 = { x: keelProps.centroid.x, y: 0, z: kg };
@@ -140,6 +143,7 @@ export function createVesselDefinition(
     beam: B,
     depth: D,
     draft: T,
+    designDraft,
     mass,
     inertia,
     kg,
@@ -178,6 +182,31 @@ export function createVesselDefinition(
       : null,
     palette: { ...d.palette },
   };
+}
+
+/**
+ * Draft [m] at which the keel-frame hull displaces `factor` times its volume at the design draft,
+ * found by bisection (volume rises monotonically with draft). Capped just below the deck.
+ */
+export function loadedDraft(
+  keelMesh: Parameters<typeof submergedProperties>[0],
+  rot: Parameters<typeof submergedProperties>[1],
+  designDraft: number,
+  depth: number,
+  factor: number,
+): number {
+  if (Math.abs(factor - 1) < 1e-9) return designDraft;
+  const volumeAt = (t: number) => submergedProperties(keelMesh, rot, { x: 0, y: 0, z: -t }).volume;
+  const target = factor * volumeAt(designDraft);
+  let lo = 0.02 * designDraft;
+  let hi = 0.98 * depth;
+  if (volumeAt(hi) <= target) return hi;
+  for (let i = 0; i < 40; i++) {
+    const mid = 0.5 * (lo + hi);
+    if (volumeAt(mid) < target) lo = mid;
+    else hi = mid;
+  }
+  return 0.5 * (lo + hi);
 }
 
 const DEFAULT_PAINT: HullPaint = { bottom: 0x7f1d1d, boot: 0x1c1917, topside: 0x1e3a5f };

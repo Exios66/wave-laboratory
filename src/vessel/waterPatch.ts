@@ -205,7 +205,10 @@ export class LocalWater {
   fluidBelow(x: number, y: number, z: number, eta: number, accel: boolean): number {
     this.eta = eta;
     if (this.calm) {
-      this.head = this.u = this.v = this.w = 0;
+      // Still water, possibly moving as a whole with a uniform current.
+      this.head = this.w = 0;
+      this.u = this.field.currentX;
+      this.v = this.field.currentY;
       this.au = this.av = this.aw = 0;
       return -z;
     }

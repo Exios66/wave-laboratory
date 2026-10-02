@@ -122,6 +122,14 @@ export const EnvironmentSchema = z.object({
   /** 10 m wind used for visuals (whitecaps, spray) and vessel windage [m/s]. */
   windSpeed: finite().min(0).max(45).default(8),
   windDirectionDeg: finite().min(0).max(360).default(270),
+  /**
+   * Uniform surface current [m/s]. The whole water body moves: wave spectra are given in the
+   * frame of the moving water (so the waves seen from a fixed point are Doppler shifted) and
+   * ships drift with it, because their hull forces act on the velocity through the water.
+   */
+  currentSpeed: finite().min(0).max(5).default(0),
+  /** Compass bearing the current flows TOWARD [deg] (oceanographic convention). */
+  currentDirectionDeg: finite().min(0).max(360).default(0),
   /** Horizontal choppiness λ. 1 = first-order Lagrangian (physical). */
   choppiness: finite().min(0).max(1.5).default(1),
   /** Sun elevation/azimuth for rendering [deg]. */
@@ -199,6 +207,12 @@ export const VesselSchema = z.object({
   autopilot: z.boolean().default(true),
   /** Vertical centre of gravity as a fraction of depth (KG / D). Higher = less stable. */
   kgFactor: finite().min(0.2).max(1.2).default(0.6),
+  /**
+   * Loading condition: displacement as a fraction of the design displacement (cargo and
+   * ballast). The ship floats at the draft that carries this mass: 0.5 is light ballast, 1 the
+   * design load, above 1 overloaded with less freeboard.
+   */
+  loadFactor: finite().min(0.4).max(1.25).default(1),
 });
 export type VesselConfig = z.infer<typeof VesselSchema>;
 

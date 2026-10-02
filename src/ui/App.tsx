@@ -7,6 +7,7 @@ import { Notices } from './components/Notices';
 import { ScenePanel } from './components/ScenePanel';
 import { TopBar } from './components/TopBar';
 import { Viewport } from './components/Viewport';
+import { useEasterEggs } from './easterEggs';
 import { experimentFromLocation } from './fileOps';
 import { getRuntime } from './runtime';
 import { useLab, type MobilePanel } from './store';
@@ -192,6 +193,7 @@ function MobileTabs() {
 
 export function App() {
   useGlobalShortcuts();
+  useEasterEggs();
   useTheme();
   useInitialExperimentFromUrl();
   useDocumentTitle();

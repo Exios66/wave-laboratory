@@ -86,6 +86,7 @@ export function newVessel(type: VesselType, count: number): VesselConfig {
     speedKn: type === 'box-barge' ? 0 : type === 'pirate-ship' ? 5 : 6,
     autopilot: type !== 'box-barge',
     kgFactor: 0.6,
+    loadFactor: 1,
   };
 }
 

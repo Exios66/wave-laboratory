@@ -65,7 +65,10 @@ export class Simulation {
   }
 
   diagnostics(): SeaDiagnostics {
-    return seaDiagnostics(this.field.sea, 4 * Math.sqrt(this.field.representedVariance));
+    return seaDiagnostics(this.field.sea, 4 * Math.sqrt(this.field.representedVariance), {
+      x: this.field.currentX,
+      y: this.field.currentY,
+    });
   }
 
   /** Run exactly one fixed step. */
