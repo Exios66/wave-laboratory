@@ -84,12 +84,12 @@ export class SailorLayer implements SceneryLayer {
     // Keep clear of the stern propeller and the stem.
     const aftX = -def.length * 0.18;
     const fwdX = Math.min(bow.x - def.length * 0.06, def.length * 0.38);
-    // Wide freighters: walk the side catwalks outside the cargo footprint.
-    const sideBias = def.beam > 12 ? 0.38 : 0.18;
+    // Wide freighters: walk the outer catwalk outside the cargo footprint (≈ ±0.43–0.47 B).
+    const sideBias = def.beam > 12 ? 0.455 : 0.2;
     for (let i = 0; i < count; i++) {
       const seed = Math.imul(Math.round(def.length * 1000) + i, 2654435761) >>> 0;
       const mesh = this.makeSailor(seed);
-      const lane = (i % 2 === 0 ? 1 : -1) * def.beam * (sideBias + hash01(seed + 3) * 0.06);
+      const lane = (i % 2 === 0 ? 1 : -1) * def.beam * (sideBias + hash01(seed + 3) * 0.015);
       const sailor: Sailor = {
         mesh,
         vesselId: v.id,
@@ -100,8 +100,8 @@ export class SailorLayer implements SceneryLayer {
         fwd: new THREE.Vector3(fwdX, 0, zDeck),
       };
       mesh.position.set(aftX, zDeck, -lane);
-      // Readable at ship scales without looking giant on small craft.
-      const scale = Math.min(2.8, Math.max(1.1, def.beam * 0.14));
+      // Slightly larger than life so they read at typical orbit distances.
+      const scale = Math.min(4.5, Math.max(1.4, def.beam * 0.2));
       mesh.scale.setScalar(scale);
       // Draw above nearby deck plates so figures are not buried in cargo.
       mesh.traverse((c) => {
