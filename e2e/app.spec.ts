@@ -139,4 +139,40 @@ test.describe('Wave Laboratory app', () => {
       'Wave tank: Wigley hull',
     );
   });
+
+  test('runs the hurricane, edits the weather and keeps values when tabbing', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    await page.getByRole('button', { name: 'Presets' }).click();
+    await page.getByRole('button', { name: /Hurricane/ }).click();
+    await waitForSimulation(page);
+
+    const scene = page.getByRole('navigation', { name: 'Scene' });
+    await scene.getByRole('button', { name: /^Weather/ }).click();
+    const wind = page.getByRole('textbox', { name: 'Mean wind (10 m)' });
+    await expect(wind).toHaveValue('42.0');
+    // A typed value between slider steps must survive tabbing across the slider, which would
+    // otherwise write back its step-snapped copy (42.5).
+    await wind.fill('42.3');
+    await wind.press('Enter');
+    await waitForSimulation(page);
+    for (let i = 0; i < 3; i++) await page.keyboard.press('Shift+Tab');
+    for (let i = 0; i < 6; i++) await page.keyboard.press('Tab');
+    await expect(wind).toHaveValue('42.3');
+
+    const results = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
+      .analyze();
+    expect(results.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+
+    await page
+      .getByRole('group', { name: 'Weather presets' })
+      .getByRole('button', { name: 'Gale' })
+      .click();
+    await waitForSimulation(page);
+    await expect(wind).not.toHaveValue('42.3');
+    await page.waitForTimeout(1500);
+    expect(errors).toEqual([]);
+  });
 });
