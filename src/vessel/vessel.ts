@@ -22,7 +22,13 @@ import { integrateQuat, quatFromEuler, quatToEuler, type Quat, type Vec3 } from 
 import { headingFromYaw, yawFromHeading } from '../ocean/systems';
 import type { OceanField } from '../ocean/oceanField';
 import type { VesselConfig } from '../schema/experiment';
-import type { VesselCommand, VesselDefinition, VesselKinematics, VesselTelemetry } from './api';
+import type {
+  HullFootprint,
+  VesselCommand,
+  VesselDefinition,
+  VesselKinematics,
+  VesselTelemetry,
+} from './api';
 import {
   resistanceCoefficient,
   rudderLift,
@@ -30,6 +36,7 @@ import {
   type ResistanceParams,
 } from './coefficients';
 import { Autopilot, rateLimit } from './control';
+import { DamageModel, steeringFactor, thrustFactor, type DamageCause } from './damage';
 import { HullForces, type RigidState } from './hullForces';
 import { buildHydroModel, CROSS_FLOW_CD, type HydroModel } from './hydroModel';
 import { quatToMat3, solveFloating } from './hydrostatics';
@@ -56,6 +63,8 @@ export interface VesselOptions {
   patchColumns?: number;
   /** Weather wind acting on the windage and sails (none = still air). */
   wind?: WindProvider;
+  /** Accumulate structural damage (default true). Off: health stays 1. */
+  damage?: boolean;
 }
 
 export interface VesselDiagnostics {
@@ -95,6 +104,8 @@ export class Vessel {
   private readonly water: LocalWater;
   private readonly hull: HullForces;
   private readonly autopilot = new Autopilot();
+  /** Structural health (see `damage.ts`). */
+  readonly damage: DamageModel;
   private readonly s: RigidState;
   private q: Quat;
   private readonly gen = new Float64Array(6);
@@ -153,6 +164,7 @@ export class Vessel {
     this.id = id;
     this.definition = definition;
     this.wind = options.wind;
+    this.damage = new DamageModel(definition.length, options.damage ?? true);
     const rho = field.env.waterDensity;
     const g = field.env.gravity;
     const hydro = buildHydroModel(definition, rho, g);
@@ -323,6 +335,48 @@ export class Vessel {
       this.autopilotOn = cmd.autopilot;
       this.autopilot.reset();
     }
+    if (cmd.repair) this.damage.repair();
+  }
+
+  /**
+   * Collision response from the simulation: an impulse [N·s] and a separating displacement [m],
+   * both horizontal in the world frame, applied to the CoG (no angular part).
+   */
+  applyCollision(impulse: { x: number; y: number }, push: { x: number; y: number }): void {
+    const s = this.s;
+    const R = s.rot;
+    const dvx = impulse.x / this.definition.mass;
+    const dvy = impulse.y / this.definition.mass;
+    // World → body: ν += Rᵀ Δv.
+    s.u += R[0]! * dvx + R[3]! * dvy;
+    s.v += R[1]! * dvx + R[4]! * dvy;
+    s.w += R[2]! * dvx + R[5]! * dvy;
+    s.px += push.x;
+    s.py += push.y;
+  }
+
+  /** Remove `amount` of health (no-op when damage is off). */
+  applyDamage(amount: number, cause: DamageCause): void {
+    this.damage.damage(amount, cause);
+  }
+
+  /** Horizontal hull footprint and momentum data for collision tests (world frame). */
+  hullFootprint(): HullFootprint {
+    const s = this.s;
+    const R = s.rot;
+    const def = this.definition;
+    const fl = Math.hypot(R[0]!, R[3]!) || 1;
+    return {
+      x: s.px,
+      y: s.py,
+      fx: R[0]! / fl,
+      fy: R[3]! / fl,
+      halfLength: def.length / 2,
+      halfBeam: def.beam / 2,
+      mass: def.mass,
+      vx: R[0]! * s.u + R[1]! * s.v + R[2]! * s.w,
+      vy: R[3]! * s.u + R[4]! * s.v + R[5]! * s.w,
+    };
   }
 
   /** Displace the vessel from its current state (used for decay tests and scripted starts). */
@@ -386,19 +440,35 @@ export class Vessel {
       const ay = this.windV - (R0[3]! * s.u + R0[4]! * s.v);
       const apparent = Math.hypot(ax, ay);
       const target = Math.max(0, Math.min(1, throttleTarget));
-      const wanted = this.autopilotOn ? Math.min(target, reefedSet(apparent)) : target;
+      // Damaged rigging carries less canvas (none once disabled).
+      const intact = thrustFactor(this.damage.health);
+      const wanted = Math.min(
+        intact,
+        this.autopilotOn ? Math.min(target, reefedSet(apparent)) : target,
+      );
       // Setting or taking in sail takes time (~20 s for the full plan).
       this.sailSet = rateLimit(this.sailSet, wanted, 0.05, dt);
     }
-    const maxR = prop.maxRudderDeg * DEG;
-    rudderTarget = Math.max(-maxR, Math.min(maxR, rudderTarget));
-    this.rudder = rateLimit(this.rudder, rudderTarget, prop.rudderRateDeg * DEG, dt);
+    // Damage: weakened steering gear below 25 % health; a disabled ship's rudder trails
+    // amidships and its engine stops.
+    const health = this.damage.health;
+    const steer = steeringFactor(health);
+    const maxR = prop.maxRudderDeg * DEG * Math.max(steer, 0.2);
+    rudderTarget = health > 0 ? Math.max(-maxR, Math.min(maxR, rudderTarget)) : 0;
+    const rudderRate = prop.rudderRateDeg * DEG * Math.max(steer, 0.2);
+    this.rudder = rateLimit(this.rudder, rudderTarget, rudderRate, dt);
     this.throttle = throttleTarget;
+    const power = thrustFactor(health);
     const thrustCmd =
-      throttleTarget >= 0
+      power *
+      (throttleTarget >= 0
         ? throttleTarget * prop.maxThrust
-        : throttleTarget * prop.maxThrust * prop.asternFraction;
-    this.thrust += (thrustCmd - this.thrust) * (1 - Math.exp(-dt / prop.thrustTimeConstant));
+        : throttleTarget * prop.maxThrust * prop.asternFraction);
+    if (power > 0) {
+      this.thrust += (thrustCmd - this.thrust) * (1 - Math.exp(-dt / prop.thrustTimeConstant));
+    } else {
+      this.thrust = 0;
+    }
 
     // ---- dynamics with substeps
     const n = Math.min(32, Math.max(1, Math.ceil(dt * this.rateMax)));
@@ -406,6 +476,7 @@ export class Vessel {
     const h = dt / n;
     let slam = false;
     let green = false;
+    let greenDepth = 0;
     const M = this.hydro.massInverse;
     for (let k = 0; k < n; k++) {
       const tk = t + k * h;
@@ -413,6 +484,7 @@ export class Vessel {
       this.evaluate(tk);
       slam ||= this.hull.slamming;
       green ||= this.hull.greenWater;
+      greenDepth = Math.max(greenDepth, this.hull.greenWaterDepth);
       const f = this.gen;
       const a = this.acc;
       for (let i = 0; i < 6; i++) {
@@ -449,6 +521,23 @@ export class Vessel {
     this.bowVz = bowVz;
     this.bridgeVz = bridgeVz;
     this.stepped = true;
+
+    // ---- structural damage from this step's seaway and weather
+    this.damage.step({
+      dt,
+      slamming: slam,
+      bowAccel: this.bowAccel,
+      greenWaterDepth: greenDepth,
+      windSpeed: Math.hypot(this.windU, this.windV),
+      heelDeg: this.heelDeg,
+      capsized: this.capsized,
+    });
+  }
+
+  /** Heel beyond the angle of vanishing stability or inverted. */
+  get capsized(): boolean {
+    const heel = this.heelDeg;
+    return heel > 90 || heel > this.definition.hydrostatics.avsDeg;
   }
 
   private pointVerticalVelocity(r: Vec3): number {
@@ -686,8 +775,6 @@ export class Vessel {
   telemetry(): VesselTelemetry {
     const k = this.kinematics;
     const e = quatToEuler(this.q);
-    const heel = this.heelDeg;
-    const avs = this.definition.hydrostatics.avsDeg;
     return {
       ...k,
       id: this.id,
@@ -703,7 +790,7 @@ export class Vessel {
       submergence: this.hull.volume / (this.definition.mass / this.hydro.rho),
       slamming: this.slamming,
       greenWater: this.greenWater,
-      capsized: heel > 90 || heel > avs,
+      capsized: this.capsized,
       windSpeed: Math.hypot(this.windU, this.windV),
       windFromDeg: compassFrom(this.windU, this.windV),
       apparentWind: Math.hypot(this.apparentX, this.apparentY),
@@ -711,6 +798,9 @@ export class Vessel {
       windForce: this.windForce,
       sailSet: this.definition.sails ? this.sailSet : 0,
       braceDeg: this.sailOut.braceDeg,
+      health: this.damage.health,
+      disabled: this.damage.disabled,
+      damageCause: this.damage.cause,
     };
   }
 

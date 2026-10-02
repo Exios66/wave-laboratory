@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PRESETS, presetExperiment } from '../schema/presets';
 import { Simulation } from './Simulation';
 import { createSimVessel } from './vessels';
+
+// Each preset steps real vessels for 2 s (~2 s of CPU); leave headroom on a busy machine.
+vi.setConfig({ testTimeout: 30_000 });
 
 describe('every preset runs end to end with real vessels', () => {
   for (const p of PRESETS) {

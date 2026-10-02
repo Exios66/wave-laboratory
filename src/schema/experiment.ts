@@ -243,6 +243,12 @@ export const ExperimentSchema = z.object({
     .max(1 / 30)
     .default(1 / 120),
   quality: OceanQualitySchema.default('high'),
+  /**
+   * Vessels take structural damage from slamming, green water, storms, heavy heel and
+   * collisions, losing power and steering. Off: health stays full and colliding hulls still
+   * bounce apart. Defaults on (older files without the field parse unchanged).
+   */
+  damage: z.boolean().default(true),
 });
 export type Experiment = z.infer<typeof ExperimentSchema>;
 

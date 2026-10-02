@@ -8,7 +8,7 @@
  */
 import type { LabRendererApi } from '../render/api';
 import { SimClient } from '../sim/SimClient';
-import type { FromWorker } from '../sim/types';
+import type { FromWorker, SimFrame } from '../sim/types';
 import type { VesselCommand } from '../vessel/api';
 import {
   detectDeviceProfile,
@@ -16,6 +16,7 @@ import {
   graphicsBudget,
   ResolutionGovernor,
 } from './deviceProfile';
+import { HealthNotifier } from './health';
 import { useLab } from './store';
 import { telemetry } from './telemetry';
 
@@ -29,6 +30,7 @@ export class LabRuntime {
   private resizeObserver: ResizeObserver | null = null;
   private lastLoaded: Extract<FromWorker, { type: 'loaded' }> | null = null;
   private readonly governor = new ResolutionGovernor();
+  private readonly healthNotices = new HealthNotifier();
   private canvas: HTMLCanvasElement | null = null;
   private visualQuality: string | null = null;
   /** Smoothed time the picture is drawn at. Physics frames arrive in bursts; this glides. */
@@ -57,6 +59,7 @@ export class LabRuntime {
       if (frame.t + 1e-4 < this.displayT) this.displayT = frame.t;
       this.renderer?.setFrame(frame);
       const now = performance.now();
+      this.announceHealth(frame, now);
       const playing = useLab.getState().playing;
       if (!playing || now - this.uiStamp > 80) {
         this.uiStamp = now;
@@ -104,6 +107,15 @@ export class LabRuntime {
     this.load();
   }
 
+  /** Notices for collisions and disabled vessels (every frame, so none are missed). */
+  private announceHealth(frame: SimFrame, now: number): void {
+    const s = useLab.getState();
+    const names = (id: string) => s.experiment.vessels.find((v) => v.id === id)?.name ?? id;
+    for (const message of this.healthNotices.check(frame, names, now)) {
+      s.notify('warning', message);
+    }
+  }
+
   private targetQuality() {
     const s = useLab.getState();
     return effectiveQuality(s.experiment.quality, s.performance, detectDeviceProfile());
@@ -113,6 +125,7 @@ export class LabRuntime {
     const s = useLab.getState();
     this.loadedRevision = s.revision;
     telemetry.clear();
+    this.healthNotices.reset();
     const quality = this.targetQuality();
     this.visualQuality = quality;
     this.renderer?.setQuality(quality);

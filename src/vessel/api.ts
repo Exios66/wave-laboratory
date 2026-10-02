@@ -6,6 +6,7 @@
  */
 import type { Quat, Vec3 } from '../core/vec';
 import type { VesselType } from '../schema/experiment';
+import type { DamageCause } from './damage';
 
 export interface TriangleMesh {
   /** xyz triples [m], body frame relative to CoG. */
@@ -195,6 +196,28 @@ export interface VesselCommand {
   rudderDeg?: number;
   /** Manual throttle −1…1 (used when autopilot is off). */
   throttle?: number;
+  /** Restore health to 1 and bring a disabled vessel back into service. */
+  repair?: boolean;
+}
+
+export type { DamageCause };
+
+/** Horizontal hull footprint for collision tests (world frame, x east, y north). */
+export interface HullFootprint {
+  /** CoG position [m]. */
+  x: number;
+  y: number;
+  /** Unit vector of the bow direction in the horizontal plane. */
+  fx: number;
+  fy: number;
+  /** Half length and half beam of the hull rectangle [m]. */
+  halfLength: number;
+  halfBeam: number;
+  /** Displacement mass [kg]. */
+  mass: number;
+  /** Horizontal CoG velocity [m/s]. */
+  vx: number;
+  vy: number;
 }
 
 /** Instantaneous kinematic state (CoG). */
@@ -241,4 +264,10 @@ export interface VesselTelemetry extends VesselKinematics {
   /** Sails (sailing ships): fraction of canvas set 0–1 and yard brace angle [deg]. */
   sailSet: number;
   braceDeg: number;
+  /** Structural health 0–1 (1 = intact, 0 = disabled). Stays 1 when damage is off. */
+  health: number;
+  /** Health 0: engine and steering dead, the vessel drifts until repaired. */
+  disabled: boolean;
+  /** Most recent significant cause of damage, cleared ~5 s after it stops; null = none. */
+  damageCause: DamageCause | null;
 }
