@@ -54,13 +54,17 @@ Requires Node ≥ 22 and a browser with WebGL 2.
 ## Deploying the live demo (from `main`, no Actions)
 
 There are no GitHub Actions workflows. Quality checks run locally (`pnpm check`, `pnpm test:e2e`).
-The demo is the production build committed into [`docs/`](docs/) on **`main`**, next to the
-markdown notes. GitHub Pages serves that folder directly.
+The demo is the production build committed on **`main`**. GitHub Pages is set to deploy from
+that branch at the repository root (`/`), not from `gh-pages`. The same files are also copied
+into [`docs/`](docs/) beside the markdown notes.
 
-1. `pnpm deploy:pages` builds the app and commits it into `docs/` on the current branch. Use
-   `--dry-run` to update the folder without committing. Merge that commit to `main`.
-2. Pages source: **Settings → Pages → Build and deployment → Deploy from a branch → `main` →
-   `/docs`**.
+`index.html` in the repository root is the built site. Local development still starts from
+[`vite.index.html`](vite.index.html); `pnpm dev` serves that file at `/`.
+
+1. `pnpm deploy:pages` builds the app and commits `index.html`, `assets/` and `docs/` on the
+   current branch. Use `--dry-run` to update the files without committing. Merge that commit
+   to `main`.
+2. Pages source, already set: **Settings → Pages → Deploy from a branch → `main` → `/ (root)`**.
 
 The site is served at `https://exios66.github.io/wave-laboratory/`. The build uses relative
 paths, so it also works from any other static host or sub-folder.
