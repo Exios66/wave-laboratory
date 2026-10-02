@@ -63,6 +63,8 @@ export interface SceneryFrame {
   /** Seconds since the renderer started (wall clock). Good for idle animation. */
   wallT: number;
   camera: THREE.PerspectiveCamera;
+  /** The camera is on a ship's bridge (crew right in front of the lens are hidden). */
+  bridgeView?: boolean;
   /** 0 = storm, 1 = fair and calm. Smoothed over several seconds. */
   calm: number;
   /** 0 = deep night, 1 = full daylight. */

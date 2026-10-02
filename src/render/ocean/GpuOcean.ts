@@ -129,8 +129,11 @@ export class GpuOcean {
       uOverlay: { value: 0 },
       uFogDensity: { value: 1e-4 },
       uWakeCount: { value: 0 },
-      uWakeA: { value: Array.from({ length: 4 }, () => new THREE.Vector4()) },
-      uWakeB: { value: Array.from({ length: 4 }, () => new THREE.Vector4()) },
+      // Set by the renderer from its WakeField.
+      uWakeTex: { value: null },
+      uWakeShip: { value: [] },
+      uWakeInfo: { value: [] },
+      uWakeBox: { value: [] },
     };
 
     const geo = new THREE.PlaneGeometry(2, 2);

@@ -41,12 +41,12 @@ function simulate(seed: number, hours: number, calm = 1, view = VIEW) {
 }
 
 describe('crossing schedule', () => {
-  it('is sparse: about one crossing every couple of minutes', () => {
+  it('comes round about once a minute, so the flights are seen without waiting long', () => {
     const { started } = simulate(7, 8);
     const gaps = started.slice(1).map((c, i) => c.startT - started[i]!.startT);
     const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
-    expect(mean).toBeGreaterThan(100);
-    expect(mean).toBeLessThan(150);
+    expect(mean).toBeGreaterThan(45);
+    expect(mean).toBeLessThan(75);
     expect(Math.min(...gaps)).toBeGreaterThanOrEqual(PLANE_SCHEDULE.minIntervalS - 1e-9);
   });
 

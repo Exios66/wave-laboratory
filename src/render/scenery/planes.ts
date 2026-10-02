@@ -1,7 +1,7 @@
 /**
  * Lost planes: rare old aircraft crossing the sky, as if from another time.
  *
- * Every couple of minutes (wall clock) a flight from the Bermuda Triangle's lore drifts across
+ * About once a minute (wall clock) a flight from the Bermuda Triangle's lore drifts across
  * the sky — five TBM Avenger torpedo bombers in loose formation (Flight 19, December 1945), a
  * lone PBM Mariner flying boat, a Douglas DC-3, or an Avro Tudor four-prop airliner (Star Tiger,
  * Star Ariel). They do not arrive from the horizon: each one condenses out of a faint shimmer
@@ -67,13 +67,13 @@ export const MAX_FLIGHT_SIZE = 5;
 
 export const PLANE_SCHEDULE = {
   /** Mean wall-clock seconds between crossings in fair weather. */
-  meanIntervalS: 120,
+  meanIntervalS: 55,
   /** …and in a storm, when the lost flights are a little more restless. */
-  stormMeanIntervalS: 85,
+  stormMeanIntervalS: 40,
   /** Never two crossings closer together than this. */
-  minIntervalS: 25,
+  minIntervalS: 15,
   /** Delay before the first crossing after start (or after the layer is switched on). */
-  firstDelayS: [20, 50] as const,
+  firstDelayS: [6, 14] as const,
   maxConcurrent: 2,
   /** Cruise altitude band [m above the sea]. */
   minAltitude: 250,
@@ -84,7 +84,7 @@ export const PLANE_SCHEDULE = {
   maxDurationS: 90,
   /** Horizontal distance of the point of closest approach from the camera [m]. */
   minRange: 700,
-  maxRange: 7000,
+  maxRange: 4500,
   /** Largest gentle turn rate [rad/s]. */
   maxTurnRate: 0.004,
 } as const;
@@ -205,7 +205,7 @@ function formation(rng: Pcg32, kind: AircraftKind): FormationMember[] {
 }
 
 /**
- * Plan one crossing. Usually (70 %) it passes in front of the camera, 6–12° above the horizon,
+ * Plan one crossing. Usually (85 %) it passes in front of the camera, 6–12° above the horizon,
  * so it is seen without looking up; otherwise it may cross anywhere in the sky.
  */
 export function planCrossing(
@@ -219,7 +219,7 @@ export function planCrossing(
   const kind = chooseAircraft(rng, calm);
   const spec = AIRCRAFT[kind];
   const fLen = Math.hypot(view.forwardX, view.forwardZ);
-  const inView = fLen > 1e-6 && rng.nextFloat() < 0.7;
+  const inView = fLen > 1e-6 && rng.nextFloat() < 0.85;
   // Passes in view fly lower and nearer, so they cross the band just above the horizon that a
   // sea-level camera actually shows; the rest may be anywhere up to the ceiling.
   const top = inView ? S.inViewMaxAltitude : S.maxAltitude;
@@ -622,7 +622,7 @@ const GHOST_COLOR = new THREE.Color(0x8f9a9c);
 const GHOST_EMISSIVE = new THREE.Color(0x1c2427);
 const SHIMMER_COLOR = new THREE.Color(0xcfe0e6);
 const LIGHT_COLORS = [0xff3a2a, 0x3aff6a, 0xfff6e8] as const;
-const BASE_OPACITY = 0.8;
+const BASE_OPACITY = 0.9;
 /** Navigation lights keep about this angular size [rad] whatever the distance. */
 const LIGHT_ANGULAR = 0.0045;
 
@@ -780,7 +780,7 @@ export class PlaneLayer implements SceneryLayer {
       const dz = p.z - cam.position.z;
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
       // Own altitude-appropriate haze: always a little ghostly, more so far away.
-      const hazeK = 0.3 + 0.45 * (1 - Math.exp(-dist / 6000));
+      const hazeK = 0.18 + 0.4 * (1 - Math.exp(-dist / 6000));
       slot.bodyMat.color.copy(GHOST_COLOR).lerp(this.haze, hazeK);
       slot.bodyMat.emissive.copy(GHOST_EMISSIVE).multiplyScalar(0.4 + 0.6 * daylight);
       slot.bodyMat.opacity = BASE_OPACITY * o * bodyVis;

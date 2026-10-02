@@ -176,6 +176,15 @@ export function TopBar() {
           <button
             type="button"
             className="btn btn--icon"
+            aria-label="Settings"
+            title="Settings: day and night, scenery"
+            onClick={() => lab().openDialog('settings')}
+          >
+            <Icon name="settings" />
+          </button>
+          <button
+            type="button"
+            className="btn btn--icon"
             aria-label="Help and keyboard shortcuts"
             title="Help (?)"
             aria-keyshortcuts="Shift+?"

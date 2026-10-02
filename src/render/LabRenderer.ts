@@ -40,8 +40,9 @@ import {
 } from './scenery/types';
 import { WildlifeLayer } from './scenery/wildlife';
 import { createRadialOceanGeometry, OCEAN_DENSITY, OCEAN_SLICES } from './scene/oceanMesh';
-import { RainField, SprayPool } from './scene/particles';
+import { RainField, SMOKE_STYLE, SprayPool } from './scene/particles';
 import { RigView } from './scene/rig';
+import { WakeField, type WakeSource } from './scene/wakes';
 import { flightDeckTexture, jollyRogerTexture } from './scene/textures';
 
 export interface LabRendererOptions {
@@ -90,6 +91,31 @@ interface VesselView {
   materials: THREE.MeshStandardMaterial[];
   textures: THREE.Texture[];
   rig: RigView | null;
+  /** Paint colours as built, darkened toward soot as the ship is damaged. */
+  baseColors: THREE.Color[];
+  /** Health the paint was last drawn for. */
+  shownHealth: number;
+  /** Body-frame point smoke rises from (funnel or top of the superstructure). */
+  smokeFrom: Vec3;
+  /** Bounds of hull and superstructure in the group's (Three.js body) axes. */
+  bounds: THREE.Box3;
+}
+
+/** Hull and superstructure bounds of a vessel, in its group's Three.js body axes. */
+function vesselBounds(def: VesselDefinition): THREE.Box3 {
+  const box = new THREE.Box3();
+  const v = new THREE.Vector3();
+  const p = def.renderHull.positions;
+  for (let i = 0; i < p.length; i += 3) box.expandByPoint(v.set(p[i]!, p[i + 2]!, -p[i + 1]!));
+  for (const b of def.superstructure) {
+    const c = b.center;
+    const h = b.size;
+    const r = Math.hypot(h.x, h.y) / 2;
+    const half = b.yawDeg ? { x: r, y: r } : { x: h.x / 2, y: h.y / 2 };
+    box.expandByPoint(v.set(c.x - half.x, c.z - h.z / 2, -(c.y - half.y)));
+    box.expandByPoint(v.set(c.x + half.x, c.z + h.z / 2, -(c.y + half.y)));
+  }
+  return box;
 }
 
 function srgbToLinear(c: number): number {
@@ -184,6 +210,9 @@ export class LabRenderer implements LabRendererApi {
   private quality: OceanQuality = 'high';
   private rain: RainField;
   private spray: SprayPool;
+  private smoke: SprayPool;
+  /** Collisions already turned into spray (keyed by time and pair). */
+  private readonly seenCollisions = new Set<string>();
   private weather: Weather = DEFAULT_WEATHER;
   private env: Environment | null = null;
   private weatherField: WeatherField | null = null;
@@ -207,6 +236,9 @@ export class LabRenderer implements LabRendererApi {
   private readonly probes = new Map<string, THREE.Object3D>();
   private readonly pickables: THREE.Object3D[] = [];
   private readonly tmp = new THREE.Vector3();
+  private readonly tmpV = new THREE.Vector3();
+  private readonly wakes = new WakeField();
+  private readonly wakeSources: WakeSource[] = [];
   private readonly look = new THREE.Vector3();
   private readonly onLost: (ev: Event) => void;
   private readonly onRestored: () => void;
@@ -268,6 +300,9 @@ export class LabRenderer implements LabRendererApi {
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       context: gl,
+      // A reversed (1 → 0) depth buffer keeps float precision all the way to the horizon, so
+      // decks, superstructure and hull paint no longer shimmer (z-fight) on distant ships.
+      reversedDepthBuffer: gl.getExtension('EXT_clip_control') !== null,
       antialias: tier === 'full',
       alpha: false,
       powerPreference: 'high-performance',
@@ -298,6 +333,10 @@ export class LabRenderer implements LabRendererApi {
       uSquall: { value: new THREE.Vector4(-1e9, -1e9, -1e9, 0) },
       uSquallOn: { value: 0 },
       uSquallDur: { value: 240 },
+      uWakeTex: { value: this.wakes.texture },
+      uWakeShip: { value: this.wakes.ship },
+      uWakeInfo: { value: this.wakes.info },
+      uWakeBox: { value: this.wakes.box },
     });
 
     this.oceanMesh = new THREE.Mesh(
@@ -358,7 +397,8 @@ export class LabRenderer implements LabRendererApi {
     const budget = BUDGET[this.quality];
     this.rain = new RainField(budget.rain);
     this.spray = new SprayPool(budget.spray);
-    this.scene.add(this.rain.object, this.spray.object);
+    this.smoke = new SprayPool(Math.round(budget.spray / 3), SMOKE_STYLE);
+    this.scene.add(this.rain.object, this.spray.object, this.smoke.object);
     this.applyQualityUniforms();
 
     this.onLost = (ev: Event) => {
@@ -496,12 +536,14 @@ export class LabRenderer implements LabRendererApi {
     this.oceanMesh.geometry.dispose();
     this.oceanMesh.geometry = createRadialOceanGeometry(OCEAN_SLICES[quality]);
     const budget = BUDGET[quality];
-    this.scene.remove(this.rain.object, this.spray.object);
+    this.scene.remove(this.rain.object, this.spray.object, this.smoke.object);
     this.rain.dispose();
     this.spray.dispose();
+    this.smoke.dispose();
     this.rain = new RainField(budget.rain);
     this.spray = new SprayPool(budget.spray);
-    this.scene.add(this.rain.object, this.spray.object);
+    this.smoke = new SprayPool(Math.round(budget.spray / 3), SMOKE_STYLE);
+    this.scene.add(this.rain.object, this.spray.object, this.smoke.object);
     this.applyQualityUniforms();
     // The water's gust patches are switched off on low quality.
     this.uploadGusts();
@@ -601,10 +643,12 @@ export class LabRenderer implements LabRendererApi {
     const camDt = Number.isFinite(dt) ? Math.min(0.1, Math.max(0, dt)) : 0;
     this.rain.update(t, rain, this.windThree, light);
     this.emitSpray(camDt, wind);
+    this.emitDamage(camDt);
     const pixelScale =
       this.renderer.getDrawingBufferSize(this.tmp2).y /
       (2 * Math.tan((this.camera.fov * Math.PI) / 360));
     this.spray.update(camDt, this.windThree, light, pixelScale);
+    this.smoke.update(camDt, this.windThree, light, pixelScale);
   }
 
   private readonly tmp2 = new THREE.Vector2();
@@ -684,10 +728,97 @@ export class LabRenderer implements LabRendererApi {
     }
   }
 
+  /** Darken the paint toward soot and scorch as health falls (1 intact, 0 wrecked). */
+  private applyDamageLook(view: VesselView, health: number): void {
+    const h = Number.isFinite(health) ? Math.min(1, Math.max(0, health)) : 1;
+    if (Math.abs(h - view.shownHealth) < 0.01) return;
+    view.shownHealth = h;
+    const k = 1 - 0.55 * (1 - h) ** 1.3;
+    view.materials.forEach((mat, i) => {
+      const base = view.baseColors[i];
+      if (!base) return;
+      // Soot is warm and dark: blue fades first.
+      mat.color.setRGB(base.r * k, base.g * k * (0.97 + 0.03 * h), base.b * k * (0.9 + 0.1 * h));
+    });
+  }
+
+  /** Smoke from damaged ships and a burst of spray where hulls collide. */
+  private emitDamage(dt: number): void {
+    if (dt <= 0 || !this.frame) return;
+    const budget = this.smoke.capacity / 860;
+    for (const state of this.frame.vessels) {
+      const view = this.vessels.get(state.id);
+      if (!view || !view.group.visible || state.capsized) continue;
+      const loss = 1 - (Number.isFinite(state.health) ? state.health : 1);
+      // Smoke from about a fifth of the health gone, thickening until the ship is wrecked.
+      const level = Math.max(0, (loss - 0.2) / 0.8) + (state.disabled ? 0.4 : 0);
+      if (level <= 0) continue;
+      const def = view.definition;
+      const scale = Math.sqrt(Math.max(def.beam, 2) / 10);
+      const n = Math.min(40, Math.floor(level * 45 * budget * scale * dt + Math.random()));
+      if (n <= 0) continue;
+      const at = rotate(state.attitude, view.smokeFrom);
+      const v = state.velocity;
+      this.smoke.emit(
+        {
+          x: state.position.x + at.x,
+          y: state.position.z + at.z,
+          z: -(state.position.y + at.y),
+          vx: v.x,
+          vy: 2 + 3 * level,
+          vz: -v.y,
+          spread: 0.6 + 0.4 * scale,
+          size: (0.8 + def.beam * 0.06) * (0.7 + 0.6 * level),
+          life: 4 + 4 * level,
+        },
+        n,
+      );
+    }
+    const seen = this.seenCollisions;
+    for (const hit of this.frame.collisions ?? []) {
+      const key = `${hit.t.toFixed(3)}:${hit.a}:${hit.b}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const sev = Math.min(1, Math.max(0.05, hit.severity));
+      const a = this.vessels.get(hit.a)?.definition;
+      const size = a ? 0.3 + a.beam * 0.02 : 0.5;
+      this.spray.emit(
+        {
+          x: hit.x,
+          y: 1,
+          z: -hit.y,
+          vx: 0,
+          vy: 5 + 9 * sev,
+          vz: 0,
+          spread: 3 + 5 * sev,
+          size: size * (1 + sev),
+          life: 1.2 + sev,
+        },
+        Math.round(40 + 160 * sev),
+      );
+      this.smoke.emit(
+        {
+          x: hit.x,
+          y: 2,
+          z: -hit.y,
+          vx: 0,
+          vy: 2,
+          vz: 0,
+          spread: 1.5,
+          size: 1.5 + 2 * sev,
+          life: 3 + 3 * sev,
+        },
+        Math.round(6 + 24 * sev),
+      );
+    }
+    if (seen.size > 256) seen.clear();
+  }
+
   setVessels(vessels: readonly { id: string; definition: VesselDefinition }[]): void {
     for (const layer of this.layers) layer.setVessels?.([]);
     for (const view of this.vessels.values()) this.disposeVessel(view);
     this.vessels.clear();
+    this.wakes.clear();
     const probes = this.pickables.filter((obj) => obj.userData.pickKind === 'probe');
     this.pickables.length = 0;
     this.pickables.push(...probes);
@@ -751,6 +882,10 @@ export class LabRenderer implements LabRendererApi {
     else if (!this.frame || frame.t + 1e-4 < this.frame.t) this.prevFrame = null;
     this.frame = frame;
     this.poseAt(frame.t);
+    for (const state of frame.vessels) {
+      const view = this.vessels.get(state.id);
+      if (view) this.applyDamageLook(view, state.health);
+    }
     this.applySelection();
   }
 
@@ -832,11 +967,12 @@ export class LabRenderer implements LabRendererApi {
     const t0 = performance.now();
     const t = this.shownT || this.frame?.t || 0;
     this.poseAt(t);
-    this.updateWakes();
+    this.updateWakes(t);
     this.ocean.update(t);
     // Count only the scene draw, not the FFT passes, so the numbers are steady frame to frame.
     this.renderer.info.reset();
     this.updateCamera();
+    this.fitNearPlane();
     this.updateScenery(t, t0);
     this.sky.position.copy(this.camera.position);
     // The radial mesh follows the camera and is scaled with its height above the water, so
@@ -942,6 +1078,7 @@ export class LabRenderer implements LabRendererApi {
       dt,
       wallT: this.wallT,
       camera: this.camera,
+      bridgeView: this.mode === 'bridge',
       calm: this.calm,
       daylight: light?.daylight ?? 1,
       timeOfDay: light?.timeOfDay ?? 12,
@@ -955,32 +1092,35 @@ export class LabRenderer implements LabRendererApi {
     for (const layer of this.layers) layer.update(frame);
   }
 
-  /** Visual Kelvin-ish foam. It does not feed back into the hull forces. */
-  private updateWakes(): void {
-    const A = this.ocean.uniforms.uWakeA!.value as THREE.Vector4[];
-    const B = this.ocean.uniforms.uWakeB!.value as THREE.Vector4[];
-    let n = 0;
+  /** Ship wakes along each hull's track (visual only; see scene/wakes.ts). */
+  private updateWakes(t: number): void {
+    const sources = this.wakeSources;
+    sources.length = 0;
+    const env = this.env;
+    const current = env ? currentVelocity(env) : { x: 0, y: 0 };
     for (const state of this.frame?.vessels ?? []) {
-      if (n >= 4) break;
       const view = this.vessels.get(state.id);
-      if (!view) continue;
-      const stern = rotate(state.attitude, {
-        x: view.definition.points.propeller.x,
-        y: 0,
-        z: 0,
+      if (!view || view.group.userData.capsized === true) continue;
+      const def = view.definition;
+      // Drawn pose (interpolated between physics frames), so the wake meets the hull exactly.
+      const p = view.group.position;
+      const fwd = this.tmpV.set(1, 0, 0).applyQuaternion(view.group.quaternion);
+      const fx = fwd.x;
+      const fy = -fwd.z;
+      const norm = Math.hypot(fx, fy) || 1;
+      const bowX = def.points.bow.x;
+      const sternX = def.points.propeller.x;
+      sources.push({
+        id: state.id,
+        length: def.length,
+        beam: def.beam,
+        bow: { x: p.x + (fx / norm) * bowX, y: -p.z + (fy / norm) * bowX },
+        stern: { x: p.x + (fx / norm) * sternX, y: -p.z + (fy / norm) * sternX },
+        speed: Math.hypot(state.velocity.x - current.x, state.velocity.y - current.y),
       });
-      const fwd = rotate(state.attitude, { x: 1, y: 0, z: 0 });
-      const speed = Math.max(0, state.speedKn) * (1852 / 3600);
-      A[n]!.set(
-        state.position.x + stern.x,
-        state.position.y + stern.y,
-        speed,
-        view.definition.length,
-      );
-      B[n]!.set(fwd.x, fwd.y, view.definition.beam, 0);
-      n++;
     }
-    this.ocean.uniforms.uWakeCount!.value = n;
+    this.wakes.update(t, sources, { x: current.x * t, y: current.y * t });
+    this.ocean.uniforms.uWakeCount!.value = this.wakes.count;
   }
 
   private pointerSpan(): number {
@@ -1033,6 +1173,8 @@ export class LabRenderer implements LabRendererApi {
     (this.sky.material as THREE.Material).dispose();
     this.rain.dispose();
     this.spray.dispose();
+    this.smoke.dispose();
+    this.wakes.dispose();
     this.renderer.dispose();
   }
 
@@ -1063,6 +1205,13 @@ export class LabRenderer implements LabRendererApi {
     group.add(duck.group);
 
     const shared = new Map<string, THREE.MeshStandardMaterial>();
+    // Top of the hull (sheer) in the body frame, so overhanging decks can be closed down to it.
+    let hullTop = -Infinity;
+    const hullPos = definition.renderHull.positions;
+    for (let i = 2; i < hullPos.length; i += 3) hullTop = Math.max(hullTop, hullPos[i]!);
+    let deckSides: THREE.MeshStandardMaterial | null = null;
+    let order = 0;
+    let decks = 0;
     for (const box of definition.superstructure) {
       // Masts of a rigged ship are drawn round by the rig; their boxes only count as windage.
       if (definition.sails && box.material === 'wood' && box.size.x < 1 && box.size.y < 1) continue;
@@ -1070,6 +1219,7 @@ export class LabRenderer implements LabRendererApi {
       if (!mat) {
         mat = this.material(box.material, palette);
         if (box.material === 'glass') {
+          mat.userData.glass = true;
           mat.transparent = true;
           mat.opacity = 0.45;
           mat.roughness = 0.05;
@@ -1090,8 +1240,34 @@ export class LabRenderer implements LabRendererApi {
         materials.push(mat);
         shared.set(box.material, mat);
       }
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(box.size.x, box.size.z, box.size.y), mat);
-      mesh.position.set(box.center.x, box.center.z, -box.center.y);
+      // Boxes overlap freely (decks over decks, containers in stacks). Grow each one by a few
+      // millimetres more than the one before so coincident faces have a fixed winner instead
+      // of flickering between the two every frame.
+      const grow = 0.004 * ++order;
+      let sz = box.size.z + grow;
+      let cz = box.center.z;
+      let boxMat: THREE.Material | THREE.Material[] = mat;
+      if (box.material === 'flightdeck') {
+        // Close the gap between an overhanging flight deck and the hull's sheer line.
+        const bottom = Math.min(cz - box.size.z / 2, hullTop - 0.2);
+        // Stacked deck surfaces (the angled landing deck over the main deck) step up 3 cm each:
+        // invisible, but far above what any depth buffer resolves.
+        const top = cz + box.size.z / 2 + 0.03 * decks++;
+        sz = top - bottom;
+        cz = (top + bottom) / 2;
+        // Deck markings belong on the top face only; the edges are plain painted steel.
+        if (!deckSides) {
+          deckSides = this.material('superstructure', palette);
+          deckSides.color.set(palette.flightdeck ?? HULL_COLORS.flightdeck).multiplyScalar(0.8);
+          materials.push(deckSides);
+        }
+        boxMat = [deckSides, deckSides, mat, deckSides, deckSides, deckSides];
+      }
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(box.size.x + grow, sz, box.size.y + grow),
+        boxMat,
+      );
+      mesh.position.set(box.center.x, cz, -box.center.y);
       if (box.yawDeg) mesh.rotation.y = THREE.MathUtils.degToRad(box.yawDeg);
       mesh.userData.pickKind = 'vessel';
       mesh.userData.pickId = id;
@@ -1126,7 +1302,29 @@ export class LabRenderer implements LabRendererApi {
       group.add(disc);
     }
 
-    const view = { id, definition, group, materials, textures, rig };
+    // Smoke leaves from the top of the tallest deckhouse (the funnel on most ships).
+    let smokeFrom: Vec3 = { x: definition.points.bridge.x, y: 0, z: hullTop + 1 };
+    let topZ = -Infinity;
+    for (const box of definition.superstructure) {
+      if (box.material !== 'superstructure' && box.material !== 'accent') continue;
+      const z = box.center.z + box.size.z / 2;
+      if (z > topZ && box.size.x > 1 && box.size.y > 1) {
+        topZ = z;
+        smokeFrom = { x: box.center.x, y: box.center.y, z };
+      }
+    }
+    const view: VesselView = {
+      id,
+      definition,
+      group,
+      materials,
+      textures,
+      rig,
+      baseColors: materials.map((m) => m.color.clone()),
+      shownHealth: 1,
+      smokeFrom,
+      bounds: vesselBounds(definition),
+    };
     this.applyDuck(view);
     return view;
   }
@@ -1197,12 +1395,21 @@ export class LabRenderer implements LabRendererApi {
   }
 
   private applySelection(): void {
+    // A light amber hint, dimmer at night (emissive ignores lighting, so a strong tint glowed
+    // in the dark), and none on the ship the Follow or Bridge camera is riding: there the
+    // selection only says which ship to follow and washed it flat amber.
+    const riding = this.mode === 'follow' || this.mode === 'bridge' ? this.focusVessel()?.id : null;
+    const tint = 0.05 + 0.13 * Math.min(1, Math.max(0, this.daylight));
     for (const view of this.vessels.values()) {
-      const selected = view.id === this.selection;
+      const selected = view.id === this.selection && view.id !== riding;
       const capsized = view.group.userData.capsized === true;
+      const glassHidden = this.mode === 'bridge' && view.id === riding;
       for (const mat of view.materials) {
         mat.emissive.set(selected ? 0xfbbf24 : capsized ? 0x7f1d1d : 0x000000);
-        mat.emissiveIntensity = selected ? 0.45 : capsized ? 0.3 : 0;
+        mat.emissiveIntensity = selected ? tint : capsized ? 0.3 : 0;
+        // From the bridge the wheelhouse windows are around the eye: drawing their tinted
+        // slab over half the view hid the sea ahead.
+        if (mat.userData.glass) mat.visible = !glassHidden;
       }
     }
     for (const [id, probe] of this.probes) {
@@ -1252,6 +1459,25 @@ export class LabRenderer implements LabRendererApi {
     this.placeOrbit(target, this.yaw, polar, this.radius);
   }
 
+  /**
+   * Push the near plane out as far as the view allows. Depth precision scales with the near
+   * distance, so a fixed 0.2 m near plane made decks and superstructure z-fight on ships a few
+   * hundred metres away (the main cause of the "glitchy" vessel textures without reversed depth).
+   */
+  private fitNearPlane(): void {
+    let near = 0.2;
+    if (this.mode !== 'bridge') {
+      const hs = (this.ocean.uniforms.uHs?.value as number | undefined) ?? 0;
+      // Never clip the nearest crest: stay well inside the camera's height above the waves.
+      const clearance = Math.max(0.4, this.camera.position.y - Math.max(1, hs));
+      near = THREE.MathUtils.clamp(Math.min(this.radius * 0.015, clearance * 0.5), 0.2, 6);
+    }
+    if (Math.abs(near - this.camera.near) > 0.02 * near) {
+      this.camera.near = near;
+      this.camera.updateProjectionMatrix();
+    }
+  }
+
   private placeBridgeCamera(position: Vec3, attitude: Quat, definition: VesselDefinition): void {
     const bow = rotate(attitude, { x: 1, y: 0, z: 0 });
     const up = rotate(attitude, { x: 0, y: 0, z: 1 });
@@ -1283,6 +1509,38 @@ export class LabRenderer implements LabRendererApi {
   }
 
   private placeOrbit(target: THREE.Vector3, azimuth: number, polar: number, radius: number): void {
+    // Back the camera out along its ray until it is outside every hull, so zooming in on a
+    // big ship never parks the lens inside it (a solid black frame).
+    let r = radius;
+    for (let i = 0; i < 40; i++) {
+      this.setOrbit(target, azimuth, polar, r);
+      if (!this.insideVessel(this.camera.position)) break;
+      r *= 1.12;
+    }
+  }
+
+  private insideVessel(p: THREE.Vector3): boolean {
+    for (const view of this.vessels.values()) {
+      if (!view.group.visible) continue;
+      view.group.updateMatrixWorld();
+      const local = this.tmpV.copy(p);
+      view.group.worldToLocal(local);
+      const b = view.bounds;
+      const m = 1.5;
+      if (
+        local.x > b.min.x - m &&
+        local.x < b.max.x + m &&
+        local.y > b.min.y - m &&
+        local.y < b.max.y + m &&
+        local.z > b.min.z - m &&
+        local.z < b.max.z + m
+      )
+        return true;
+    }
+    return false;
+  }
+
+  private setOrbit(target: THREE.Vector3, azimuth: number, polar: number, radius: number): void {
     this.camera.up.set(0, 1, 0);
     this.camera.position.set(
       target.x + radius * Math.sin(polar) * Math.sin(azimuth),

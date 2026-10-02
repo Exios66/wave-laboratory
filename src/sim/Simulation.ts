@@ -7,11 +7,25 @@ import { FixedStepClock } from '../core/clock';
 import { buildGpuOceanData, type GpuOceanData } from '../ocean/gpuData';
 import { OceanField } from '../ocean/oceanField';
 import type { Experiment, OceanQuality, VesselConfig } from '../schema/experiment';
-import type { VesselCommand, VesselDefinition, VesselTelemetry } from '../vessel/api';
+import type {
+  DamageCause,
+  HullFootprint,
+  VesselCommand,
+  VesselDefinition,
+  VesselTelemetry,
+} from '../vessel/api';
+import { collisionDamage } from '../vessel/damage';
+import { footprintContact, resolveContact } from './collisions';
 import { seaDiagnostics } from './diagnostics';
 import { Recorder } from './recorder';
 import { WeatherField } from '../weather/weather';
-import type { ProbeReading, SeaDiagnostics, SimFrame, WeatherReading } from './types';
+import type {
+  CollisionEvent,
+  ProbeReading,
+  SeaDiagnostics,
+  SimFrame,
+  WeatherReading,
+} from './types';
 
 /** What the simulation needs from a vessel implementation. */
 export interface SimVessel {
@@ -20,13 +34,25 @@ export interface SimVessel {
   step(dt: number, t: number): void;
   command(cmd: VesselCommand): void;
   telemetry(): VesselTelemetry;
+  /** Collision support (vessels without it pass through each other). */
+  hullFootprint?(): HullFootprint;
+  applyCollision?(impulse: { x: number; y: number }, push: { x: number; y: number }): void;
+  applyDamage?(amount: number, cause: DamageCause): void;
 }
 
 export type VesselFactory = (
   config: VesselConfig,
   field: OceanField,
   weather: WeatherField,
+  options: { damage: boolean },
 ) => SimVessel;
+
+/** Collision events kept for the next frame at most (older ones are dropped first). */
+const MAX_PENDING_COLLISIONS = 64;
+/** Minimum time between reported events of one pair in continuous contact [s]. */
+const COLLISION_EVENT_INTERVAL = 1;
+/** Closing speed below which a contact is resting, not an impact [m/s]. */
+const IMPACT_SPEED = 0.05;
 
 export interface SimulationOptions {
   createVessel: VesselFactory;
@@ -42,6 +68,8 @@ export class Simulation {
   readonly clock: FixedStepClock;
   readonly recorder: Recorder;
   private lastStepMs = 0;
+  private pendingCollisions: CollisionEvent[] = [];
+  private readonly lastPairEvent = new Map<string, number>();
 
   constructor(experiment: Experiment, options: SimulationOptions) {
     this.experiment = experiment;
@@ -50,7 +78,9 @@ export class Simulation {
     this.clock = new FixedStepClock(experiment.timestep, 64);
     this.recorder = new Recorder(options.recordRate ?? 10);
     for (const v of experiment.vessels)
-      this.vessels.push(options.createVessel(v, this.field, this.weather));
+      this.vessels.push(
+        options.createVessel(v, this.field, this.weather, { damage: experiment.damage }),
+      );
     this.field.prepare(0);
     this.recordIfDue();
   }
@@ -77,6 +107,7 @@ export class Simulation {
     const t = this.clock.time;
     this.field.prepare(t + dt);
     for (const v of this.vessels) v.step(dt, t);
+    this.collide(t + dt);
     this.clock.commit();
     this.recordIfDue();
   }
@@ -122,7 +153,52 @@ export class Simulation {
       lagging: this.clock.lagging,
       samples: this.recorder.flush(),
       weather: this.weatherAt(0, 0, this.clock.time),
+      collisions: this.flushCollisions(),
     };
+  }
+
+  /** Collision events since the last call. */
+  flushCollisions(): CollisionEvent[] {
+    const out = this.pendingCollisions;
+    this.pendingCollisions = [];
+    return out;
+  }
+
+  /** Separate overlapping hulls, exchange momentum and deal impact damage. */
+  private collide(t: number): void {
+    const bodies: { v: SimVessel; f: HullFootprint }[] = [];
+    for (const v of this.vessels) {
+      if (v.hullFootprint && v.applyCollision) bodies.push({ v, f: v.hullFootprint() });
+    }
+    for (let i = 0; i < bodies.length; i++) {
+      for (let j = i + 1; j < bodies.length; j++) {
+        const A = bodies[i]!;
+        const B = bodies[j]!;
+        const c = footprintContact(A.f, B.f);
+        if (!c) continue;
+        const r = resolveContact(A.f, B.f, c);
+        A.v.applyCollision!({ x: -r.jx, y: -r.jy }, r.pushA);
+        B.v.applyCollision!({ x: r.jx, y: r.jy }, r.pushB);
+        // Later pairs this step see the updated state.
+        A.f = A.v.hullFootprint!();
+        B.f = B.v.hullFootprint!();
+        if (r.closingSpeed < IMPACT_SPEED) continue;
+        // Both structures crumple in the contact zone: each absorbs half the energy.
+        const da = collisionDamage(0.5 * r.energy, A.f.mass);
+        const db = collisionDamage(0.5 * r.energy, B.f.mass);
+        if (this.experiment.damage) {
+          A.v.applyDamage?.(da, 'collision');
+          B.v.applyDamage?.(db, 'collision');
+        }
+        const severity = Math.min(1, Math.max(da, db));
+        const key = `${A.v.id}|${B.v.id}`;
+        const last = this.lastPairEvent.get(key) ?? -Infinity;
+        if (t - last < COLLISION_EVENT_INTERVAL && severity < 0.02) continue;
+        this.lastPairEvent.set(key, t);
+        this.pendingCollisions.push({ a: A.v.id, b: B.v.id, x: c.x, y: c.y, t, severity });
+        if (this.pendingCollisions.length > MAX_PENDING_COLLISIONS) this.pendingCollisions.shift();
+      }
+    }
   }
 
   /** Weather readout at a point (for the HUD). */
@@ -162,6 +238,7 @@ export class Simulation {
         values[`${v.id}:bridgeAccel`] = tel.bridgeAccel;
         values[`${v.id}:bowAccel`] = tel.bowAccel;
         values[`${v.id}:wind`] = tel.windSpeed;
+        values[`${v.id}:health`] = tel.health;
       }
       this.recorder.record(values);
     }

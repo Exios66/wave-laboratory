@@ -22,6 +22,25 @@ export interface SimFrame {
   samples: SampleBlock | null;
   /** Weather at the origin at time t. */
   weather: WeatherReading;
+  /** Vessel-to-vessel collisions since the previous frame (none are dropped between frames). */
+  collisions: CollisionEvent[];
+}
+
+/** One vessel-to-vessel impact. */
+export interface CollisionEvent {
+  /** Ids of the two vessels. */
+  a: string;
+  b: string;
+  /** Contact point (world, x east, y north) [m]. */
+  x: number;
+  y: number;
+  /** Simulation time of the impact [s]. */
+  t: number;
+  /**
+   * 0–1: the larger health loss the impact causes either vessel (computed even when damage is
+   * off, so the effects can still show how hard the blow was).
+   */
+  severity: number;
 }
 
 export interface WeatherReading {

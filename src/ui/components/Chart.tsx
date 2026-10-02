@@ -34,13 +34,15 @@ function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888';
 }
 
-/** Leave room under the canvas for uPlot's legend so it is not clipped by the dock. */
-const LEGEND_PX = 44;
-
+/**
+ * The series key is drawn in the caption line (uPlot's own legend sat under the plot and took
+ * a third of a short dock, leaving a plot area only 10–20 px tall), so the plot gets the
+ * host's full height.
+ */
 function plotSize(host: HTMLElement): { width: number; height: number } {
   return {
     width: Math.max(160, host.clientWidth),
-    height: Math.max(96, host.clientHeight - LEGEND_PX),
+    height: Math.max(110, host.clientHeight),
   };
 }
 
@@ -69,14 +71,14 @@ export function Chart({ title, series, getData, xLabel, yLabel, logX, logY, summ
     const opts: uPlot.Options = {
       width: initial.width,
       height: initial.height,
-      legend: { show: true, live: false },
+      legend: { show: false },
       cursor: { drag: { x: false, y: false } },
       scales: {
         x: { time: false, ...(logX ? { distr: 3 } : {}) },
         y: logY ? { distr: 3 } : {},
       },
       axes: [
-        { ...axis, label: xLabel },
+        { ...axis, label: xLabel, size: 34, labelSize: 14, labelGap: 0 },
         { ...axis, label: yLabel, size: 56 },
       ],
       series: [
@@ -120,7 +122,20 @@ export function Chart({ title, series, getData, xLabel, yLabel, logX, logY, summ
 
   return (
     <figure className="chart" aria-label={`${title}. ${summary}`}>
-      <figcaption>{title}</figcaption>
+      <figcaption>
+        <span>{title}</span>
+        <span className="chart__key" aria-hidden="true">
+          {series.map((s) => (
+            <span key={s.label} className="chart__key-item">
+              <i
+                className={s.dash ? 'chart__swatch chart__swatch--dash' : 'chart__swatch'}
+                style={{ borderColor: `var(${s.colorVar})` }}
+              />
+              {s.label} [{s.unit}]
+            </span>
+          ))}
+        </span>
+      </figcaption>
       <div className="chart__plot" ref={hostRef} aria-hidden="true" />
     </figure>
   );

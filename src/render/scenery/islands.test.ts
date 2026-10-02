@@ -7,17 +7,23 @@ import {
   ISLAND_VIEW_RANGE,
   IslandLayer,
   islandInCell,
+  islandsInCell,
+  POOL_SIZE,
+  keysInCell,
   islandsNear,
   type IslandSpec,
 } from './islands';
 import type { SceneryFrame } from './types';
 
-function scan(range: number): IslandSpec[] {
+function scan(range: number, keys = true): IslandSpec[] {
   const out: IslandSpec[] = [];
   for (let iy = -range; iy < range; iy++) {
     for (let ix = -range; ix < range; ix++) {
-      const s = islandInCell(ix, iy);
-      if (s) out.push(s);
+      if (keys) out.push(...islandsInCell(ix, iy));
+      else {
+        const one = islandInCell(ix, iy);
+        if (one) out.push(one);
+      }
     }
   }
   return out;
@@ -76,7 +82,7 @@ describe('island placement', () => {
 
   it('scatters roughly a third of cells with islands of sensible size', () => {
     const range = 60;
-    const all = scan(range);
+    const all = scan(range, false);
     const cells = (2 * range) ** 2;
     const share = all.length / cells;
     expect(share).toBeGreaterThan(0.3);
@@ -96,12 +102,26 @@ describe('island placement', () => {
     expect(all.some((s) => s.dock)).toBe(true);
   });
 
+  it('strings chains of small keys through cells that have no island', () => {
+    let chains = 0;
+    for (let iy = -20; iy < 20; iy++) {
+      for (let ix = -20; ix < 20; ix++) {
+        const keys = keysInCell(ix, iy);
+        if (keys.length === 0) continue;
+        expect(islandInCell(ix, iy)).toBeNull();
+        if (keys.length >= 3) chains++;
+        for (const k of keys) expect(k.radius).toBeLessThan(45);
+      }
+    }
+    expect(chains).toBeGreaterThan(40);
+  });
+
   it('never lets two islands (lagoons included) overlap', () => {
-    const all = islandsNear(30_000, 30_000, 20_000);
+    const all = islandsNear(30_000, 30_000, 12_000);
     for (const a of all) {
       const ix = Math.floor(a.x / ISLAND_CELL);
       const iy = Math.floor(a.y / ISLAND_CELL);
-      expect(a.key).toBe(`${ix}:${iy}`);
+      expect(a.key.startsWith(`${ix}:${iy}`)).toBe(true);
     }
     for (let i = 0; i < all.length; i++) {
       for (let j = i + 1; j < all.length; j++) {
@@ -144,11 +164,13 @@ describe('IslandLayer', () => {
       const wx = camera.position.x;
       const wy = -camera.position.z;
       const expected = islandsNear(wx, wy, ISLAND_VIEW_RANGE).map((s) => s.key);
-      expect(layer.visibleIslands.map((s) => s.key).sort()).toEqual(expected.slice(0, 16).sort());
+      expect(layer.visibleIslands.map((s) => s.key).sort()).toEqual(
+        expected.slice(0, POOL_SIZE).sort(),
+      );
       maxChildren = Math.max(maxChildren, layer.object.children.length);
     }
     // Pool meshes + palms + lagoons + a few lighthouse glows; never grows with distance walked.
-    expect(maxChildren).toBeLessThanOrEqual(16 * 2 + 2);
+    expect(maxChildren).toBeLessThanOrEqual(POOL_SIZE * 2 + 2);
     const visibleMeshes = layer.object.children.filter((c) => c.visible && c.name === 'island');
     expect(visibleMeshes.length).toBe(layer.visibleIslands.length);
     layer.dispose();
