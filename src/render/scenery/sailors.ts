@@ -17,6 +17,9 @@ import type { SceneryFrame, SceneryLayer, SceneryVessel } from './types';
 // ============================================================================ placement maths
 
 /** Height of a person [m] and the readability upscale applied to the sprites. */
+/** Sailors closer than this to the camera are not drawn [m]. */
+const NEAR_CULL = 6;
+
 export const SAILOR_HEIGHT = 1.8;
 export const SAILOR_UPSCALE = 1.3;
 /** Clearance kept from the deck edge and from superstructure [m]. */
@@ -974,6 +977,12 @@ export class SailorLayer implements SceneryLayer {
       const sc = sailor.member.scale;
       this.local.makeScale(sc, sc, sc).setPosition(px, py, pz);
       this.world.multiplyMatrices(group.matrixWorld, this.local);
+      // Skip anyone standing right in front of the lens (e.g. next to the bridge camera).
+      const w = this.world.elements;
+      const cx = w[12]! - cam.position.x;
+      const cy = w[13]! - cam.position.y;
+      const cz = w[14]! - cam.position.z;
+      if (cx * cx + cy * cy + cz * cz < NEAR_CULL * NEAR_CULL) continue;
       mesh.setMatrixAt(n, this.world);
       const lit = sailor.lantern ? night * 0.75 : 0;
       arr[4 * n] = this.frameOf(sailor, night);
