@@ -6,6 +6,10 @@ import type { GpuOceanData } from '../ocean/gpuData';
 import type { Environment, OceanQuality, ProbeConfig, Weather } from '../schema/experiment';
 import type { SimFrame } from '../sim/types';
 import type { VesselDefinition } from '../vessel/api';
+import type { AmbienceSettings } from './scenery/types';
+
+export type { AmbienceSettings } from './scenery/types';
+export { DAY_LENGTH_RANGE, DEFAULT_AMBIENCE } from './scenery/types';
 
 export type OverlayMode = 'none' | 'height' | 'steepness' | 'foam';
 export type CameraMode = 'orbit' | 'follow' | 'bridge' | 'top';
@@ -29,6 +33,15 @@ export interface LabRendererApi {
   /** Upload a new spectral sea (called after every experiment load). */
   setOcean(data: GpuOceanData): void;
   setEnvironment(env: Environment): void;
+  /** Viewer preferences: day:night cycle, islands, sea life, sailors. */
+  setAmbience(settings: AmbienceSettings): void;
+  /** Clock time [h, 0–24] for the day:night cycle (ignored while the cycle is off). */
+  setTimeOfDay(hours: number | null): void;
+  /**
+   * Optional 0–1 storm intensity from a weather system. Rougher values send the wildlife
+   * away and darken the mood; null derives the mood from wind and sea state alone.
+   */
+  setStorminess(storminess: number | null): void;
   /** Weather to draw (clouds, rain, fog, lightning, gusts, squalls). */
   setWeather(weather: Weather): void;
   /** Graphics level: mesh density, detail layers and particle budgets. */
