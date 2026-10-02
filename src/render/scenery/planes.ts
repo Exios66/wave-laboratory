@@ -50,11 +50,10 @@ export class PlaneLayer implements SceneryLayer {
 
   update(frame: SceneryFrame): void {
     if (!this.object.visible) return;
-    // Rarer in fair midday; more likely at dusk/night or in unsettled weather — the Triangle mood.
+    // Rare flyovers — first one comes quickly so the Easter egg is discoverable.
     const haunt = (1 - frame.daylight) * 0.55 + (1 - frame.calm) * 0.25 + 0.2;
-    if (this.flights.length === 0 && frame.wallT >= this.nextSpawnAt) {
+    if (frame.wallT >= this.nextSpawnAt && this.flights.length < 2) {
       this.spawn(frame, haunt);
-      // Next pass: 35–140 s of wall time, biased shorter when haunted.
       const gap = 35 + hash01(this.spawnIndex * 97) * (140 - haunt * 70);
       this.nextSpawnAt = frame.wallT + gap;
     }
@@ -134,6 +133,9 @@ export class PlaneLayer implements SceneryLayer {
     };
     this.object.add(group);
     this.flights.push(flight);
+    if (typeof window !== 'undefined') {
+      (window as unknown as { __labPlanes?: number }).__labPlanes = this.flights.length;
+    }
   }
 
   private buildPlane(ghost: boolean, seed: number): THREE.Group {

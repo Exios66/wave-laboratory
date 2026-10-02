@@ -32,8 +32,8 @@ export class SailorLayer implements SceneryLayer {
   readonly object = new THREE.Group();
   private readonly pool = new GeometryPool();
   private readonly sailors: Sailor[] = [];
-  private readonly bodyGeo = this.pool.share(new THREE.CapsuleGeometry(0.22, 0.7, 3, 6));
-  private readonly headGeo = this.pool.share(new THREE.SphereGeometry(0.2, 8, 6));
+  private readonly bodyGeo = this.pool.share(new THREE.BoxGeometry(0.45, 1.1, 0.35));
+  private readonly headGeo = this.pool.share(new THREE.SphereGeometry(0.22, 8, 6));
 
   constructor() {
     this.object.name = 'sailors';
@@ -48,7 +48,16 @@ export class SailorLayer implements SceneryLayer {
   setVessels(vessels: readonly SceneryVessel[]): void {
     this.clearSailors();
     if (vessels.length === 0) return;
-    for (const v of vessels) this.spawnForVessel(v);
+    for (const v of vessels) {
+      try {
+        this.spawnForVessel(v);
+      } catch (err) {
+        console.error('[scenery/sailors] failed to spawn crew on', v.id, err);
+      }
+    }
+    if (typeof window !== 'undefined') {
+      (window as unknown as { __labSailors?: number }).__labSailors = this.sailors.length;
+    }
   }
 
   update(frame: SceneryFrame): void {
@@ -126,10 +135,10 @@ export class SailorLayer implements SceneryLayer {
     const body = new THREE.Mesh(this.bodyGeo, bodyMat);
     body.position.y = 0.55;
     const head = new THREE.Mesh(this.headGeo, headMat);
-    head.position.y = 1.15;
+    head.position.y = 1.25;
     const beacon = new THREE.Mesh(this.headGeo, beaconMat);
-    beacon.position.y = 1.55;
-    beacon.scale.setScalar(0.55);
+    beacon.position.y = 1.7;
+    beacon.scale.setScalar(0.7);
     g.add(body, head, beacon);
     g.userData.mats = [bodyMat, headMat, beaconMat];
     return g;
