@@ -72,7 +72,10 @@ function HelpContent() {
         Pick a preset, or edit the sea in the <strong>Scene</strong> panel: add wave systems
         (spectra, wind seas or regular waves), vessels and wave gauges. Select anything to edit it
         in the <strong>Inspector</strong>. Data appears in the dock at the bottom; the Statistics
-        tab can export everything as CSV.
+        tab can export everything as CSV. On a phone the ocean fills the top of the screen and
+        Scene, Inspector and Data switch underneath it. Drag with one finger to orbit and pinch with
+        two fingers to zoom. Presets stays in the header; everything else is in the More menu,
+        including Settings for theme and graphics quality.
       </p>
       <h3>Keyboard shortcuts</h3>
       <table className="data-table">

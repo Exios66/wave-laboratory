@@ -2,29 +2,31 @@
 
 **A real-time, scientifically grounded 3D ocean-wave sandbox for setting up wave experiments and dropping ships into them.**
 
-Status: Draft v1 · Owner: TBD · Last updated: 2026-10-01
+Status: v0.1 in the repository · Last updated: 2026-10-02
 
 ---
 
 ## 0. Implementation status (v0.1)
 
-The first build implements the core of Phases 0–4 and part of Phase 7:
+The first build implements the core of Phases 0–4 and part of Phase 7. Checks and publishing
+are local: `pnpm check` and `pnpm test:e2e` on a developer machine, and `pnpm deploy:pages`
+commits the static build to the `gh-pages` branch. There is no GitHub Actions workflow.
 
 | Area                                                                                                                     | Status                 |
 | ------------------------------------------------------------------------------------------------------------------------ | ---------------------- |
-| Tooling, CI, schema, deterministic core                                                                                  | ✅ Done                |
+| Tooling, local tests, schema, deterministic core                                                                         | ✅ Done                |
 | Spectral ocean (JONSWAP/PM/Bretschneider, TMA, wind-sea growth, spreading, 4 cascades, choppy)                           | ✅ CPU reference + GPU |
 | Regular (Airy) waves                                                                                                     | ✅                     |
 | Vessel dynamics: pressure integration with waterline clipping, L0 radiation, viscous drag, propulsion, rudder, autopilot | ✅                     |
 | Instruments: wave gauges, motion recorders, Welch PSD, statistics, MSI, CSV export                                       | ✅                     |
-| Sandbox UI with presets, save/open/share, undo/redo, accessibility checks                                                | ✅                     |
+| Sandbox UI: presets, save/open/share, undo/redo, phone layout, accessibility checks                                      | ✅                     |
 | Stokes/cnoidal/focused waves, grid (SWE/Boussinesq) solvers, scripting API, L1/L2 radiation                              | ⏳ Later phases        |
 
 **Deviation from §2:** the renderer uses **WebGL 2 through Three.js**, not raw WebGPU. Every
-current desktop and mobile browser supports WebGL 2, which maximises compatibility, and it runs
-in headless CI (SwiftShader), so GPU↔CPU consistency is tested on every change. The renderer is
-isolated behind `src/render/api.ts`, so a WebGPU backend can be added later without touching
-the rest of the app.
+current desktop and mobile browser supports WebGL 2. Playwright runs it under SwiftShader, and
+the renderer compares one GPU texel with the CPU FFT on each new sea (half-float devices skip
+the readback). The renderer is isolated behind `src/render/api.ts`, so a WebGPU backend can be
+added later without touching the rest of the app.
 
 **Deviation from §3.3:** vessels do not read the GPU surface back. They sample a CPU evaluation
 of _the same_ spectral components (`src/ocean/oceanField.ts`) in the simulation worker. This
@@ -404,7 +406,10 @@ Orbit, free-fly, ship follow (chase), on-deck/bridge (with the ship's motion, op
 
 ## 8. Scientific validation plan
 
-The validation suite in `tools/validation` runs in CI on every PR (fast subset) and nightly (full set). Each test produces numbers plus a plot in an auto-generated **Validation Report**, published with every release.
+The checks that exist today live next to the code (`src/**/*.test.ts` and
+`src/**/*.validation.ts`) and run locally with `pnpm test` and `pnpm validate`. They are not
+started by GitHub. The table below is the target suite; not every row has an automated test
+yet, and there is no generated validation report.
 
 | #   | Test                                                                        | Reference                  | Pass criterion (initial)                    |
 | --- | --------------------------------------------------------------------------- | -------------------------- | ------------------------------------------- |
