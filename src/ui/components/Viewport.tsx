@@ -1,11 +1,12 @@
 import { beaufortFromWind } from '../../core/units';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { LabRenderer } from '../../render/LabRenderer';
 import type { CameraMode, OverlayMode } from '../../render/api';
 import { getRuntime } from '../runtime';
 import { useLab } from '../store';
 import { dayPhase, formatClock } from './clock';
 import { fmt } from './fields';
+import { Icon } from './icons';
 
 const CAMERAS: { mode: CameraMode; label: string; needsVessel: boolean }[] = [
   { mode: 'orbit', label: 'Orbit', needsVessel: false },
@@ -114,6 +115,7 @@ function Hud() {
   const camera = useLab((s) => s.camera);
   const overlay = useLab((s) => s.overlay);
   const cameraTarget = useLab((s) => s.cameraTarget);
+  const groundCamera = useLab((s) => s.groundCamera);
   const selection = useLab((s) => s.selection);
   const vessels = useLab((s) => s.experiment.vessels);
   const lab = useLab.getState;
@@ -181,13 +183,29 @@ function Hud() {
                       group?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus(),
                     );
                   }}
-                  tabIndex={camera === c.mode ? 0 : -1}
+                  tabIndex={
+                    camera === c.mode || (camera === 'plane' && groundCamera === c.mode) ? 0 : -1
+                  }
                 >
                   {c.label}
                 </button>
               );
             })}
           </div>
+          <button
+            type="button"
+            className="hud__plane"
+            aria-pressed={camera === 'plane'}
+            title={
+              camera === 'plane'
+                ? 'Back to the previous view'
+                : 'Ride one of the lost flights for a bird’s-eye view of the lab'
+            }
+            onClick={() => lab().togglePlaneView()}
+          >
+            <Icon name="plane" size={16} />
+            {camera === 'plane' ? 'Land' : 'Plane'}
+          </button>
           <label className="visually-hidden" htmlFor="overlay-select">
             Surface overlay
           </label>
@@ -214,8 +232,26 @@ function Hud() {
           {status === 'error' && `Simulation error: ${error ?? 'unknown'}`}
           {status === 'ready' && 'Simulation running'}
         </div>
+        {camera === 'plane' && <RideCaption />}
         {overlay !== 'none' && <Legend mode={overlay} />}
       </div>
+    </div>
+  );
+}
+
+/** Which flight the plane view is riding, and how to look around from it. */
+function RideCaption() {
+  const [label, setLabel] = useState<string | null>(null);
+  useEffect(() => {
+    const read = () => setLabel(getRuntime().rendererApi?.planeRide() ?? null);
+    read();
+    const id = window.setInterval(read, 500);
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <div className="hud__card hud__ride" role="status">
+      <strong>{label ? `Riding with ${label}` : 'Joining a lost flight…'}</strong>
+      <span>Drag to look around · scroll to sit further back</span>
     </div>
   );
 }

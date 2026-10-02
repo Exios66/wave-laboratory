@@ -26,6 +26,7 @@ type IconName =
   | 'eye'
   | 'eye-off'
   | 'camera'
+  | 'plane'
   | 'warning'
   | 'wrench'
   | 'settings'
@@ -95,6 +96,9 @@ const paths: Record<IconName, ReactElement> = {
       <path d="M4 8h3l2-3h6l2 3h3v11H4z" />
       <circle cx="12" cy="13" r="3.5" />
     </>
+  ),
+  plane: (
+    <path d="M21 15.5v-2l-7.5-4.5V4a1.5 1.5 0 0 0-3 0v5L3 13.5v2l7.5-2.25V18l-2 1.5V21l3.5-1 3.5 1v-1.5l-2-1.5v-4.75z" />
   ),
   warning: <path d="M12 3 2 20h20zM12 10v4M12 17v.01" />,
   wrench: (

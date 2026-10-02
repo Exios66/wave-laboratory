@@ -205,4 +205,32 @@ test.describe('Wave Laboratory app', () => {
     await waitForSimulation(page);
     expect(errors).toEqual([]);
   });
+
+  test('rides a lost flight for a bird’s-eye view and lands again', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    const plane = page.getByRole('button', { name: 'Plane' });
+    await plane.click();
+    await expect(page.getByRole('button', { name: 'Land' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(page.getByText(/^Riding with /)).toBeVisible({ timeout: 10_000 });
+    // Let the flight condense, then look further down at the fleet.
+    await page.waitForTimeout(3500);
+    await page.screenshot({ path: 'test-results/plane-view.png' });
+    const canvas = page.locator('#viewport-canvas');
+    await canvas.focus();
+    for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowUp');
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: 'test-results/plane-view-down.png' });
+    await page.getByRole('button', { name: 'Land' }).click();
+    await expect(page.getByRole('radio', { name: 'Orbit' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await expect(page.getByText(/^Riding with /)).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
 });

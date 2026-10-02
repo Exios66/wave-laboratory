@@ -12,7 +12,8 @@ export type { AmbienceSettings } from './scenery/types';
 export { DAY_LENGTH_RANGE, DEFAULT_AMBIENCE } from './scenery/types';
 
 export type OverlayMode = 'none' | 'height' | 'steepness' | 'foam';
-export type CameraMode = 'orbit' | 'follow' | 'bridge' | 'top';
+/** `plane` rides one of the lost flights, circling high over the fleet. */
+export type CameraMode = 'orbit' | 'follow' | 'bridge' | 'top' | 'plane';
 
 export interface PickResult {
   kind: 'vessel' | 'probe' | 'water';
@@ -58,6 +59,8 @@ export interface LabRendererApi {
   setOverlay(mode: OverlayMode): void;
   setCamera(mode: CameraMode, targetId?: string | null): void;
   setSelection(id: string | null): void;
+  /** Name of the flight the Plane camera is riding, or null (not riding, or not yet aboard). */
+  planeRide(): string | null;
   /** Render one frame (call from requestAnimationFrame). */
   render(): void;
   resize(width: number, height: number, pixelRatio: number): void;

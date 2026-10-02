@@ -30,7 +30,7 @@ import { calmFromConditions, ease } from './scenery/ambience';
 import { SeabirdLayer } from './scenery/birds';
 import { IslandLayer } from './scenery/islands';
 import { SkyLighting, type LightingState } from './scenery/lighting';
-import { PlaneLayer } from './scenery/planes';
+import { PlaneLayer, type PlanePose } from './scenery/planes';
 import { SailorLayer } from './scenery/sailors';
 import {
   DEFAULT_AMBIENCE,
@@ -182,6 +182,21 @@ function oceanTextureType(gl: WebGL2RenderingContext): THREE.TextureDataType {
   throw new Error('This browser cannot render the ocean (missing floating-point colour buffers).');
 }
 
+/** Plane camera: default and limits of the seat behind the ridden aircraft. */
+const PLANE_LOOK = {
+  /** Gaze below level [rad]: about 22° down, the fleet a little above mid-frame from the circuit. */
+  dip: 0.38,
+  minDip: -0.3,
+  /** Nearly straight down. */
+  maxDip: 1.52,
+  /** Distance behind the aircraft along the gaze [m]. */
+  chase: 110,
+  minChase: 30,
+  maxChase: 1500,
+  /** Seat height above the gaze line through the aircraft, per metre of chase. */
+  lift: 0.24,
+} as const;
+
 export class LabRenderer implements LabRendererApi {
   readonly stats: RendererStats = { fps: 0, frameMs: 0, drawCalls: 0, triangles: 0 };
 
@@ -258,6 +273,13 @@ export class LabRenderer implements LabRendererApi {
   private yaw = 0.65;
   private polar = 0.95;
   private radius = 180;
+  /** Plane view: gaze turned from "toward the fleet" [rad], dip below level [rad], seat [m]. */
+  private planeYaw = 0;
+  private planeDip: number = PLANE_LOOK.dip;
+  private planeChase: number = PLANE_LOOK.chase;
+  private readonly ridePose: PlanePose = { x: 0, y: 0, z: 0, heading: 0, bank: 0 };
+  private readonly rideCentre = { x: 0, z: 0 };
+  private wallDt = 0;
   private userMoved = false;
   private dragging = false;
   private dragged = false;
@@ -431,7 +453,7 @@ export class LabRenderer implements LabRendererApi {
         if (this.pinchDist > 8 && dist > 8) {
           this.userMoved = true;
           this.dragged = true;
-          this.radius = THREE.MathUtils.clamp(this.radius * (this.pinchDist / dist), 6, 4000);
+          this.zoom(this.pinchDist / dist);
         }
         this.pinchDist = dist;
         return;
@@ -443,8 +465,7 @@ export class LabRenderer implements LabRendererApi {
       this.lastY = ev.clientY;
       if (dx * dx + dy * dy > 9) this.dragged = true;
       this.userMoved = true;
-      this.yaw -= dx * 0.005;
-      this.polar = THREE.MathUtils.clamp(this.polar + dy * 0.004, 0.12, 1.42);
+      this.turn(-dx * 0.005, dy * 0.004);
     };
     this.onPointerUp = (ev: PointerEvent) => {
       this.pointers.delete(ev.pointerId);
@@ -456,8 +477,7 @@ export class LabRenderer implements LabRendererApi {
     this.onWheel = (ev: WheelEvent) => {
       ev.preventDefault();
       this.userMoved = true;
-      const factor = Math.exp(ev.deltaY * 0.0012);
-      this.radius = THREE.MathUtils.clamp(this.radius * factor, 6, 4000);
+      this.zoom(Math.exp(ev.deltaY * 0.0012));
     };
     canvas.addEventListener('webglcontextlost', this.onLost);
     canvas.addEventListener('webglcontextrestored', this.onRestored);
@@ -955,6 +975,10 @@ export class LabRenderer implements LabRendererApi {
     if (targetId !== undefined) this.cameraTarget = targetId ?? null;
   }
 
+  planeRide(): string | null {
+    return this.mode === 'plane' ? this.planes.rideLabel : null;
+  }
+
   setSelection(id: string | null): void {
     this.selection = id;
     this.applySelection();
@@ -971,9 +995,10 @@ export class LabRenderer implements LabRendererApi {
     this.ocean.update(t);
     // Count only the scene draw, not the FFT passes, so the numbers are steady frame to frame.
     this.renderer.info.reset();
+    this.tickWall(t0);
     this.updateCamera();
     this.fitNearPlane();
-    this.updateScenery(t, t0);
+    this.updateScenery(t);
     this.sky.position.copy(this.camera.position);
     // The radial mesh follows the camera and is scaled with its height above the water, so
     // the triangles stay about the same size on screen from any view (no top-down blockiness).
@@ -1051,11 +1076,17 @@ export class LabRenderer implements LabRendererApi {
     return { kind: 'water', point: { x: planeHit.x, y: -planeHit.z, z: planeHit.y } };
   }
 
-  private updateScenery(t: number, now: number): void {
+  /** Advance the wall clock the scenery runs on (before the camera, which may ride a plane). */
+  private tickWall(now: number): void {
     const dt =
       this.lastRenderAt > 0 ? Math.min(0.1, Math.max(0, (now - this.lastRenderAt) / 1000)) : 0;
     this.lastRenderAt = now;
     this.wallT += dt;
+    this.wallDt = dt;
+  }
+
+  private updateScenery(t: number): void {
+    const dt = this.wallDt;
     const windSpeed = this.weatherField ? this.localWind : (this.env?.windSpeed ?? 0);
     const storm = Math.max(this.weatherStorm, this.storminess ?? 0);
     const target = calmFromConditions(this.hs, windSpeed, storm);
@@ -1134,18 +1165,55 @@ export class LabRenderer implements LabRendererApi {
   nudgeCamera(action: 'left' | 'right' | 'up' | 'down' | 'in' | 'out' | 'reset'): void {
     this.userMoved = action !== 'reset';
     if (action === 'reset') {
+      if (this.mode === 'plane') {
+        this.planeYaw = 0;
+        this.planeDip = PLANE_LOOK.dip;
+        this.planeChase = PLANE_LOOK.chase;
+        return;
+      }
       this.yaw = 0.65;
       this.polar = 0.95;
       this.radius = 180;
       this.userMoved = false;
       return;
     }
-    if (action === 'left') this.yaw -= 0.08;
-    if (action === 'right') this.yaw += 0.08;
-    if (action === 'up') this.polar = THREE.MathUtils.clamp(this.polar - 0.05, 0.12, 1.42);
-    if (action === 'down') this.polar = THREE.MathUtils.clamp(this.polar + 0.05, 0.12, 1.42);
-    if (action === 'in') this.radius = THREE.MathUtils.clamp(this.radius * 0.9, 6, 4000);
-    if (action === 'out') this.radius = THREE.MathUtils.clamp(this.radius * 1.11, 6, 4000);
+    if (action === 'left') this.turn(-0.08, 0);
+    if (action === 'right') this.turn(0.08, 0);
+    if (action === 'up') this.turn(0, -0.05);
+    if (action === 'down') this.turn(0, 0.05);
+    if (action === 'in') this.zoom(0.9);
+    if (action === 'out') this.zoom(1.11);
+  }
+
+  /**
+   * Drag or arrow keys. The orbit cameras swing round their target; from a plane the gaze
+   * turns (dragging up looks further down, like the orbit camera rising).
+   */
+  private turn(yaw: number, polar: number): void {
+    if (this.mode === 'plane') {
+      this.planeYaw += yaw;
+      this.planeDip = THREE.MathUtils.clamp(
+        this.planeDip - polar,
+        PLANE_LOOK.minDip,
+        PLANE_LOOK.maxDip,
+      );
+      return;
+    }
+    this.yaw += yaw;
+    this.polar = THREE.MathUtils.clamp(this.polar + polar, 0.12, 1.42);
+  }
+
+  /** Wheel, pinch or +/−: orbit distance, or how far behind the aircraft the plane view sits. */
+  private zoom(factor: number): void {
+    if (this.mode === 'plane') {
+      this.planeChase = THREE.MathUtils.clamp(
+        this.planeChase * factor,
+        PLANE_LOOK.minChase,
+        PLANE_LOOK.maxChase,
+      );
+      return;
+    }
+    this.radius = THREE.MathUtils.clamp(this.radius * factor, 6, 4000);
   }
 
   dispose(): void {
@@ -1427,6 +1495,7 @@ export class LabRenderer implements LabRendererApi {
   }
 
   private updateCamera(): void {
+    if (this.updateRide()) return;
     const focus = this.focusVessel();
     const target = this.tmp;
     if (focus && this.frame) {
@@ -1460,13 +1529,66 @@ export class LabRenderer implements LabRendererApi {
   }
 
   /**
+   * Keep (or let go of) the lost flight the Plane camera rides, circling over the fleet, and
+   * put the camera aboard. False when the camera is not riding (or the flight is not there yet).
+   */
+  private updateRide(): boolean {
+    const riding = this.mode === 'plane';
+    const c = this.rideCentre;
+    c.x = 0;
+    c.z = 0;
+    let n = 0;
+    for (const view of this.vessels.values()) {
+      if (!view.group.visible) continue;
+      c.x += view.group.position.x;
+      c.z += view.group.position.z;
+      n++;
+    }
+    if (n > 0) {
+      c.x /= n;
+      c.z /= n;
+    }
+    this.planes.updateRide(this.wallT, this.wallDt, riding, c, this.calm);
+    if (!riding) return false;
+    const p = this.planes.ridePose(this.wallT, this.ridePose);
+    if (!p) return false;
+    // Gaze toward the circuit's centre (the fleet), turned and dipped by the viewer.
+    const az = Math.atan2(c.z - p.z, c.x - p.x) + this.planeYaw;
+    const dip = this.planeDip;
+    const gx = Math.cos(dip) * Math.cos(az);
+    const gy = -Math.sin(dip);
+    const gz = Math.cos(dip) * Math.sin(az);
+    // Screen-up, square to the gaze: the seat is a little above it so the aircraft rides
+    // low in the frame and the view past it stays clear.
+    const ux = Math.sin(dip) * Math.cos(az);
+    const uy = Math.cos(dip);
+    const uz = Math.sin(dip) * Math.sin(az);
+    const back = this.planeChase;
+    const lift = back * PLANE_LOOK.lift;
+    this.camera.up.set(ux, uy, uz);
+    this.camera.position.set(
+      p.x - gx * back + ux * lift,
+      p.y - gy * back + uy * lift,
+      p.z - gz * back + uz * lift,
+    );
+    this.camera.lookAt(
+      this.camera.position.x + gx,
+      this.camera.position.y + gy,
+      this.camera.position.z + gz,
+    );
+    return true;
+  }
+
+  /**
    * Push the near plane out as far as the view allows. Depth precision scales with the near
    * distance, so a fixed 0.2 m near plane made decks and superstructure z-fight on ships a few
    * hundred metres away (the main cause of the "glitchy" vessel textures without reversed depth).
    */
   private fitNearPlane(): void {
     let near = 0.2;
-    if (this.mode !== 'bridge') {
+    if (this.mode === 'plane') {
+      near = THREE.MathUtils.clamp(this.planeChase * 0.05, 0.5, 6);
+    } else if (this.mode !== 'bridge') {
       const hs = (this.ocean.uniforms.uHs?.value as number | undefined) ?? 0;
       // Never clip the nearest crest: stay well inside the camera's height above the waves.
       const clearance = Math.max(0.4, this.camera.position.y - Math.max(1, hs));
