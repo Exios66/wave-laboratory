@@ -19,7 +19,7 @@ import {
   PHYSICS_GRID,
   type CascadeSpectrum,
 } from './cascades';
-import { pressureAttenuation, tanhKh } from './dispersion';
+import { pressureAttenuation, stokesSecondAmplitude, tanhKh } from './dispersion';
 import { FFT, signedIndex } from './fft';
 import { resolveSea, type ResolvedRegularWave, type ResolvedSea } from './systems';
 
@@ -366,10 +366,14 @@ export class OceanField {
       const theta = r.k * (r.dirX * x0 + r.dirY * y0) - r.omega * t + r.phase;
       const c = Math.cos(theta);
       const s = Math.sin(theta);
-      eta += r.amplitude * c;
-      sx += -r.amplitude * r.k * r.dirX * s;
-      sy += -r.amplitude * r.k * r.dirY * s;
-      et += r.amplitude * r.omega * s;
+      const a2 =
+        this.env.choppiness > 0 ? stokesSecondAmplitude(r.amplitude, r.k, this.env.depth) : 0;
+      const c2 = Math.cos(2 * theta);
+      const s2 = Math.sin(2 * theta);
+      eta += r.amplitude * c + a2 * c2;
+      sx += (-r.amplitude * r.k * s - 2 * a2 * r.k * s2) * r.dirX;
+      sy += (-r.amplitude * r.k * s - 2 * a2 * r.k * s2) * r.dirY;
+      et += r.amplitude * r.omega * s + 2 * a2 * r.omega * s2;
     }
     // Slopes are w.r.t. the Lagrangian label; good to first order in steepness.
     res.eta = eta;
@@ -424,7 +428,10 @@ export class OceanField {
       const c = Math.cos(theta);
       const s = Math.sin(theta);
       const att = pressureAttenuation(r.k, zeta, h);
-      head += r.amplitude * c * att;
+      const a2 =
+        this.env.choppiness > 0 ? stokesSecondAmplitude(r.amplitude, r.k, this.env.depth) : 0;
+      head +=
+        r.amplitude * c * att + a2 * Math.cos(2 * theta) * pressureAttenuation(2 * r.k, zeta, h);
       const uh = r.amplitude * r.omega * r.cothKh * c * att;
       u += uh * r.dirX;
       v += uh * r.dirY;
@@ -492,9 +499,13 @@ export class OceanField {
       const theta = r.k * (r.dirX * x0 + r.dirY * y0) - r.omega * t + r.phase;
       const cs = Math.cos(theta);
       const sn = Math.sin(theta);
+      const a2 =
+        this.env.choppiness > 0 ? stokesSecondAmplitude(r.amplitude, r.k, this.env.depth) : 0;
+      const cs2 = Math.cos(2 * theta);
       for (let j = 0; j < m; j++) {
-        const att = pressureAttenuation(r.k, Math.min(0, zetas[j]!), h);
-        out.head[j]! += r.amplitude * cs * att;
+        const zeta = Math.min(0, zetas[j]!);
+        const att = pressureAttenuation(r.k, zeta, h);
+        out.head[j]! += r.amplitude * cs * att + a2 * cs2 * pressureAttenuation(2 * r.k, zeta, h);
         const uh = r.amplitude * r.omega * r.cothKh * cs * att;
         out.u[j]! += uh * r.dirX;
         out.v[j]! += uh * r.dirY;

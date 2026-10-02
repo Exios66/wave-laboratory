@@ -16,6 +16,18 @@ export function tanhKh(k: number, h: number): number {
   return kh > 20 ? 1 : Math.tanh(kh);
 }
 
+/**
+ * Amplitude of the second-order Stokes bound harmonic a₂ cos 2θ.
+ * Deep water: a₂ = k a² / 2, which raises crests and lifts troughs (sharper crests, flatter
+ * troughs). The harmonic averages to zero, so the Eulerian mean level is unchanged.
+ */
+export function stokesSecondAmplitude(amplitude: number, k: number, depth: number): number {
+  const sigma = tanhKh(k, depth);
+  if (!(sigma > 1e-4) || !(k > 0)) return 0;
+  const s2 = sigma * sigma;
+  return ((k * amplitude * amplitude) / 4) * ((3 - s2) / (s2 * sigma));
+}
+
 /** Angular frequency ω(k) [rad/s]. */
 export function omegaOf(k: number, p: DispersionParams): number {
   if (k <= 0) return 0;

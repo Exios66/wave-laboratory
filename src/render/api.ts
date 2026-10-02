@@ -33,6 +33,11 @@ export interface LabRendererApi {
   setProbes(probes: readonly ProbeConfig[]): void;
   /** Latest simulation state; the ocean is rendered at frame.t so it matches the physics. */
   setFrame(frame: SimFrame): void;
+  /**
+   * Time to draw this animation frame. It glides between physics frames so the sea and the
+   * ships do not jump when a worker result arrives.
+   */
+  setVisualTime(t: number): void;
   setOverlay(mode: OverlayMode): void;
   setCamera(mode: CameraMode, targetId?: string | null): void;
   setSelection(id: string | null): void;

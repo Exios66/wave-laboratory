@@ -211,7 +211,11 @@ export class GpuOcean {
 
   update(t: number): void {
     if (!this.data || this.n < 2) return;
-    if (!this.dirty && Math.abs(t - this.lastT) < 1e-6) return;
+    // Regular waves and capillary glitter read this every frame, so they stay smooth even when
+    // the spectral FFT (the expensive part) is refreshed at a steady 45 Hz instead of in bursts.
+    this.uniforms.uTime!.value = t;
+    const ahead = t - this.lastT;
+    if (!this.dirty && ahead >= 0 && ahead < 1 / 45) return;
     this.dirty = false;
     this.lastT = t;
     this.uniforms.uTime!.value = t;

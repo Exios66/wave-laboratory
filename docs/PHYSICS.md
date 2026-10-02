@@ -85,6 +85,11 @@ orbital velocity and the other rows of the table above stay on the CPU.
 
     θ = k (d̂·x₀) − ω t + φ,   η = a cos θ,   D = −λ a coth(kh) sin θ · d̂
 
+When choppiness λ > 0 a second-order Stokes harmonic is added, a₂ cos 2θ, with
+a₂ = (k a² / 4) (3 − σ²) / σ³ and σ = tanh(kh). That raises crests and lifts troughs.
+It is omitted for λ = 0 so a pure Airy wave stays linear. The harmonic averages to zero,
+so the Eulerian mean level of the choppy wave is still −k a² / 2.
+
 ## Pressure and kinematics (CPU)
 
 Total gauge pressure below the surface uses Wheeler stretching:

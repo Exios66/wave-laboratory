@@ -189,9 +189,13 @@ vec3 regularSample(vec2 worldXY) {
     float theta = a.z * dot(b.xy, worldXY) - a.y * uTime + a.w;
     float s = sin(theta);
     float horiz = -uLambda * a.x * b.z * s;
+    float sigma = 1.0 / max(b.z, 1.0e-3);
+    float a2 = uLambda > 0.001
+      ? (a.z * a.x * a.x * 0.25) * (3.0 - sigma * sigma) / (sigma * sigma * sigma)
+      : 0.0;
     d.x += use * horiz * b.x;
     d.y += use * horiz * b.y;
-    d.z += use * a.x * cos(theta);
+    d.z += use * (a.x * cos(theta) + a2 * cos(theta * 2.0));
   }
   return d;
 }

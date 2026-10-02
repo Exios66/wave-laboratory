@@ -38,10 +38,10 @@ export function seaDiagnostics(sea: ResolvedSea, representedHs: number): SeaDiag
         `${r.id}: H/L = ${steep.toFixed(3)} exceeds the Miche breaking limit ` +
           `(${limit.toFixed(3)}). Such a wave cannot exist without breaking.`,
       );
-    } else if (steep > 0.5 * limit) {
+    } else if (steep > 0.85 * limit) {
       warnings.push(
-        `${r.id}: steep wave (H/L = ${steep.toFixed(3)}); Stokes-type nonlinear effects ` +
-          '(sharper crests, flatter troughs) are only partly captured by the choppy model.',
+        `${r.id}: steep wave (H/L = ${steep.toFixed(3)}). A second-order Stokes correction ` +
+          'sharpens the crests, but the wave is close to breaking and higher-order effects remain.',
       );
     }
     checkShallow(r.id, 2 * r.amplitude, wavelength, r.k);

@@ -26,6 +26,10 @@ export class LabRuntime {
   private readonly governor = new ResolutionGovernor();
   private canvas: HTMLCanvasElement | null = null;
   private visualQuality: string | null = null;
+  /** Smoothed time the picture is drawn at. Physics frames arrive in bursts; this glides. */
+  private displayT = 0;
+  private simT = 0;
+  private uiStamp = 0;
 
   constructor() {
     this.client = new SimClient();
@@ -41,8 +45,15 @@ export class LabRuntime {
     });
     this.client.on('frame', (frame) => {
       if (frame.samples) telemetry.append(frame.samples);
-      useLab.getState().simFrame(frame);
+      this.simT = frame.t;
+      if (frame.t + 1e-4 < this.displayT) this.displayT = frame.t;
       this.renderer?.setFrame(frame);
+      const now = performance.now();
+      const playing = useLab.getState().playing;
+      if (!playing || now - this.uiStamp > 80) {
+        this.uiStamp = now;
+        useLab.getState().simFrame(frame);
+      }
     });
     this.client.on('error', (message) => {
       console.error('[simulation]', message);
@@ -184,11 +195,23 @@ export class LabRuntime {
     this.lastTime = now;
     const s = useLab.getState();
     if (s.playing && s.status === 'ready') this.client.advance(wall * s.timeScale);
+    this.advanceDisplayClock(wall, s.playing && s.status === 'ready', s.timeScale);
+    this.renderer?.setVisualTime(this.displayT);
     if (this.renderer && !document.hidden && this.governor.frame(wall) && this.canvas) {
       this.resize(this.canvas);
       s.setRenderScale(this.governor.scale);
     }
     this.renderer?.render();
+  }
+
+  private advanceDisplayClock(wall: number, playing: boolean, timeScale: number): void {
+    const target = this.simT;
+    const lag = target - this.displayT;
+    if (!playing || lag < -1e-3 || lag > 0.45) {
+      this.displayT = target;
+      return;
+    }
+    this.displayT += Math.min(lag, wall * timeScale);
   }
 
   stepOnce(): void {

@@ -117,6 +117,10 @@ export class LabRenderer implements LabRendererApi {
   private readonly onWheel: (ev: WheelEvent) => void;
 
   private frame: SimFrame | null = null;
+  private prevFrame: SimFrame | null = null;
+  private shownT = 0;
+  private readonly quatA = new THREE.Quaternion();
+  private readonly quatB = new THREE.Quaternion();
   private mode: CameraMode = 'orbit';
   private cameraTarget: string | null = null;
   private selection: string | null = null;
@@ -352,34 +356,81 @@ export class LabRenderer implements LabRendererApi {
   }
 
   setFrame(frame: SimFrame): void {
+    if (this.frame && frame.t > this.frame.t + 1e-6) this.prevFrame = this.frame;
+    else if (!this.frame || frame.t + 1e-4 < this.frame.t) this.prevFrame = null;
     this.frame = frame;
-    for (const state of frame.vessels) {
-      const view = this.vessels.get(state.id);
-      if (!view) continue;
-      view.group.position.set(state.position.x, state.position.z, -state.position.y);
+    this.poseAt(frame.t);
+    this.applySelection();
+  }
+
+  /** Draw the sea and ships at a time that moves every animation frame. */
+  setVisualTime(t: number): void {
+    this.shownT = t;
+  }
+
+  private poseAt(t: number): void {
+    const latest = this.frame;
+    if (!latest) return;
+    const previous = this.prevFrame;
+    const span = previous && latest.t > previous.t ? latest.t - previous.t : 0;
+    const blend = previous && span > 0 ? Math.min(1, Math.max(0, (t - previous.t) / span)) : 1;
+    for (const state of latest.vessels) {
+      const before =
+        blend < 1 && previous ? previous.vessels.find((v) => v.id === state.id) : undefined;
+      this.applyVessel(state, before, blend);
+    }
+    for (const reading of latest.probes) {
+      const probe = this.probes.get(reading.id);
+      if (!probe) continue;
+      const earlier = previous?.probes.find((p) => p.id === reading.id);
+      const eta =
+        earlier && blend < 1 ? earlier.eta + (reading.eta - earlier.eta) * blend : reading.eta;
+      probe.position.y = eta;
+    }
+  }
+
+  private applyVessel(
+    state: SimFrame['vessels'][number],
+    before: SimFrame['vessels'][number] | undefined,
+    blend: number,
+  ): void {
+    const view = this.vessels.get(state.id);
+    if (!view) return;
+    const u = before ? blend : 1;
+    const px = before
+      ? before.position.x + (state.position.x - before.position.x) * u
+      : state.position.x;
+    const py = before
+      ? before.position.y + (state.position.y - before.position.y) * u
+      : state.position.y;
+    const pz = before
+      ? before.position.z + (state.position.z - before.position.z) * u
+      : state.position.z;
+    view.group.position.set(px, pz, -py);
+    if (before) {
+      attitudeToThree(before.attitude, this.quatA);
+      attitudeToThree(state.attitude, this.quatB);
+      this.quatA.slerp(this.quatB, u);
+      view.group.quaternion.copy(this.quatA);
+    } else {
       attitudeToThree(state.attitude, view.group.quaternion);
-      view.group.userData.capsized = state.capsized;
-      const spray = view.group.getObjectByName('spray');
-      if (spray) {
-        const kn = Math.max(0, state.speedKn);
-        const t = Math.min(1, kn / 12);
-        spray.visible = kn > 0.4;
-        spray.scale.set(
-          view.definition.beam * (0.12 + 0.28 * t),
-          view.definition.draft * (0.2 + 0.45 * t),
-          view.definition.beam * (0.16 + 0.3 * t),
-        );
-        const mat = (spray as THREE.Mesh).material;
-        if (!Array.isArray(mat) && mat instanceof THREE.MeshStandardMaterial) {
-          mat.opacity = 0.12 + 0.55 * t;
-        }
+    }
+    view.group.userData.capsized = state.capsized;
+    const spray = view.group.getObjectByName('spray');
+    if (spray) {
+      const kn = Math.max(0, state.speedKn);
+      const amount = Math.min(1, kn / 12);
+      spray.visible = kn > 0.4;
+      spray.scale.set(
+        view.definition.beam * (0.12 + 0.28 * amount),
+        view.definition.draft * (0.2 + 0.45 * amount),
+        view.definition.beam * (0.16 + 0.3 * amount),
+      );
+      const mat = (spray as THREE.Mesh).material;
+      if (!Array.isArray(mat) && mat instanceof THREE.MeshStandardMaterial) {
+        mat.opacity = 0.12 + 0.55 * amount;
       }
     }
-    for (const reading of frame.probes) {
-      const probe = this.probes.get(reading.id);
-      if (probe) probe.position.y = reading.eta;
-    }
-    this.applySelection();
   }
 
   setOverlay(mode: OverlayMode): void {
@@ -403,7 +454,8 @@ export class LabRenderer implements LabRendererApi {
     if (gl.isContextLost()) return;
     const t0 = performance.now();
     this.renderer.info.reset();
-    const t = this.frame?.t ?? 0;
+    const t = this.shownT || this.frame?.t || 0;
+    this.poseAt(t);
     this.updateWakes();
     this.ocean.update(t);
     this.updateCamera();
