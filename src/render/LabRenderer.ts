@@ -86,17 +86,23 @@ const smooth = (e0: number, e1: number, x: number): number => {
   return t * t * (3 - 2 * t);
 };
 
-/** Horizon colour, matching `horizonColor()` in the sky shader (linear RGB). */
+const HORIZON_CLEAR = [0.78, 0.84, 0.9].map(srgbToLinear);
+const OVERCAST_GREY = [0.62, 0.66, 0.7].map(srgbToLinear);
+const OVERCAST_STORM = [0.36, 0.39, 0.42].map(srgbToLinear);
+const FLASH_RGB = [0.55, 0.6, 0.75];
+
+/**
+ * Horizon colour (linear RGB): a direct port of `horizonColor()` / `overcastBase()` in the sky
+ * shader, so fogged vessels and the clear colour fade to the same grey as the sky and water.
+ */
 function horizonColor(cloud: number, daylight: number, flash: number, out: THREE.Color) {
-  const mix = (a: number, b: number, t: number) => a + (b - a) * t;
-  const c = [0.78, 0.84, 0.9].map(srgbToLinear);
-  const g = [0.5, 0.54, 0.58].map(srgbToLinear);
-  const st = [0.26, 0.29, 0.32].map(srgbToLinear);
-  const flashRgb = [0.55, 0.6, 0.75];
-  const t1 = smooth(0.2, 0.75, cloud);
-  const t2 = smooth(0.75, 1, cloud);
-  const ch = (i: number) =>
-    mix(mix(c[i]!, g[i]!, t1), st[i]!, t2) * daylight + flashRgb[i]! * flash * 0.6;
+  const overcast = smooth(0.2, 0.85, cloud);
+  const storm = smooth(0.75, 1, cloud);
+  const ch = (i: number) => {
+    const base = OVERCAST_GREY[i]! + (OVERCAST_STORM[i]! - OVERCAST_GREY[i]!) * storm;
+    const c = HORIZON_CLEAR[i]! + (base * 0.62 - HORIZON_CLEAR[i]!) * overcast;
+    return c * daylight + FLASH_RGB[i]! * flash * 0.6;
+  };
   return out.setRGB(ch(0), ch(1), ch(2));
 }
 
@@ -182,6 +188,7 @@ export class LabRenderer implements LabRendererApi {
   private pinchDist = 0;
   private fpsFrames = 0;
   private fpsElapsed = 0;
+  private lastFrameAt = 0;
   private disposed = false;
 
   constructor(
@@ -399,6 +406,8 @@ export class LabRenderer implements LabRendererApi {
     this.spray = new SprayPool(budget.spray);
     this.scene.add(this.rain.object, this.spray.object);
     this.applyQualityUniforms();
+    // The water's gust patches are switched off on low quality.
+    this.uploadGusts();
   }
 
   private applyQualityUniforms(): void {
@@ -443,11 +452,13 @@ export class LabRenderer implements LabRendererApi {
       rain = wf.rainAt(wx, wy, t);
       flash = wf.lightning(t, this.windSample.squall, rain);
       this.windThree.set(this.windSample.u, 0, -this.windSample.v);
-      // The three squall fronts nearest in time (the shader evaluates them per pixel).
+      // The three squall fronts nearest the camera's local front time (the shader evaluates
+      // them per pixel at τ = t − along/advection, like WeatherField.squall).
       const sq = this.weather.squalls;
       if (sq.enabled) {
         const interval = sq.intervalMin * 60;
-        const k0 = Math.floor(t / interval);
+        const tau = t - (wx * wf.dirX + wy * wf.dirY) / wf.advection;
+        const k0 = Math.floor(tau / interval);
         const v = u.uSquall!.value as THREE.Vector4;
         const tk = (k: number) => (k < 0 ? -1e9 : wf.squallTime(k));
         v.set(tk(k0 - 1), tk(k0), tk(k0 + 1), 0);
@@ -464,7 +475,9 @@ export class LabRenderer implements LabRendererApi {
     const drift = u.uCloudDrift!.value as THREE.Vector2;
     // Cloud deck coordinates are in km; it drifts at ~1.5× the surface wind.
     const mean = wf ? wf.meanSpeed : 0;
-    drift.set((wf?.dirX ?? 0) * mean * 1.5 * t * 1e-3, -(wf?.dirY ?? 0) * mean * 1.5 * t * 1e-3);
+    // The shader samples the deck at (position + drift), so features move by −drift: the
+    // offset points upwind for the clouds to travel downwind with the gusts and squalls.
+    drift.set(-(wf?.dirX ?? 0) * mean * 1.5 * t * 1e-3, (wf?.dirY ?? 0) * mean * 1.5 * t * 1e-3);
     const visibility = rainVisibilityKm(this.weather.visibilityKm, rain) * 1000;
     const density = 1.98 / Math.min(visibility, MAX_VIEW);
     u.uFogDensity!.value = density;
@@ -705,11 +718,12 @@ export class LabRenderer implements LabRendererApi {
     const gl = this.renderer.getContext();
     if (gl.isContextLost()) return;
     const t0 = performance.now();
-    this.renderer.info.reset();
     const t = this.shownT || this.frame?.t || 0;
     this.poseAt(t);
     this.updateWakes();
     this.ocean.update(t);
+    // Count only the scene draw, not the FFT passes, so the numbers are steady frame to frame.
+    this.renderer.info.reset();
     this.updateCamera();
     this.sky.position.copy(this.camera.position);
     // The radial mesh follows the camera and is scaled with its height above the water, so
@@ -727,8 +741,12 @@ export class LabRenderer implements LabRendererApi {
     this.stats.frameMs = now - t0;
     this.stats.drawCalls = this.renderer.info.render.calls;
     this.stats.triangles = this.renderer.info.render.triangles;
-    this.fpsFrames += 1;
-    this.fpsElapsed += now - t0;
+    // Frame rate from the interval between frames, not the time spent inside render().
+    if (this.lastFrameAt > 0) {
+      this.fpsFrames += 1;
+      this.fpsElapsed += now - this.lastFrameAt;
+    }
+    this.lastFrameAt = now;
     if (this.fpsElapsed >= 500) {
       this.stats.fps = (this.fpsFrames / this.fpsElapsed) * 1000;
       this.fpsFrames = 0;

@@ -82,16 +82,18 @@ export class GpuOcean {
   private depth = 1000;
   private dirty = true;
   private lastT = Number.NaN;
+  private lastRefresh = 0;
+  private readonly live: boolean[] = [];
   private verified = false;
 
   constructor(renderer: THREE.WebGLRenderer, texType: THREE.TextureDataType = THREE.FloatType) {
     this.renderer = renderer;
     this.texType = texType;
     const gl = renderer.getContext() as WebGL2RenderingContext;
+    // WebGL 2 filters half floats natively (OES_texture_half_float_linear is WebGL 1 only and
+    // reports null here); 32-bit floats still need OES_texture_float_linear.
     const linear =
-      texType === THREE.HalfFloatType
-        ? gl.getExtension('OES_texture_half_float_linear')
-        : gl.getExtension('OES_texture_float_linear');
+      texType === THREE.HalfFloatType || gl.getExtension('OES_texture_float_linear') !== null;
     this.sampleFilter = linear ? THREE.LinearFilter : THREE.NearestFilter;
     this.mipmapped = Boolean(linear);
 
@@ -226,10 +228,13 @@ export class GpuOcean {
     // Regular waves and capillary glitter read this every frame, so they stay smooth even when
     // the spectral FFT (the expensive part) is refreshed at a steady 45 Hz instead of in bursts.
     this.uniforms.uTime!.value = t;
-    const ahead = t - this.lastT;
-    if (!this.dirty && ahead >= 0 && ahead < 1 / 45) return;
+    // Refresh when the sea time moved, at most ~70 times per wall-clock second: every frame on a
+    // 60 Hz screen, including slow motion, and every other frame on a 120 Hz one.
+    const now = performance.now();
+    if (!this.dirty && (t === this.lastT || now - this.lastRefresh < 1000 / 70)) return;
     this.dirty = false;
     this.lastT = t;
+    this.lastRefresh = now;
     this.uniforms.uTime!.value = t;
     const cascades = this.data.cascades;
     for (let i = 0; i < MAX_CASCADES; i++) {
@@ -237,21 +242,23 @@ export class GpuOcean {
       const out = this.outputs[i];
       const slope = this.slopes[i];
       if (!c || !out || !slope || !this.sources[i] || c.variance < 1e-10) {
-        if (out) this.clear(out);
-        if (slope) this.clear(slope);
+        // A quiet cascade samples black: clearing its target would leave the old sea in the
+        // mip levels that distant water reads.
+        this.live[i] = false;
         continue;
       }
+      this.live[i] = true;
       this.synthesize(this.sources[i]!, c.size, t, out);
       this.gradientMat.uniforms.uDisp!.value = out.texture;
       this.gradientMat.uniforms.uN!.value = this.n;
       this.gradientMat.uniforms.uTexel!.value = c.size / this.n;
       this.blit(this.gradientMat, slope);
     }
-    const slots = [this.uniforms.uC0, this.uniforms.uC1, this.uniforms.uC2, this.uniforms.uC3];
-    const slopeSlots = [this.uniforms.uS0, this.uniforms.uS1, this.uniforms.uS2, this.uniforms.uS3];
+    const u = this.uniforms;
     for (let i = 0; i < MAX_CASCADES; i++) {
-      slots[i]!.value = this.outputs[i]?.texture ?? this.black;
-      slopeSlots[i]!.value = this.slopes[i]?.texture ?? this.black;
+      const live = this.live[i];
+      u[`uC${i}`]!.value = (live && this.outputs[i]?.texture) || this.black;
+      u[`uS${i}`]!.value = (live && this.slopes[i]?.texture) || this.black;
     }
     if (!this.verified) this.verify(t);
   }
@@ -344,18 +351,6 @@ export class GpuOcean {
     this.renderer.setRenderTarget(target);
     this.renderer.render(this.quadScene, this.quadCamera);
     this.renderer.setRenderTarget(null);
-  }
-
-  private readonly clearColor = new THREE.Color();
-
-  private clear(target: THREE.WebGLRenderTarget): void {
-    this.renderer.getClearColor(this.clearColor);
-    const alpha = this.renderer.getClearAlpha();
-    this.renderer.setRenderTarget(target);
-    this.renderer.setClearColor(0x000000, 0);
-    this.renderer.clear(true, false, false);
-    this.renderer.setRenderTarget(null);
-    this.renderer.setClearColor(this.clearColor, alpha);
   }
 
   private allocate(n: number): void {
