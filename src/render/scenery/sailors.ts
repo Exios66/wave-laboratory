@@ -101,7 +101,7 @@ export class SailorLayer implements SceneryLayer {
       };
       mesh.position.set(aftX, zDeck, -lane);
       // Slightly larger than life so they read at typical orbit distances.
-      const scale = Math.min(4.5, Math.max(1.4, def.beam * 0.2));
+      const scale = def.beam > 12 ? 7 : Math.min(3.2, Math.max(1.4, def.beam * 0.22));
       mesh.scale.setScalar(scale);
       // Draw above nearby deck plates so figures are not buried in cargo.
       mesh.traverse((c) => {
@@ -122,19 +122,16 @@ export class SailorLayer implements SceneryLayer {
     // Unlit so figures stay readable under day/night and in storms.
     const bodyMat = new THREE.MeshBasicMaterial({ color: bodyColor });
     const headMat = new THREE.MeshBasicMaterial({ color: 0xffe4c8 });
+    const beaconMat = new THREE.MeshBasicMaterial({ color: 0xffff66 });
     const body = new THREE.Mesh(this.bodyGeo, bodyMat);
     body.position.y = 0.55;
     const head = new THREE.Mesh(this.headGeo, headMat);
     head.position.y = 1.15;
-    // Beacon so orbit cameras can still pick them out on large freighters.
-    const beacon = new THREE.Mesh(
-      this.headGeo,
-      new THREE.MeshBasicMaterial({ color: 0xffff66 }),
-    );
+    const beacon = new THREE.Mesh(this.headGeo, beaconMat);
     beacon.position.y = 1.55;
     beacon.scale.setScalar(0.55);
     g.add(body, head, beacon);
-    g.userData.mats = [bodyMat, headMat, beacon.material];
+    g.userData.mats = [bodyMat, headMat, beaconMat];
     return g;
   }
 

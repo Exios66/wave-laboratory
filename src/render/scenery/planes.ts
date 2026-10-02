@@ -100,22 +100,25 @@ export class PlaneLayer implements SceneryLayer {
   private spawn(frame: SceneryFrame, haunt: number): void {
     this.spawnIndex += 1;
     const seed = this.spawnIndex * 7919;
-    const ghost = hash01(seed) < 0.55 + haunt * 0.35;
-    const heading = hash01(seed + 1) * Math.PI * 2;
+    const ghost = this.spawnIndex === 1 ? true : hash01(seed) < 0.55 + haunt * 0.35;
+    const heading = this.spawnIndex === 1 ? 0.35 : hash01(seed + 1) * Math.PI * 2;
     const cam = frame.camera.position;
-    const side = (hash01(seed + 2) - 0.5) * 380;
+    // First sighting: fly straight over the camera look area so demos catch it.
+    const side = this.spawnIndex === 1 ? 40 : (hash01(seed + 2) - 0.5) * 380;
     const origin = new THREE.Vector3(
       cam.x + Math.cos(heading + Math.PI / 2) * side,
       0,
       cam.z + Math.sin(heading + Math.PI / 2) * side,
     );
-    const altitude = 120 + hash01(seed + 3) * 220;
-    const span = 1400 + hash01(seed + 4) * 900;
-    const speed = 55 + hash01(seed + 5) * 40;
+    const altitude = this.spawnIndex === 1 ? 90 : 120 + hash01(seed + 3) * 220;
+    const span = this.spawnIndex === 1 ? 900 : 1400 + hash01(seed + 4) * 900;
+    const speed = this.spawnIndex === 1 ? 70 : 55 + hash01(seed + 5) * 40;
     const duration = span / speed;
-    // Most ghost flights vanish; solid "sightings" usually complete the pass.
-    const willVanish = ghost ? hash01(seed + 6) < 0.72 : hash01(seed + 6) < 0.12;
+    // First pass completes; later ghost flights often dematerialise.
+    const willVanish =
+      this.spawnIndex === 1 ? false : ghost ? hash01(seed + 6) < 0.72 : hash01(seed + 6) < 0.12;
     const group = this.buildPlane(ghost, seed);
+    if (this.spawnIndex === 1) group.scale.multiplyScalar(1.6);
     const flight: Flight = {
       group,
       age: 0,
