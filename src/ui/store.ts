@@ -4,7 +4,13 @@
  * schedules a simulation reload.
  */
 import { create } from 'zustand';
-import type { CameraMode, OverlayMode } from '../render/api';
+import {
+  DAY_LENGTH_RANGE,
+  DEFAULT_AMBIENCE,
+  type AmbienceSettings,
+  type CameraMode,
+  type OverlayMode,
+} from '../render/api';
 import {
   parseExperiment,
   type Experiment,
@@ -61,6 +67,10 @@ export interface LabState {
 
   theme: ThemePreference;
   performance: PerformanceMode;
+  /** Day:night cycle, islands, sea life and sailors (viewer preference, not saved in files). */
+  ambience: AmbienceSettings;
+  /** Clock time of the day:night cycle [h], refreshed a few times a second for display. */
+  timeOfDay: number;
   /** Current dynamic render scale (1 = full resolution). */
   renderScale: number;
   dockTab: DockTab;
@@ -81,6 +91,8 @@ export interface LabState {
   setCamera(mode: CameraMode, target?: string | null): void;
   setTheme(theme: ThemePreference): void;
   setPerformance(mode: PerformanceMode): void;
+  setAmbience(patch: Partial<AmbienceSettings>): void;
+  setTimeOfDay(hours: number): void;
   setRenderScale(scale: number): void;
   setDockTab(tab: DockTab): void;
   setMobilePanel(panel: MobilePanel): void;
@@ -140,6 +152,32 @@ function readTheme(): ThemePreference {
   }
 }
 
+function readAmbience(): AmbienceSettings {
+  try {
+    const raw = localStorage.getItem('wave-lab:ambience');
+    return sanitizeAmbience(raw ? (JSON.parse(raw) as Partial<AmbienceSettings>) : {});
+  } catch {
+    return { ...DEFAULT_AMBIENCE };
+  }
+}
+
+/** Fill in defaults and clamp anything out of range (old or hand-edited storage). */
+export function sanitizeAmbience(raw: Partial<AmbienceSettings>): AmbienceSettings {
+  const d = DEFAULT_AMBIENCE;
+  const bool = (v: unknown, fallback: boolean) => (typeof v === 'boolean' ? v : fallback);
+  const num = (v: unknown, fallback: number, min: number, max: number) =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback;
+  return {
+    dayNight: bool(raw.dayNight, d.dayNight),
+    dayLengthMin: num(raw.dayLengthMin, d.dayLengthMin, DAY_LENGTH_RANGE.min, DAY_LENGTH_RANGE.max),
+    startHour: num(raw.startHour, d.startHour, 0, 24) % 24,
+    islands: bool(raw.islands, d.islands),
+    wildlife: bool(raw.wildlife, d.wildlife),
+    sailors: bool(raw.sailors, d.sailors),
+    planes: bool(raw.planes, d.planes),
+  };
+}
+
 export const useLab = create<LabState>()((set, get) => ({
   experiment: presetExperiment(),
   revision: 0,
@@ -163,6 +201,8 @@ export const useLab = create<LabState>()((set, get) => ({
 
   theme: readTheme(),
   performance: readPerformance(),
+  ambience: readAmbience(),
+  timeOfDay: readAmbience().startHour,
   renderScale: 1,
   dockTab: 'gauges',
   mobilePanel: 'data',
@@ -274,6 +314,18 @@ export const useLab = create<LabState>()((set, get) => ({
       /* storage unavailable */
     }
     set({ performance });
+  },
+  setAmbience(patch) {
+    const ambience = sanitizeAmbience({ ...get().ambience, ...patch });
+    try {
+      localStorage.setItem('wave-lab:ambience', JSON.stringify(ambience));
+    } catch {
+      /* storage unavailable */
+    }
+    set(patch.startHour !== undefined ? { ambience, timeOfDay: ambience.startHour } : { ambience });
+  },
+  setTimeOfDay(timeOfDay) {
+    set({ timeOfDay: ((timeOfDay % 24) + 24) % 24 });
   },
   setRenderScale(renderScale) {
     set({ renderScale });

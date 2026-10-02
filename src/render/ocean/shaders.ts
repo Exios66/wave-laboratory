@@ -184,14 +184,20 @@ uniform float uFlash;
 uniform float uSkyTime;
 uniform vec2 uCloudDrift;
 uniform float uCloudOctaves;
+// Day:night (scenery/lighting.ts). All 0 = plain daytime.
+uniform float uNight;
+uniform float uDusk;
+uniform vec3 uMoonDir;
 ${NOISE}
 vec3 srgbToLinear(vec3 c) {
   vec3 lo = c / 12.92;
   vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
   return mix(lo, hi, step(vec3(0.04045), c));
 }
+// Mirrored by skyLightLevel() in scenery/lighting.ts: brighter through the golden hour, with
+// a moonlight floor at night.
 float daylight() {
-  return clamp(uSunDir.y * 4.0 + 0.25, 0.08, 1.0);
+  return min(1.0, clamp(uSunDir.y * 4.0 + 0.25, 0.08 + 0.14 * uNight, 1.0) + uDusk * 0.25);
 }
 // Overcast luminance follows the CIE overcast sky, L(θ) ∝ (1 + 2 sin θ) / 3: the horizon is a
 // third as bright as the zenith, which is what keeps wave slopes visible under a grey sky.
@@ -203,10 +209,13 @@ vec3 overcastBase() {
 float overcastAmount() {
   return smoothstep(0.2, 0.85, uCloud);
 }
+// Mirrored by horizonColor() in LabRenderer.ts (fog and clear colour).
 vec3 horizonColor() {
   vec3 clear = srgbToLinear(vec3(0.78, 0.84, 0.90));
-  vec3 c = mix(clear, overcastBase() * 0.62, overcastAmount());
-  return c * daylight() + vec3(0.55, 0.6, 0.75) * uFlash * 0.6;
+  clear = mix(clear, srgbToLinear(vec3(0.95, 0.66, 0.46)), uDusk * 0.45);
+  vec3 c = mix(clear, overcastBase() * 0.62, overcastAmount()) * daylight();
+  c = mix(c, srgbToLinear(vec3(0.15, 0.20, 0.30)) * (1.0 - 0.5 * overcastAmount()), uNight);
+  return c + vec3(0.55, 0.6, 0.75) * uFlash * 0.6;
 }
 float cloudDensity(vec3 dir) {
   if (dir.y <= 0.0 || uCloud < 0.02) return 0.0;
@@ -228,14 +237,35 @@ vec3 skyColor(vec3 dir, vec3 sun) {
   vec3 horizon = horizonColor();
   vec3 zenithClear = srgbToLinear(vec3(0.16, 0.38, 0.72));
   vec3 zenith = mix(zenithClear, overcastBase() * 1.6, overcastAmount()) * daylight();
+  zenith = mix(zenith, srgbToLinear(vec3(0.04, 0.07, 0.15)) * (1.0 - 0.5 * overcastAmount()), uNight);
   vec3 below = horizon * 0.8;
-  vec3 col = dir.y >= 0.0 ? mix(horizon, zenith, pow(clamp(dir.y, 0.0, 1.0), 0.55)) : mix(horizon, below, clamp(-dir.y, 0.0, 1.0));
+  float up = pow(clamp(dir.y, 0.0, 1.0), 0.55);
+  vec3 col = dir.y >= 0.0 ? mix(horizon, zenith, up) : mix(horizon, below, clamp(-dir.y, 0.0, 1.0));
+  vec3 nd = normalize(dir);
+  float clear = 1.0 - overcastAmount();
+  if (uDusk > 0.001) {
+    // Golden hour: a warm band low in the sky, strongest toward the sun, violet-blue above.
+    vec2 hd = normalize(nd.xz + vec2(1e-5));
+    vec2 hs = normalize(sun.xz + vec2(1e-5));
+    float toward = 0.5 + 0.5 * dot(hd, hs);
+    float low = 1.0 - smoothstep(-0.05, 0.45, abs(nd.y));
+    vec3 warm = mix(srgbToLinear(vec3(0.98, 0.72, 0.52)), srgbToLinear(vec3(1.0, 0.52, 0.26)), toward);
+    col = mix(col, warm * daylight(), uDusk * clear * low * mix(0.45, 0.95, toward * toward));
+    col = mix(col, srgbToLinear(vec3(0.30, 0.34, 0.62)) * daylight(), uDusk * clear * up * 0.35);
+  }
+  if (uNight > 0.001) {
+    float md = max(dot(nd, uMoonDir), 0.0);
+    float moonUp = smoothstep(-0.04, 0.02, uMoonDir.y) * uNight * (1.0 - cloudDensity(dir)) * (1.0 - 0.8 * overcastAmount());
+    col += srgbToLinear(vec3(0.85, 0.90, 1.0)) * (smoothstep(0.99965, 0.99985, md) * 0.9 + pow(md, 60.0) * 0.06) * moonUp;
+  }
   float d = cloudDensity(dir);
   float clearSun = 1.0 - smoothstep(0.55, 0.95, uCloud);
-  float sunDisc = pow(max(dot(normalize(dir), sun), 0.0), 1400.0) * (1.0 - d) * clearSun;
+  float sunGate = 1.0 - uNight * (1.0 - smoothstep(-0.06, 0.0, sun.y));
+  float sunDisc = pow(max(dot(normalize(dir), sun), 0.0), 1400.0) * (1.0 - d) * clearSun * sunGate;
   float glow = pow(max(dot(normalize(dir), sun), 0.0), 8.0) * (1.0 - 0.7 * uCloud);
+  vec3 glowCol = mix(srgbToLinear(vec3(1.0, 0.85, 0.65)), srgbToLinear(vec3(1.0, 0.55, 0.25)), uDusk);
   col += srgbToLinear(vec3(1.0, 0.96, 0.88)) * sunDisc * 1.6;
-  col += srgbToLinear(vec3(1.0, 0.85, 0.65)) * glow * 0.28 * daylight();
+  col += glowCol * glow * (0.28 + 0.35 * uDusk) * daylight() * (1.0 - uNight * (1.0 - smoothstep(-0.2, 0.0, sun.y)));
   // Cloud: bright tops toward the sun, dark bases when the deck is thick.
   float lit = 0.55 + 0.45 * max(dot(normalize(dir), sun), 0.0);
   vec3 cloudCol = mix(srgbToLinear(vec3(0.95, 0.96, 0.97)), srgbToLinear(vec3(0.30, 0.32, 0.36)), smoothstep(0.35, 1.0, uCloud));
@@ -519,7 +549,11 @@ void main() {
   float sun = max(dot(normalize(R), uSunDir), 0.0);
   float sunVis = (1.0 - smoothstep(0.5, 0.95, uCloud)) * step(0.0, uSunDir.y);
   float spec = (pow(sun, 90.0) * 0.3 + pow(sun, sharp) * (sharp / 1400.0 + 0.15)) * sunVis;
-  col += srgbToLinear(vec3(1.0, 0.97, 0.90)) * spec * (0.4 + 0.6 * fresnel);
+  vec3 glint = mix(srgbToLinear(vec3(1.0, 0.97, 0.90)), srgbToLinear(vec3(1.0, 0.68, 0.40)), uDusk);
+  col += glint * spec * (0.4 + 0.6 * fresnel);
+  // Moon glitter path at night.
+  float moonGlint = pow(max(dot(normalize(R), uMoonDir), 0.0), 220.0) * uNight * step(0.0, uMoonDir.y);
+  col += srgbToLinear(vec3(0.75, 0.82, 0.95)) * moonGlint * 0.5 * (1.0 - smoothstep(0.4, 0.9, uCloud));
   // Subsurface glow through thin crests.
   float sss = pow(crest, 2.0) * (1.0 - fresnel) * max(dot(V, -uSunDir) * 0.5 + 0.5, 0.0);
   col += srgbToLinear(vec3(0.10, 0.40, 0.38)) * sss * 0.5 * light;
@@ -589,11 +623,25 @@ void main() {
 
 export const SKY_FRAG = /* glsl */ `
 uniform float uFogDensity;
+uniform float uStars;
 varying vec3 vDir;
 ${SKY}
+// Cheap procedural star field on the dome (not in the sea: reflected stars only shimmer).
+float stars(vec3 d) {
+  vec3 p = d * 260.0;
+  vec3 cell = floor(p);
+  float n = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+  if (n < 0.985) return 0.0;
+  float r = length(fract(p) - 0.5);
+  return smoothstep(0.32, 0.0, r) * (n - 0.985) / 0.015;
+}
 void main() {
   vec3 dir = normalize(vDir);
   vec3 col = skyColor(dir, uSunDir);
+  if (uStars > 0.001 && dir.y > 0.0) {
+    float seen = uStars * (1.0 - cloudDensity(dir)) * (1.0 - overcastAmount()) * smoothstep(0.0, 0.18, dir.y);
+    col += vec3(0.75, 0.8, 0.9) * stars(dir) * seen;
+  }
   // Low visibility (rain, fog) hides the horizon and the lower sky.
   float haze = clamp(uFogDensity * 4000.0, 0.0, 1.0);
   col = mix(col, horizonColor(), haze * (1.0 - smoothstep(0.0, 0.35, dir.y)));
