@@ -573,10 +573,10 @@ function pirateShip(): HullDesign {
     bridge: { x: -10.5, y: 0, z: D + 4.6 },
     propeller: { x: -13.5, z: 1.2, diameter: 1, wake: 0.25, timeConstant: 2 },
     rudder: { x: -14.6, z: 1.8, area: 4.6, aspect: 1.1, rateDeg: 3 },
-    paint: { bottom: 0x2d2117, boot: 0xb8912a, topside: 0x3a271a },
+    paint: { bottom: 0x2d2117, boot: 0xb8912a, topside: 0x5a3c26 },
     palette: {
-      wood: 0x5a3b22,
-      deck: 0x8a6a45,
+      wood: 0x6b4529,
+      deck: 0x9c7a50,
       gold: 0xd4a72c,
       accent: 0x111111,
       sail: 0xe6dcc3,

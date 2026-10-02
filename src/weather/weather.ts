@@ -104,6 +104,12 @@ export class WeatherField {
     this.modes = buildGustModes(weather.gustiness, this.advection, this.seed);
   }
 
+  /** Time the k-th squall front passes the origin [s]. */
+  squallTime(k: number): number {
+    const interval = this.weather.squalls.intervalMin * 60;
+    return (k + 0.25 + 0.5 * hash01(this.seed ^ 0x5a17, k)) * interval;
+  }
+
   /** Squall intensity 0–1 at a point (fronts move downwind). */
   squall(x: number, y: number, t: number): number {
     const sq = this.weather.squalls;
@@ -117,7 +123,7 @@ export class WeatherField {
     let e = 0;
     for (let k = k0 - 1; k <= k0 + 1; k++) {
       if (k < 0) continue;
-      const tk = (k + 0.25 + 0.5 * hash01(this.seed ^ 0x5a17, k)) * interval;
+      const tk = this.squallTime(k);
       const s = tau - tk;
       const rise = smoothstep(-0.08 * dur, 0, s);
       const fall = 1 - smoothstep(0.55 * dur, 1.4 * dur, s);

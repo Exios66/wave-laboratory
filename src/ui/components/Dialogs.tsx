@@ -1,5 +1,10 @@
 import { PRESETS, presetExperiment } from '../../schema/presets';
-import { detectDeviceProfile, type PerformanceMode } from '../deviceProfile';
+import {
+  detectDeviceProfile,
+  PERFORMANCE_LABELS,
+  PERFORMANCE_MODES,
+  type PerformanceMode,
+} from '../deviceProfile';
 import { useLab, type ThemePreference } from '../store';
 import { Dialog } from './Dialog';
 import { SelectField } from './fields';
@@ -133,13 +138,9 @@ function SettingsContent() {
       <SelectField<PerformanceMode>
         label="Graphics"
         value={performance}
-        options={[
-          { value: 'auto', label: 'Auto (recommended)' },
-          { value: 'saver', label: 'Battery saver' },
-          { value: 'quality', label: 'Best quality' },
-        ]}
+        options={PERFORMANCE_MODES.map((m) => ({ value: m, label: PERFORMANCE_LABELS[m] }))}
         onChange={(v) => lab().setPerformance(v)}
-        hint={`Detected: ${detectDeviceProfile().description}. The physics is identical in every mode.`}
+        hint={`Detected: ${detectDeviceProfile().description}. Higher levels draw a denser sea, finer ripples and more rain and spray at a higher resolution. The physics is identical at every level.`}
       />
     </>
   );

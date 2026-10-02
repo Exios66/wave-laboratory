@@ -15,7 +15,7 @@ import {
 import { presetExperiment } from '../schema/presets';
 import type { SeaDiagnostics, SimFrame } from '../sim/types';
 import type { VesselDefinition } from '../vessel/api';
-import type { PerformanceMode } from './deviceProfile';
+import { parsePerformanceMode, type PerformanceMode } from './deviceProfile';
 
 export type Selection =
   | { kind: 'environment' }
@@ -97,8 +97,7 @@ let noticeId = 0;
 
 function readPerformance(): PerformanceMode {
   try {
-    const p = localStorage.getItem('wave-lab:performance');
-    return p === 'saver' || p === 'quality' ? p : 'auto';
+    return parsePerformanceMode(localStorage.getItem('wave-lab:performance'));
   } catch {
     return 'auto';
   }
