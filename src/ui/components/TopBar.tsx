@@ -1,7 +1,7 @@
 import { useId, useRef } from 'react';
 import { presetExperiment } from '../../schema/presets';
 import { readExperimentFile, saveExperiment, shareUrl } from '../fileOps';
-import type { PerformanceMode } from '../deviceProfile';
+import { PERFORMANCE_LABELS, PERFORMANCE_MODES, type PerformanceMode } from '../deviceProfile';
 import { useLab, type ThemePreference } from '../store';
 import { Icon } from './icons';
 import { Menu } from './Menu';
@@ -153,9 +153,11 @@ export function TopBar() {
             title="Graphics performance — the physics is identical in every mode"
             onChange={(e) => lab().setPerformance(e.target.value as PerformanceMode)}
           >
-            <option value="auto">Graphics: Auto</option>
-            <option value="saver">Graphics: Battery saver</option>
-            <option value="quality">Graphics: Best quality</option>
+            {PERFORMANCE_MODES.map((m) => (
+              <option key={m} value={m}>
+                Graphics: {PERFORMANCE_LABELS[m].split(' — ')[0]}
+              </option>
+            ))}
           </select>
           <label htmlFor={themeId} className="visually-hidden">
             Colour theme

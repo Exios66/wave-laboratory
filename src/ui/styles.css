@@ -374,6 +374,18 @@ textarea {
   flex: none;
 }
 
+.chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--space-3);
+}
+.btn--chip {
+  border-radius: 999px;
+  font-size: 0.85rem;
+  padding: 0 12px;
+}
+
 /* ------------------------------------------------------------------ scene tree */
 
 .tree-section + .tree-section {

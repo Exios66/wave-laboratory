@@ -1,3 +1,4 @@
+import { beaufortFromWind } from '../../core/units';
 import { useEffect, useRef } from 'react';
 import { LabRenderer } from '../../render/LabRenderer';
 import type { CameraMode, OverlayMode } from '../../render/api';
@@ -106,6 +107,7 @@ function Hud() {
   const t = useLab((s) => s.frame?.t ?? 0);
   const lagging = useLab((s) => s.frame?.lagging ?? false);
   const hs = useLab((s) => s.diagnostics?.hs);
+  const weather = useLab((s) => s.frame?.weather);
   const status = useLab((s) => s.status);
   const error = useLab((s) => s.error);
   const camera = useLab((s) => s.camera);
@@ -131,6 +133,15 @@ function Hud() {
               <dt>Hs</dt>
               <dd>{fmt(hs, 2, 'm')}</dd>
             </div>
+            {weather && (
+              <div title={`Wind from ${weather.windFromDeg.toFixed(0)}° (at the origin)`}>
+                <dt>Wind</dt>
+                <dd>
+                  {fmt(weather.windSpeed, 0, 'm/s')} · Bf {beaufortFromWind(weather.windSpeed)}
+                  {weather.squall > 0.3 ? ' · squall' : weather.rainMmH > 0.5 ? ' · rain' : ''}
+                </dd>
+              </div>
+            )}
             {lagging && (
               <div>
                 <dt className="visually-hidden">Status</dt>
