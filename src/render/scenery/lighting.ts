@@ -11,8 +11,12 @@
  *   uDusk    0 … 1 golden-hour tint around sunrise and sunset
  *   uStars   0 … 1 star visibility (sky dome only)
  *   uMoonDir unit vector toward the moon, Three.js axes
+ * and, on the sky dome only, the turning star frame for the stars and the Milky Way:
+ *   uCelestial  sky direction → star frame (see celestial.ts)
+ *   uGalPole, uGalCentre  the galactic plane's normal and core, star frame
  */
 import * as THREE from 'three';
+import { GALACTIC_CENTRE, GALACTIC_POLE, skyToStars } from './celestial';
 import type { Environment } from '../../schema/experiment';
 
 export interface LightingParts {
@@ -163,13 +167,18 @@ export class SkyLighting {
   };
   private readonly moonDir = new THREE.Vector3(0, -1, 0);
   private readonly u: Record<'uNight' | 'uDusk' | 'uStars', THREE.IUniform<number>>;
+  private readonly celestial = new THREE.Matrix3();
 
   constructor(private readonly parts: LightingParts) {
     this.u = { uNight: { value: 0 }, uDusk: { value: 0 }, uStars: { value: 0 } };
     const shared: Record<string, THREE.IUniform> = { ...this.u, uMoonDir: { value: this.moonDir } };
     // The ocean ShaderMaterial uses `oceanUniforms` directly, so adding keys here reaches it.
     Object.assign(parts.oceanUniforms, shared);
-    Object.assign(parts.skyMaterial.uniforms, shared);
+    Object.assign(parts.skyMaterial.uniforms, shared, {
+      uCelestial: { value: this.celestial },
+      uGalPole: { value: GALACTIC_POLE },
+      uGalCentre: { value: GALACTIC_CENTRE },
+    });
   }
 
   update(input: LightingInput): LightingState {
@@ -207,6 +216,7 @@ export class SkyLighting {
       st.skyLight = skyLightLevel(sun.y, mood.night, mood.dusk);
       st.daylight = mood.daylight;
       st.timeOfDay = hours;
+      skyToStars(hours, this.celestial);
 
       // Direct light: the sun by day, swapped to the moon once the sun is well down.
       const sunUp = smoothstep(-4, 3, sp.elevationDeg);
