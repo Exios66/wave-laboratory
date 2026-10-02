@@ -55,6 +55,8 @@ function blackTexture(): THREE.DataTexture {
 
 export class GpuOcean {
   readonly uniforms: Record<string, THREE.IUniform>;
+  private readonly current = new THREE.Vector2();
+  private shownT = 0;
   private readonly renderer: THREE.WebGLRenderer;
   private readonly quad: THREE.Mesh;
   private readonly quadScene = new THREE.Scene();
@@ -114,6 +116,7 @@ export class GpuOcean {
       uCount: { value: 0 },
       uN: { value: 1 },
       uTime: { value: 0 },
+      uDrift: { value: new THREE.Vector2() },
       uLambda: { value: 1 },
       uRegularCount: { value: 0 },
       uRegA: { value: regA },
@@ -204,6 +207,12 @@ export class GpuOcean {
   }
 
   /** Choppiness or depth edited before the worker republishes h₀. */
+  /** Uniform surface current (world x, y) [m/s]; the drawn sea drifts with it. */
+  setCurrent(x: number, y: number): void {
+    this.current.set(x, y);
+    (this.uniforms.uDrift!.value as THREE.Vector2).copy(this.current).multiplyScalar(this.shownT);
+  }
+
   setWaveParams(lambda: number, depth: number): void {
     if (lambda === this.lambda && depth === this.depth) return;
     this.lambda = lambda;
@@ -226,6 +235,8 @@ export class GpuOcean {
     // Regular waves and capillary glitter read this every frame, so they stay smooth even when
     // the spectral FFT (the expensive part) is refreshed at a steady 45 Hz instead of in bursts.
     this.uniforms.uTime!.value = t;
+    this.shownT = t;
+    (this.uniforms.uDrift!.value as THREE.Vector2).copy(this.current).multiplyScalar(t);
     const ahead = t - this.lastT;
     if (!this.dirty && ahead >= 0 && ahead < 1 / 45) return;
     this.dirty = false;

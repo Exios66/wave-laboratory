@@ -10,6 +10,11 @@ export function createSimVessel(
   field: OceanField,
   weather?: WeatherField,
 ): SimVessel {
-  const definition = createVesselDefinition(config.type, config.scale, config.kgFactor);
+  const definition = createVesselDefinition(
+    config.type,
+    config.scale,
+    config.kgFactor,
+    config.loadFactor,
+  );
   return new Vessel(config.id, definition, config, field, weather ? { wind: weather } : {});
 }

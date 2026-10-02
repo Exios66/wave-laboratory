@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { rotate, type Quat, type Vec3 } from '../core/vec';
 import type { GpuOceanData } from '../ocean/gpuData';
+import { currentVelocity } from '../ocean/oceanField';
 import {
   DEFAULT_WEATHER,
   type Environment,
@@ -365,6 +366,8 @@ export class LabRenderer implements LabRendererApi {
     this.weatherField = new WeatherField(this.weather, env);
     this.uploadGusts();
     this.ocean.setWaveParams(env.choppiness, env.depth);
+    const current = currentVelocity(env);
+    this.ocean.setCurrent(current.x, current.y);
     const elev = THREE.MathUtils.degToRad(env.sunElevationDeg);
     const az = THREE.MathUtils.degToRad(env.sunAzimuthDeg);
     const horiz = Math.cos(elev);
@@ -867,7 +870,7 @@ export class LabRenderer implements LabRendererApi {
         definition.renderHull.indices,
         hullMat,
         id,
-        definition.draft - definition.kg,
+        definition.designDraft - definition.kg,
         definition.paint,
       ),
     );

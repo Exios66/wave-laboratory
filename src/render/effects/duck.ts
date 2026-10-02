@@ -13,7 +13,7 @@ export function buildDuck(
 ): { group: THREE.Group; materials: THREE.MeshStandardMaterial[] } {
   const L = length;
   const yellow = new THREE.MeshPhysicalMaterial({
-    color: 0xfff04a,
+    color: 0xffc21a,
     roughness: 0.35,
     metalness: 0,
     clearcoat: 0.8,
