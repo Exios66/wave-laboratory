@@ -27,13 +27,17 @@ import type { SceneryFrame, SceneryLayer } from './types';
 /** Size of one placement cell [m]. At most one island per cell. */
 export const ISLAND_CELL = 1500;
 /** No part of an island, lagoon included, comes closer than this to the world origin [m]. */
-export const ISLAND_CLEAR_RADIUS = 700;
+export const ISLAND_CLEAR_RADIUS = 450;
 /** Outer edge of the lagoon, as a multiple of the island's nominal radius. */
 export const ISLAND_FOOTPRINT = 1.8;
 /** Islands are built and drawn within this horizontal range of the camera [m]. */
-export const ISLAND_VIEW_RANGE = 4000;
+export const ISLAND_VIEW_RANGE = 6000;
 /** Chance that a cell holds an island (before the clear zone removes a few). */
 export const ISLAND_OCCUPANCY = 0.36;
+/** Chance that a cell without an island holds a chain of keys (small low islets) instead. */
+export const KEY_OCCUPANCY = 0.3;
+/** Islets in a chain of keys. */
+export const KEY_COUNT = [3, 7] as const;
 
 const WORLD_SALT = 0x5eed1517;
 
@@ -99,6 +103,68 @@ export function islandInCell(ix: number, iy: number): IslandSpec | null {
 }
 
 /**
+ * A chain of keys in grid cell (ix, iy): small low islets strung along a gently curving reef
+ * line, like the Florida Keys or the Exumas. Empty when the cell holds none (or holds an island).
+ */
+export function keysInCell(ix: number, iy: number): IslandSpec[] {
+  if (islandInCell(ix, iy)) return [];
+  const rnd = mulberry32(hash2(ix, iy, WORLD_SALT ^ 0x6b657973));
+  if (rnd() >= KEY_OCCUPANCY) return [];
+  const n = KEY_COUNT[0] + Math.floor(rnd() * (KEY_COUNT[1] - KEY_COUNT[0] + 1));
+  const radii = Array.from({ length: n }, () => 10 + 34 * rnd() ** 1.4);
+  const gaps = radii.slice(1).map((r, k) => (r + radii[k]!) * ISLAND_FOOTPRINT + 12 + 70 * rnd());
+  // Lay the chain out from its first islet, turning a little at each step.
+  let heading = rnd() * Math.PI * 2;
+  const bend = (rnd() - 0.5) * 0.5;
+  const pts = [{ x: 0, y: 0 }];
+  for (const g of gaps) {
+    heading += bend + (rnd() - 0.5) * 0.3;
+    const last = pts[pts.length - 1]!;
+    pts.push({ x: last.x + g * Math.cos(heading), y: last.y + g * Math.sin(heading) });
+  }
+  // Centre it in the cell, then keep only islets whose whole lagoon stays inside the cell
+  // and clear of the origin, and that keep clear of every other islet (a tight bend).
+  const cx = pts.reduce((a, p) => a + p.x, 0) / n;
+  const cy = pts.reduce((a, p) => a + p.y, 0) / n;
+  const ox = (ix + 0.5) * ISLAND_CELL + (rnd() - 0.5) * 200 - cx;
+  const oy = (iy + 0.5) * ISLAND_CELL + (rnd() - 0.5) * 200 - cy;
+  const out: IslandSpec[] = [];
+  for (let k = 0; k < n; k++) {
+    const radius = radii[k]!;
+    const x = pts[k]!.x + ox;
+    const y = pts[k]!.y + oy;
+    const m = radius * ISLAND_FOOTPRINT + 10;
+    if (x - m < ix * ISLAND_CELL || x + m > (ix + 1) * ISLAND_CELL) continue;
+    if (y - m < iy * ISLAND_CELL || y + m > (iy + 1) * ISLAND_CELL) continue;
+    if (Math.hypot(x, y) - radius * ISLAND_FOOTPRINT < ISLAND_CLEAR_RADIUS) continue;
+    const clash = out.some(
+      (o) => Math.hypot(o.x - x, o.y - y) - (o.radius + radius) * ISLAND_FOOTPRINT <= 1,
+    );
+    if (clash) continue;
+    const seed = hash2(ix * 8 + k, iy, WORLD_SALT ^ 0x6b6579);
+    const r = mulberry32(seed);
+    out.push({
+      key: `${ix}:${iy}:${k}`,
+      x,
+      y,
+      radius,
+      seed,
+      hut: radius > 24 && r() < 0.35,
+      dock: false,
+      lighthouse: k === 0 && radius > 18 && r() < 0.35,
+      palms: radius < 16 ? 1 + Math.floor(r() * 2) : 2 + Math.floor(r() * 4),
+    });
+  }
+  return out;
+}
+
+/** Everything in grid cell (ix, iy): one island, a chain of keys, or nothing. */
+export function islandsInCell(ix: number, iy: number): IslandSpec[] {
+  const one = islandInCell(ix, iy);
+  return one ? [one] : keysInCell(ix, iy);
+}
+
+/**
  * Islands any part of which (lagoon included) lies within `radius` of world point (x, y),
  * nearest first. Deterministic: the same island always comes back identical.
  */
@@ -111,10 +177,10 @@ export function islandsNear(x: number, y: number, radius: number): IslandSpec[] 
   const found: { spec: IslandSpec; d: number }[] = [];
   for (let iy = iy0; iy <= iy1; iy++) {
     for (let ix = ix0; ix <= ix1; ix++) {
-      const spec = islandInCell(ix, iy);
-      if (!spec) continue;
-      const d = Math.hypot(spec.x - x, spec.y - y);
-      if (d - spec.radius * ISLAND_FOOTPRINT <= radius) found.push({ spec, d });
+      for (const spec of islandsInCell(ix, iy)) {
+        const d = Math.hypot(spec.x - x, spec.y - y);
+        if (d - spec.radius * ISLAND_FOOTPRINT <= radius) found.push({ spec, d });
+      }
     }
   }
   found.sort((a, b) => a.d - b.d);
@@ -825,7 +891,8 @@ void main() {
 // ---------------------------------------------------------------------------------------------
 
 /** Most islands kept built at once. Typical view holds 3–10. */
-const POOL_SIZE = 16;
+/** Islands (and keys) drawn at once, nearest first. */
+export const POOL_SIZE = 32;
 /** Rebuild the visible set once the camera has moved this far [m]. */
 const REFRESH_DISTANCE = 40;
 /**
