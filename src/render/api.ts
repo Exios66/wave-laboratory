@@ -10,6 +10,7 @@ import type { AmbienceSettings } from './scenery/types';
 
 export type { AmbienceSettings } from './scenery/types';
 export { DAY_LENGTH_RANGE, DEFAULT_AMBIENCE } from './scenery/types';
+export { formatClock } from './scenery/sun';
 
 export type OverlayMode = 'none' | 'height' | 'steepness' | 'foam';
 export type CameraMode = 'orbit' | 'follow' | 'bridge' | 'top';

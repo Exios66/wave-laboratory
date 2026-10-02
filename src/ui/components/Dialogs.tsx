@@ -1,8 +1,9 @@
+import { DAY_LENGTH_RANGE, formatClock } from '../../render/api';
 import { PRESETS, presetExperiment } from '../../schema/presets';
 import { detectDeviceProfile, type PerformanceMode } from '../deviceProfile';
 import { useLab, type ThemePreference } from '../store';
 import { Dialog } from './Dialog';
-import { SelectField } from './fields';
+import { NumberField, SelectField, Switch } from './fields';
 
 export function Dialogs() {
   const dialog = useLab((s) => s.dialog);
@@ -117,6 +118,8 @@ function HelpContent() {
 function SettingsContent() {
   const theme = useLab((s) => s.theme);
   const performance = useLab((s) => s.performance);
+  const ambience = useLab((s) => s.ambience);
+  const timeOfDay = useLab((s) => s.timeOfDay);
   const lab = useLab.getState;
   return (
     <>
@@ -141,6 +144,68 @@ function SettingsContent() {
         onChange={(v) => lab().setPerformance(v)}
         hint={`Detected: ${detectDeviceProfile().description}. The physics is identical in every mode.`}
       />
+
+      <fieldset className="fieldset">
+        <legend>Ambience</legend>
+        <p className="field__hint" style={{ marginTop: 0 }}>
+          Viewer-only scenery. These preferences never change the physics, instruments or saved
+          experiment files. Current clock: <strong>{formatClock(timeOfDay)}</strong>
+        </p>
+        <Switch
+          label="Day / night cycle"
+          checked={ambience.dayNight}
+          onChange={(dayNight) => lab().setAmbience({ dayNight })}
+          hint="When off, the experiment’s fixed sun elevation and azimuth are used."
+        />
+        <NumberField
+          label="Day length"
+          value={ambience.dayLengthMin}
+          min={DAY_LENGTH_RANGE.min}
+          max={DAY_LENGTH_RANGE.max}
+          step={1}
+          unit="min"
+          unitLabel="real minutes per 24-hour day"
+          precision={0}
+          disabled={!ambience.dayNight}
+          onCommit={(dayLengthMin) => lab().setAmbience({ dayLengthMin })}
+          hint="Real minutes for one full day at 1× simulation speed."
+        />
+        <NumberField
+          label="Start hour"
+          value={ambience.startHour}
+          min={0}
+          max={23.75}
+          step={0.25}
+          unit="h"
+          unitLabel="hours"
+          precision={2}
+          disabled={!ambience.dayNight}
+          onCommit={(startHour) => lab().setAmbience({ startHour })}
+          hint="Clock time the cycle starts from (and resets to when you change this)."
+        />
+        <Switch
+          label="Islands"
+          checked={ambience.islands}
+          onChange={(islands) => lab().setAmbience({ islands })}
+        />
+        <Switch
+          label="Wildlife & seabirds"
+          checked={ambience.wildlife}
+          onChange={(wildlife) => lab().setAmbience({ wildlife })}
+          hint="Dolphins, whales, turtles and birds in fair weather."
+        />
+        <Switch
+          label="Sailors on deck"
+          checked={ambience.sailors}
+          onChange={(sailors) => lab().setAmbience({ sailors })}
+        />
+        <Switch
+          label="Lost planes"
+          checked={ambience.planes}
+          onChange={(planes) => lab().setAmbience({ planes })}
+          hint="Rare ghostly aircraft — a Bermuda Triangle Easter egg. They sometimes vanish mid-flight."
+        />
+      </fieldset>
     </>
   );
 }
