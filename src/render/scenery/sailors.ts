@@ -7,13 +7,14 @@ import { disposeObject3D, GeometryPool, hash01 } from './util';
 interface Sailor {
   mesh: THREE.Group;
   vesselId: string;
-  /** Phase along the deck walk [0–1). */
+  /** Phase along the deck walk [0–2). */
   phase: number;
   speed: number;
   lane: number;
-  /** Body-frame walk endpoints (x along length, y across beam, z deck). */
   aft: THREE.Vector3;
   fwd: THREE.Vector3;
+  /** Vessel body-frame group this sailor is attached to. */
+  host: THREE.Group;
 }
 
 /** High-vis gear so the figures read against dark decks. */
@@ -34,20 +35,25 @@ export class SailorLayer implements SceneryLayer {
   private readonly sailors: Sailor[] = [];
   private readonly bodyGeo = this.pool.share(new THREE.BoxGeometry(0.45, 1.1, 0.35));
   private readonly headGeo = this.pool.share(new THREE.SphereGeometry(0.22, 8, 6));
+  private readonly mastGeo = this.pool.share(new THREE.BoxGeometry(2, 24, 2));
+  private enabled = true;
 
   constructor() {
     this.object.name = 'sailors';
-    // Sailors live as children of vessel groups, so this root stays empty.
   }
 
   setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
     this.object.visible = enabled;
     for (const s of this.sailors) s.mesh.visible = enabled;
   }
 
   setVessels(vessels: readonly SceneryVessel[]): void {
     this.clearSailors();
-    if (vessels.length === 0) return;
+    if (vessels.length === 0) {
+      this.publishDebug();
+      return;
+    }
     for (const v of vessels) {
       try {
         this.spawnForVessel(v);
@@ -55,13 +61,11 @@ export class SailorLayer implements SceneryLayer {
         console.error('[scenery/sailors] failed to spawn crew on', v.id, err);
       }
     }
-    if (typeof window !== 'undefined') {
-      (window as unknown as { __labSailors?: number }).__labSailors = this.sailors.length;
-    }
+    this.publishDebug();
   }
 
   update(frame: SceneryFrame): void {
-    if (!this.object.visible) return;
+    if (!this.enabled) return;
     for (const s of this.sailors) {
       const motion = frame.vessels.find((v) => v.id === s.vesselId);
       if (motion?.capsized) {
@@ -69,20 +73,19 @@ export class SailorLayer implements SceneryLayer {
         continue;
       }
       s.mesh.visible = true;
-      // Pace slows in heavy seas; they still brace-walk.
+      if (s.speed <= 0) continue; // static mast marker
       const seaFactor = 0.35 + 0.65 * frame.calm;
       s.phase = (s.phase + frame.dt * s.speed * seaFactor) % 2;
-      // Ping-pong along the deck.
       const u = s.phase < 1 ? s.phase : 2 - s.phase;
       const x = THREE.MathUtils.lerp(s.aft.x, s.fwd.x, u);
       const y = THREE.MathUtils.lerp(s.aft.y, s.fwd.y, u) + s.lane;
       const z = THREE.MathUtils.lerp(s.aft.z, s.fwd.z, u);
+      // Body → Three on the host: (x, z, −y). Host already carries world motion.
       s.mesh.position.set(x, z, -y);
-      const goingFwd = s.phase < 1;
-      s.mesh.rotation.y = goingFwd ? 0 : Math.PI;
-      const bob = Math.sin(s.phase * Math.PI * 2) * 0.05;
-      s.mesh.position.y += bob;
+      s.mesh.rotation.y = s.phase < 1 ? 0 : Math.PI;
+      s.mesh.position.y += Math.sin(s.phase * Math.PI * 2) * 0.05;
     }
+    if (frame.wallT % 2 < frame.dt) this.publishDebug();
   }
 
   private spawnForVessel(v: SceneryVessel): void {
@@ -90,16 +93,43 @@ export class SailorLayer implements SceneryLayer {
     const count = Math.min(10, Math.max(2, Math.round(def.length / 22)));
     const bow = def.points.bow;
     const zDeck = deckHeight(def);
-    // Keep clear of the stern propeller and the stem.
     const aftX = -def.length * 0.18;
     const fwdX = Math.min(bow.x - def.length * 0.06, def.length * 0.38);
-    // Wide freighters: walk the outer catwalk outside the cargo footprint (≈ ±0.43–0.47 B).
     const sideBias = def.beam > 12 ? 0.455 : 0.2;
+
+    // Magenta mast on the bow — unmistakable if the host group is the rendered vessel.
+    const mastMat = new THREE.MeshBasicMaterial({ color: 0xff00ff, toneMapped: false });
+    const mast = new THREE.Group();
+    mast.name = 'sailor-mast';
+    const mastMesh = new THREE.Mesh(this.mastGeo, mastMat);
+    mastMesh.position.y = 12;
+    mastMesh.frustumCulled = false;
+    mast.add(mastMesh);
+    mast.position.set(fwdX, zDeck, 0);
+    mast.frustumCulled = false;
+    mast.userData.mats = [mastMat];
+    v.group.add(mast);
+    this.sailors.push({
+      mesh: mast,
+      vesselId: v.id,
+      phase: 0,
+      speed: 0,
+      lane: 0,
+      aft: new THREE.Vector3(fwdX, 0, zDeck),
+      fwd: new THREE.Vector3(fwdX, 0, zDeck),
+      host: v.group,
+    });
+
     for (let i = 0; i < count; i++) {
       const seed = Math.imul(Math.round(def.length * 1000) + i, 2654435761) >>> 0;
       const mesh = this.makeSailor(seed);
       const lane = (i % 2 === 0 ? 1 : -1) * def.beam * (sideBias + hash01(seed + 3) * 0.015);
-      const sailor: Sailor = {
+      mesh.position.set(aftX, zDeck, -lane);
+      const scale = def.beam > 12 ? 7 : Math.min(3.2, Math.max(1.4, def.beam * 0.22));
+      mesh.scale.setScalar(scale);
+      mesh.frustumCulled = false;
+      v.group.add(mesh);
+      this.sailors.push({
         mesh,
         vesselId: v.id,
         phase: hash01(seed + 1),
@@ -107,20 +137,8 @@ export class SailorLayer implements SceneryLayer {
         lane,
         aft: new THREE.Vector3(aftX, 0, zDeck),
         fwd: new THREE.Vector3(fwdX, 0, zDeck),
-      };
-      mesh.position.set(aftX, zDeck, -lane);
-      // Slightly larger than life so they read at typical orbit distances.
-      const scale = def.beam > 12 ? 7 : Math.min(3.2, Math.max(1.4, def.beam * 0.22));
-      mesh.scale.setScalar(scale);
-      // Draw above nearby deck plates so figures are not buried in cargo.
-      mesh.traverse((c) => {
-        if (c instanceof THREE.Mesh) {
-          c.renderOrder = 2;
-          c.material.depthTest = true;
-        }
+        host: v.group,
       });
-      v.group.add(mesh);
-      this.sailors.push(sailor);
     }
   }
 
@@ -128,17 +146,19 @@ export class SailorLayer implements SceneryLayer {
     const g = new THREE.Group();
     g.name = 'sailor';
     const bodyColor = BODY_COLORS[Math.floor(hash01(seed) * BODY_COLORS.length)]!;
-    // Unlit so figures stay readable under day/night and in storms.
-    const bodyMat = new THREE.MeshBasicMaterial({ color: bodyColor });
-    const headMat = new THREE.MeshBasicMaterial({ color: 0xffe4c8 });
-    const beaconMat = new THREE.MeshBasicMaterial({ color: 0xffff66 });
+    const bodyMat = new THREE.MeshBasicMaterial({ color: bodyColor, toneMapped: false });
+    const headMat = new THREE.MeshBasicMaterial({ color: 0xffe4c8, toneMapped: false });
+    const beaconMat = new THREE.MeshBasicMaterial({ color: 0xffff66, toneMapped: false });
     const body = new THREE.Mesh(this.bodyGeo, bodyMat);
     body.position.y = 0.55;
+    body.frustumCulled = false;
     const head = new THREE.Mesh(this.headGeo, headMat);
     head.position.y = 1.25;
+    head.frustumCulled = false;
     const beacon = new THREE.Mesh(this.headGeo, beaconMat);
     beacon.position.y = 1.7;
     beacon.scale.setScalar(0.7);
+    beacon.frustumCulled = false;
     g.add(body, head, beacon);
     g.userData.mats = [bodyMat, headMat, beaconMat];
     return g;
@@ -151,6 +171,24 @@ export class SailorLayer implements SceneryLayer {
       if (mats) for (const m of mats) m.dispose();
     }
     this.sailors.length = 0;
+  }
+
+  private publishDebug(): void {
+    if (typeof window === 'undefined') return;
+    const w = window as unknown as {
+      __labSailors?: number;
+      __labSailorPos?: number[][];
+      __labSailorParents?: string[];
+    };
+    w.__labSailors = this.sailors.length;
+    w.__labSailorParents = this.sailors.map(
+      (s) => `${s.mesh.name}@${s.host.uuid.slice(0, 8)}:parent=${s.mesh.parent?.uuid.slice(0, 8) ?? 'none'}`,
+    );
+    w.__labSailorPos = this.sailors.map((s) => {
+      const p = new THREE.Vector3();
+      s.mesh.getWorldPosition(p);
+      return [+p.x.toFixed(1), +p.y.toFixed(1), +p.z.toFixed(1), s.mesh.visible ? 1 : 0];
+    });
   }
 
   dispose(): void {
