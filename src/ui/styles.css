@@ -874,7 +874,12 @@ input[type='range'] {
 }
 .chart__plot {
   flex: 1;
-  min-height: 0;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+}
+.u-legend {
+  flex: none;
 }
 
 .charts-row {
@@ -1123,18 +1128,18 @@ kbd {
     min-width: 0;
   }
 
-  .app__scene,
-  .app__inspector,
-  .app__dock {
+  .app__scene.panel,
+  .app__inspector.panel,
+  .app__dock.panel {
     grid-area: panel;
     display: none;
     border-width: 0 !important;
   }
-  .app[data-mobile-panel='scene'] .app__scene,
-  .app[data-mobile-panel='inspector'] .app__inspector {
+  .app[data-mobile-panel='scene'] .app__scene.panel,
+  .app[data-mobile-panel='inspector'] .app__inspector.panel {
     display: block;
   }
-  .app[data-mobile-panel='data'] .app__dock {
+  .app[data-mobile-panel='data'] .app__dock.panel {
     display: flex;
   }
 
@@ -1168,6 +1173,10 @@ kbd {
     width: 100%;
     overflow-x: auto;
     scrollbar-width: none;
+  }
+  .tabs [role='tab'] {
+    white-space: nowrap;
+    padding: 6px 8px;
   }
 
   .hud {
@@ -1224,7 +1233,9 @@ kbd {
   .input,
   .tree__select,
   .tabs [role='tab'],
-  .segmented button,
+  .segmented button {
+    min-height: 44px;
+  }
   .hud select {
     min-height: 44px;
   }
@@ -1240,5 +1251,19 @@ kbd {
   }
   input[type='range'] {
     min-height: 36px;
+  }
+}
+
+/* Camera and overlay controls sit on the 3D view, so they stay shorter than form fields. */
+@media (max-width: 900px) and (pointer: coarse) {
+  .hud .segmented button {
+    min-height: 32px;
+    padding: 2px 8px;
+    font-size: 13px;
+  }
+  .hud select {
+    min-height: 32px;
+    padding: 2px 8px;
+    font-size: 16px;
   }
 }

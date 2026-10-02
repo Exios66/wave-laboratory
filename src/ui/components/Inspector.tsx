@@ -46,7 +46,14 @@ export function Inspector() {
   }
 
   return (
-    <aside className="panel app__inspector" aria-labelledby="inspector-title" id="inspector">
+    <aside
+      className="panel app__inspector"
+      aria-labelledby="inspector-title"
+      id="inspector"
+      // Scrollable landmark: keyboard users must be able to focus it (WCAG 2.1.1).
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+      tabIndex={0}
+    >
       <div className="panel__header">
         <h2 className="panel__title" id="inspector-title">
           {title}
@@ -118,8 +125,10 @@ function SeaSummary() {
   );
 }
 
+const NO_WARNINGS: readonly string[] = [];
+
 function Warnings() {
-  const warnings = useLab((s) => s.diagnostics?.warnings ?? []);
+  const warnings = useLab((s) => s.diagnostics?.warnings ?? NO_WARNINGS);
   if (warnings.length === 0) return null;
   return (
     <div className="callout" role="note" style={{ marginTop: 12 }}>

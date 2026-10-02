@@ -102,7 +102,14 @@ export function ScenePanel() {
   };
 
   return (
-    <nav className="panel app__scene" aria-labelledby="scene-title" id="scene">
+    <nav
+      className="panel app__scene"
+      aria-labelledby="scene-title"
+      id="scene"
+      // Scrollable landmark: keyboard users must be able to focus it (WCAG 2.1.1).
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+      tabIndex={0}
+    >
       <div className="panel__header">
         <h2 className="panel__title" id="scene-title">
           Scene

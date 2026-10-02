@@ -34,6 +34,16 @@ function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888';
 }
 
+/** Leave room under the canvas for uPlot's legend so it is not clipped by the dock. */
+const LEGEND_PX = 44;
+
+function plotSize(host: HTMLElement): { width: number; height: number } {
+  return {
+    width: Math.max(160, host.clientWidth),
+    height: Math.max(96, host.clientHeight - LEGEND_PX),
+  };
+}
+
 export function Chart({ title, series, getData, xLabel, yLabel, logX, logY, summary }: ChartProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
@@ -55,9 +65,10 @@ export function Chart({ title, series, getData, xLabel, yLabel, logX, logY, summ
       font: '12px system-ui, sans-serif',
       labelFont: '12px system-ui, sans-serif',
     };
+    const initial = plotSize(host);
     const opts: uPlot.Options = {
-      width: Math.max(200, host.clientWidth),
-      height: Math.max(120, host.clientHeight),
+      width: initial.width,
+      height: initial.height,
       legend: { show: true, live: false },
       cursor: { drag: { x: false, y: false } },
       scales: {
@@ -82,10 +93,7 @@ export function Chart({ title, series, getData, xLabel, yLabel, logX, logY, summ
     const plot = new uPlot(opts, getDataRef.current() as uPlot.AlignedData, host);
     plotRef.current = plot;
     const ro = new ResizeObserver(() => {
-      plot.setSize({
-        width: Math.max(200, host.clientWidth),
-        height: Math.max(120, host.clientHeight),
-      });
+      plot.setSize(plotSize(host));
     });
     ro.observe(host);
     let pending = false;
