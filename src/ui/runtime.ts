@@ -35,6 +35,9 @@ export class LabRuntime {
   private displayT = 0;
   private simT = 0;
   private uiStamp = 0;
+  /** Day:night clock [h]. Advances with simulated time, so pausing stops the sun too. */
+  private clockHours = useLab.getState().timeOfDay;
+  private clockStamp = 0;
 
   constructor() {
     this.client = new SimClient();
@@ -82,6 +85,12 @@ export class LabRuntime {
         }
         if (s.experiment.environment !== prev.experiment.environment) {
           this.renderer.setEnvironment(s.experiment.environment);
+        }
+        if (s.ambience !== prev.ambience) this.renderer.setAmbience(s.ambience);
+        if (s.timeOfDay !== prev.timeOfDay && Math.abs(s.timeOfDay - this.clockHours) > 1e-6) {
+          // Someone set the clock (settings or reset): jump to it.
+          this.clockHours = s.timeOfDay;
+          this.renderer.setTimeOfDay(this.clockHours);
         }
       }),
     );
@@ -143,6 +152,8 @@ export class LabRuntime {
     this.renderer.setOverlay(s.overlay);
     this.renderer.setCamera(s.camera, s.cameraTarget);
     this.renderer.setSelection(selectionId(s.selection));
+    this.renderer.setAmbience(s.ambience);
+    this.renderer.setTimeOfDay(this.clockHours);
     this.pushSceneToRenderer();
     this.canvas = canvas;
     this.configureGovernor();
@@ -207,11 +218,23 @@ export class LabRuntime {
     if (s.playing && s.status === 'ready') this.client.advance(wall * s.timeScale);
     this.advanceDisplayClock(wall, s.playing && s.status === 'ready', s.timeScale);
     this.renderer?.setVisualTime(this.displayT);
+    this.advanceClock(now, wall, s);
     if (this.renderer && !document.hidden && this.governor.frame(wall) && this.canvas) {
       this.resize(this.canvas);
       s.setRenderScale(this.governor.scale);
     }
     this.renderer?.render();
+  }
+
+  private advanceClock(now: number, wall: number, s: ReturnType<typeof useLab.getState>): void {
+    const { dayNight, dayLengthMin } = s.ambience;
+    if (!dayNight || !s.playing || s.status !== 'ready') return;
+    this.clockHours = (this.clockHours + (wall * s.timeScale * 24) / (dayLengthMin * 60)) % 24;
+    this.renderer?.setTimeOfDay(this.clockHours);
+    if (now - this.clockStamp > 250) {
+      this.clockStamp = now;
+      s.setTimeOfDay(this.clockHours);
+    }
   }
 
   private advanceDisplayClock(wall: number, playing: boolean, timeScale: number): void {
