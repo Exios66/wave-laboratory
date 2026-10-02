@@ -235,10 +235,14 @@ void main() {
 export const OCEAN_FRAG = /* glsl */ `
 uniform vec3 uSunDir;
 uniform float uWind;
+uniform float uTime;
 uniform float uHs;
 uniform float uOverlay;
 uniform vec3 uFogColor;
 uniform float uFogDensity;
+uniform float uWakeCount;
+uniform vec4 uWakeA[4];
+uniform vec4 uWakeB[4];
 varying vec3 vNormal;
 varying vec3 vThreePos;
 varying float vEta;
@@ -255,8 +259,43 @@ vec3 ramp5(float u, vec3 a, vec3 b, vec3 c, vec3 d, vec3 e) {
   return mix(d, e, (x - 0.75) / 0.25);
 }
 
+float capillary(vec2 p) {
+  float a = 0.012 * (0.35 + uWind * 0.05);
+  float w = sin(p.x * 2.4 + p.y * 1.1 + uTime * 1.7);
+  w += 0.55 * sin(p.x * 5.6 - p.y * 4.2 + uTime * 2.6);
+  return w * a;
+}
+
+float wakeFoam(vec2 worldXY) {
+  float foam = 0.0;
+  for (int i = 0; i < 4; i++) {
+    if (float(i) + 0.5 > uWakeCount) break;
+    vec4 a = uWakeA[i];
+    vec4 b = uWakeB[i];
+    vec2 rel = worldXY - a.xy;
+    float along = dot(rel, b.xy);
+    float across = abs(rel.x * b.y - rel.y * b.x);
+    float behind = -along;
+    float speed = a.z;
+    float len = max(a.w, 4.0);
+    float beam = max(b.z, 1.0);
+    if (behind > 0.0 && behind < len * 6.0 && speed > 0.8) {
+      float wedge = beam * 0.42 + behind * 0.16;
+      float inside = 1.0 - smoothstep(wedge * 0.35, wedge, across);
+      float fade = exp(-behind / (len * 1.8));
+      foam += inside * fade * clamp(speed / 8.0, 0.0, 1.0) * 0.55;
+    }
+  }
+  return foam;
+}
+
 void main() {
-  vec3 N = normalize(vNormal);
+  vec2 worldXY = vec2(vThreePos.x, -vThreePos.z);
+  float e = 0.35;
+  float c0 = capillary(worldXY);
+  float cx = (capillary(worldXY + vec2(e, 0.0)) - c0) / e;
+  float cy = (capillary(worldXY + vec2(0.0, e)) - c0) / e;
+  vec3 N = normalize(normalize(vNormal) + vec3(-cx, 0.0, cy));
   if (!gl_FrontFacing) N = -N;
   vec3 V = normalize(cameraPosition - vThreePos);
   float ndv = clamp(dot(N, V), 0.0, 1.0);
@@ -264,16 +303,18 @@ void main() {
   vec3 R = reflect(-V, N);
   vec3 reflection = skyColor(R, uSunDir);
   float crest = clamp(vEta / max(uHs, 0.4) * 0.5 + 0.5, 0.0, 1.0);
-  vec3 deep = srgbToLinear(vec3(0.02, 0.10, 0.16));
-  vec3 shallow = srgbToLinear(vec3(0.05, 0.42, 0.48));
+  vec3 deep = srgbToLinear(vec3(0.015, 0.07, 0.12));
+  vec3 shallow = srgbToLinear(vec3(0.04, 0.38, 0.46));
   vec3 water = mix(deep, shallow, crest);
   vec3 col = mix(water, reflection, fresnel);
-  float spec = pow(max(dot(normalize(R), uSunDir), 0.0), 500.0);
-  col += srgbToLinear(vec3(1.0, 0.97, 0.90)) * spec * (0.35 + 0.65 * fresnel);
+  float sun = max(dot(normalize(R), uSunDir), 0.0);
+  float spec = pow(sun, 90.0) * 0.35 + pow(sun, 1400.0);
+  col += srgbToLinear(vec3(1.0, 0.97, 0.90)) * spec * (0.4 + 0.6 * fresnel);
+  col += srgbToLinear(vec3(0.10, 0.40, 0.38)) * pow(crest, 2.0) * (1.0 - fresnel) * 0.45;
   float foamGate = mix(0.45, 0.75, clamp(uWind / 28.0, 0.0, 1.0));
   float foam = 1.0 - smoothstep(foamGate - 0.35, foamGate, vJacobian);
-  foam = clamp(foam + smoothstep(0.22, 0.45, vSlope) * 0.35, 0.0, 1.0);
-  col = mix(col, srgbToLinear(vec3(0.90, 0.94, 0.96)), foam * 0.85);
+  foam = clamp(foam + smoothstep(0.22, 0.45, vSlope) * 0.35 + wakeFoam(worldXY), 0.0, 1.0);
+  col = mix(col, srgbToLinear(vec3(0.90, 0.94, 0.96)), foam * 0.9);
 
   if (uOverlay > 0.5 && uOverlay < 1.5) {
     float u = clamp(vEta / max(0.25, uHs * 0.75) * 0.5 + 0.5, 0.0, 1.0);

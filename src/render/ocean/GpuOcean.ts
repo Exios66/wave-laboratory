@@ -116,6 +116,9 @@ export class GpuOcean {
         value: new THREE.Color().setRGB(srgbChannel(0.78), srgbChannel(0.84), srgbChannel(0.9)),
       },
       uFogDensity: { value: 1.4e-6 },
+      uWakeCount: { value: 0 },
+      uWakeA: { value: Array.from({ length: 4 }, () => new THREE.Vector4()) },
+      uWakeB: { value: Array.from({ length: 4 }, () => new THREE.Vector4()) },
     };
 
     const geo = new THREE.PlaneGeometry(2, 2);
