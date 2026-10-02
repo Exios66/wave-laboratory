@@ -164,7 +164,9 @@ describe('IslandLayer', () => {
       const wx = camera.position.x;
       const wy = -camera.position.z;
       const expected = islandsNear(wx, wy, ISLAND_VIEW_RANGE).map((s) => s.key);
-      expect(layer.visibleIslands.map((s) => s.key).sort()).toEqual(expected.slice(0, POOL_SIZE).sort());
+      expect(layer.visibleIslands.map((s) => s.key).sort()).toEqual(
+        expected.slice(0, POOL_SIZE).sort(),
+      );
       maxChildren = Math.max(maxChildren, layer.object.children.length);
     }
     // Pool meshes + palms + lagoons + a few lighthouse glows; never grows with distance walked.

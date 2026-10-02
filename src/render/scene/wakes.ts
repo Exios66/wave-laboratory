@@ -85,7 +85,8 @@ export class WakeTrail {
   ): void {
     const newest = this.points[0];
     if (newest && (t < newest.t - 1e-6 || t - newest.t > wakeLifetime(length))) this.reset();
-    if (!this.last && heading && speed > 0.3) this.backfill(t, x, y, heading, speed, length, capacity);
+    if (!this.last && heading && speed > 0.3)
+      this.backfill(t, x, y, heading, speed, length, capacity);
     if (this.last) this.odo += Math.hypot(x - this.last.x, y - this.last.y);
     this.last = { x, y };
     const head = this.points[0];

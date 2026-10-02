@@ -750,7 +750,8 @@ export class LabRenderer implements LabRendererApi {
       const view = this.vessels.get(state.id);
       if (!view || !view.group.visible || state.capsized) continue;
       const loss = 1 - (Number.isFinite(state.health) ? state.health : 1);
-      const level = Math.max(0, (loss - 0.4) / 0.6) + (state.disabled ? 0.4 : 0);
+      // Smoke from about a fifth of the health gone, thickening until the ship is wrecked.
+      const level = Math.max(0, (loss - 0.2) / 0.8) + (state.disabled ? 0.4 : 0);
       if (level <= 0) continue;
       const def = view.definition;
       const scale = Math.sqrt(Math.max(def.beam, 2) / 10);
