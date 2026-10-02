@@ -66,6 +66,8 @@ export interface LabState {
   mobilePanel: MobilePanel;
   dialog: 'help' | 'presets' | 'settings' | null;
   notices: Notice[];
+  /** Easter egg: hulls drawn as rubber ducks. Session only, never saved in the experiment. */
+  duckMode: boolean;
 
   // actions
   updateExperiment(recipe: (draft: Experiment) => void, opts?: { reload?: boolean }): void;
@@ -85,6 +87,7 @@ export interface LabState {
   openDialog(dialog: LabState['dialog']): void;
   notify(tone: Notice['tone'], message: string): void;
   dismissNotice(id: number): void;
+  setDuckMode(on: boolean): void;
   // simulation bridge callbacks
   simLoaded(defs: Record<string, VesselDefinition>, diagnostics: SeaDiagnostics): void;
   simFrame(frame: SimFrame): void;
@@ -141,6 +144,7 @@ export const useLab = create<LabState>()((set, get) => ({
   mobilePanel: 'data',
   dialog: null,
   notices: [],
+  duckMode: false,
 
   updateExperiment(recipe, opts) {
     const prev = get().experiment;
@@ -259,6 +263,9 @@ export const useLab = create<LabState>()((set, get) => ({
   notify(tone, message) {
     const id = ++noticeId;
     set((s) => ({ notices: [...s.notices.slice(-3), { id, tone, message }] }));
+  },
+  setDuckMode(on) {
+    set({ duckMode: on });
   },
   dismissNotice(id) {
     set((s) => ({ notices: s.notices.filter((n) => n.id !== id) }));

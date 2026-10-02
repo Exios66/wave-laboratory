@@ -48,6 +48,8 @@ export interface LabRendererApi {
   pick(x: number, y: number): PickResult | null;
   /** Keyboard camera control (accessible alternative to pointer orbiting). */
   nudgeCamera(action: 'left' | 'right' | 'up' | 'down' | 'in' | 'out' | 'reset'): void;
+  /** Easter egg: draw every hull as a rubber duck. The physics is unchanged. */
+  setDuckMode(on: boolean): void;
   readonly stats: RendererStats;
   dispose(): void;
 }

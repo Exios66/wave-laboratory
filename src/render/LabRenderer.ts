@@ -9,6 +9,8 @@ import type { Environment, ProbeConfig } from '../schema/experiment';
 import type { SimFrame } from '../sim/types';
 import type { VesselDefinition } from '../vessel/api';
 import type { CameraMode, LabRendererApi, OverlayMode, PickResult, RendererStats } from './api';
+import { buildDuck } from './effects/duck';
+import { SprayParticles } from './effects/spray';
 import { GpuOcean } from './ocean/GpuOcean';
 import { OCEAN_FRAG, OCEAN_VERT, SKY_FRAG, SKY_VERT } from './ocean/shaders';
 
@@ -102,6 +104,12 @@ export class LabRenderer implements LabRendererApi {
   private readonly oceanMesh: THREE.Mesh;
   private readonly sky: THREE.Mesh;
   private readonly sun: THREE.DirectionalLight;
+  private readonly spray: SprayParticles;
+  /** Vessels that slammed or shipped green water since the last drawn frame. */
+  private readonly sprayBursts = new Set<string>();
+  private sprayT = 0;
+  private duckMode = false;
+  private readonly tier: 'light' | 'full';
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
   private readonly vessels = new Map<string, VesselView>();
@@ -109,6 +117,7 @@ export class LabRenderer implements LabRendererApi {
   private readonly pickables: THREE.Object3D[] = [];
   private readonly tmp = new THREE.Vector3();
   private readonly look = new THREE.Vector3();
+  private readonly tmpSide = new THREE.Vector3();
   private readonly onLost: (ev: Event) => void;
   private readonly onRestored: () => void;
   private readonly onPointerDown: (ev: PointerEvent) => void;
@@ -146,6 +155,7 @@ export class LabRenderer implements LabRendererApi {
     const probeGl = probe.getContext('webgl2');
     const tier = probeGl ? rendererTier(probeGl) : 'light';
     probeGl?.getExtension('WEBGL_lose_context')?.loseContext();
+    this.tier = tier;
     const gl = canvas.getContext('webgl2', {
       alpha: false,
       antialias: tier === 'full',
@@ -203,6 +213,9 @@ export class LabRenderer implements LabRendererApi {
     this.sky.renderOrder = -1;
     this.sky.frustumCulled = false;
     this.scene.add(this.sky);
+
+    this.spray = new SprayParticles(tier === 'light' ? 400 : 1600);
+    this.scene.add(this.spray.points);
 
     this.scene.add(new THREE.HemisphereLight(0xc5ddf2, 0x1c3344, 0.9));
     this.sun = new THREE.DirectionalLight(0xfff4e0, 2.4);
@@ -359,6 +372,7 @@ export class LabRenderer implements LabRendererApi {
     if (this.frame && frame.t > this.frame.t + 1e-6) this.prevFrame = this.frame;
     else if (!this.frame || frame.t + 1e-4 < this.frame.t) this.prevFrame = null;
     this.frame = frame;
+    for (const v of frame.vessels) if (v.slamming || v.greenWater) this.sprayBursts.add(v.id);
     this.poseAt(frame.t);
     this.applySelection();
   }
@@ -416,21 +430,6 @@ export class LabRenderer implements LabRendererApi {
       attitudeToThree(state.attitude, view.group.quaternion);
     }
     view.group.userData.capsized = state.capsized;
-    const spray = view.group.getObjectByName('spray');
-    if (spray) {
-      const kn = Math.max(0, state.speedKn);
-      const amount = Math.min(1, kn / 12);
-      spray.visible = kn > 0.4;
-      spray.scale.set(
-        view.definition.beam * (0.12 + 0.28 * amount),
-        view.definition.draft * (0.2 + 0.45 * amount),
-        view.definition.beam * (0.16 + 0.3 * amount),
-      );
-      const mat = (spray as THREE.Mesh).material;
-      if (!Array.isArray(mat) && mat instanceof THREE.MeshStandardMaterial) {
-        mat.opacity = 0.12 + 0.55 * amount;
-      }
-    }
   }
 
   setOverlay(mode: OverlayMode): void {
@@ -457,6 +456,7 @@ export class LabRenderer implements LabRendererApi {
     const t = this.shownT || this.frame?.t || 0;
     this.poseAt(t);
     this.updateWakes();
+    this.updateSpray(t);
     this.ocean.update(t);
     this.updateCamera();
     this.sky.position.copy(this.camera.position);
@@ -485,6 +485,18 @@ export class LabRenderer implements LabRendererApi {
     this.camera.updateProjectionMatrix();
     this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(width, height, false);
+    this.spray.setViewport(height * pixelRatio, this.camera.fov);
+  }
+
+  setDuckMode(on: boolean): void {
+    this.duckMode = on;
+    for (const view of this.vessels.values()) this.applyDuck(view);
+  }
+
+  private applyDuck(view: VesselView): void {
+    for (const child of view.group.children) {
+      child.visible = child.name === 'duck' ? this.duckMode : !this.duckMode;
+    }
   }
 
   pick(x: number, y: number): PickResult | null {
@@ -514,6 +526,57 @@ export class LabRenderer implements LabRendererApi {
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     if (!this.raycaster.ray.intersectPlane(plane, planeHit)) return null;
     return { kind: 'water', point: { x: planeHit.x, y: -planeHit.z, z: planeHit.y } };
+  }
+
+  /** Bow spray while making way, and bursts on slamming or green water. Visual only. */
+  private updateSpray(t: number): void {
+    const dt = Math.min(Math.max(t - this.sprayT, 0), 0.05);
+    if (t + 1e-4 < this.sprayT) this.spray.clear();
+    this.sprayT = t;
+    if (dt <= 0) return;
+    const light = this.tier === 'light';
+    for (const state of this.frame?.vessels ?? []) {
+      const view = this.vessels.get(state.id);
+      if (!view || state.capsized) continue;
+      const def = view.definition;
+      const kn = Math.max(0, state.speedKn);
+      const making = Math.min(1, kn / 14);
+      const burst = this.sprayBursts.has(state.id);
+      if (making < 0.08 && !burst) continue;
+      view.group.updateMatrixWorld();
+      const size = THREE.MathUtils.clamp(def.beam * 0.035, 0.18, 1.1);
+      const wl = def.draft - def.kg;
+      const vel = state.velocity;
+      for (const side of [-1, 1]) {
+        const origin = view.group.localToWorld(
+          this.look.set(def.points.bow.x - def.length * 0.02, wl, side * def.beam * 0.08),
+        );
+        const out = this.tmpSide.set(0, 0, side).applyQuaternion(view.group.quaternion);
+        const emit = {
+          x: origin.x,
+          y: origin.y,
+          z: origin.z,
+          vx: vel.x * 0.85 + out.x * (1.5 + 3 * making),
+          vy: 1.5 + 4.5 * making,
+          vz: -vel.y * 0.85 + out.z * (1.5 + 3 * making),
+          jitter: 0.6 + 1.2 * making,
+          spread: def.beam * 0.05,
+          size,
+        };
+        const rate = (light ? 60 : 220) * making ** 1.5;
+        const n = rate * dt;
+        this.spray.emit(emit, Math.floor(n) + (Math.random() < n % 1 ? 1 : 0));
+        if (burst) {
+          emit.vy = 5 + Math.sqrt(def.length) * 0.4;
+          emit.jitter = 2.5;
+          emit.spread = def.beam * 0.25;
+          emit.size = size * 1.5;
+          this.spray.emit(emit, light ? 18 : 70);
+        }
+      }
+    }
+    this.sprayBursts.clear();
+    this.spray.update(dt);
   }
 
   /** Visual Kelvin-ish foam. It does not feed back into the hull forces. */
@@ -586,6 +649,7 @@ export class LabRenderer implements LabRendererApi {
     (this.oceanMesh.material as THREE.Material).dispose();
     this.sky.geometry.dispose();
     (this.sky.material as THREE.Material).dispose();
+    this.spray.dispose();
     this.renderer.dispose();
   }
 
@@ -608,21 +672,9 @@ export class LabRenderer implements LabRendererApi {
         definition.draft - definition.kg,
       ),
     );
-    const sprayMat = new THREE.MeshStandardMaterial({
-      color: 0xf8fafc,
-      transparent: true,
-      opacity: 0.2,
-      roughness: 0.15,
-      metalness: 0,
-      depthWrite: false,
-    });
-    materials.push(sprayMat);
-    const spray = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), sprayMat);
-    spray.name = 'spray';
-    const bow = definition.points.bow;
-    spray.position.set(bow.x + definition.length * 0.02, bow.z, -bow.y);
-    spray.scale.set(definition.beam * 0.22, definition.draft * 0.35, definition.beam * 0.28);
-    group.add(spray);
+    const duck = buildDuck(definition.length, definition.draft - definition.kg, id);
+    materials.push(...duck.materials);
+    group.add(duck.group);
 
     for (const box of definition.superstructure) {
       const mat = this.material(box.material);
@@ -657,7 +709,9 @@ export class LabRenderer implements LabRendererApi {
     disc.userData.pickId = id;
     group.add(disc);
 
-    return { id, definition, group, materials };
+    const view = { id, definition, group, materials };
+    this.applyDuck(view);
+    return view;
   }
 
   private meshFromHull(

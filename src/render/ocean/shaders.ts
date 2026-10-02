@@ -284,6 +284,27 @@ float capillary(vec2 p) {
   return w * a;
 }
 
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+float valueNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash12(i), hash12(i + vec2(1.0, 0.0)), u.x),
+             mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+
+/** Lacy foam texture: two octaves of drifting noise, so foam breaks into streaks and holes. */
+float foamLace(vec2 p) {
+  vec2 drift = vec2(uTime * 0.21, uTime * 0.13);
+  float n = valueNoise(p * 0.45 + drift) * 0.62 + valueNoise(p * 1.7 - drift * 1.9) * 0.38;
+  return n;
+}
+
 float wakeFoam(vec2 worldXY) {
   float foam = 0.0;
   for (int i = 0; i < 4; i++) {
@@ -330,9 +351,17 @@ void main() {
   float spec = pow(sun, 90.0) * 0.35 + pow(sun, 1400.0);
   col += srgbToLinear(vec3(1.0, 0.97, 0.90)) * spec * (0.4 + 0.6 * fresnel);
   col += srgbToLinear(vec3(0.10, 0.40, 0.38)) * pow(crest, 2.0) * (1.0 - fresnel) * 0.45;
+  // Light through thin crests when looking toward the sun (cheap subsurface scattering).
+  vec3 sunFlat = normalize(vec3(uSunDir.x, 0.0, uSunDir.z) + vec3(0.0, 1e-4, 0.0));
+  float backlit = pow(clamp(dot(-V, sunFlat), 0.0, 1.0), 3.0);
+  float thin = smoothstep(0.55, 1.0, crest) * smoothstep(0.05, 0.3, vSlope + 0.08);
+  float sunUp = smoothstep(-0.05, 0.25, uSunDir.y);
+  col += srgbToLinear(vec3(0.12, 0.72, 0.58)) * backlit * thin * sunUp * (1.0 - fresnel) * 0.55;
   float foamGate = mix(0.45, 0.75, clamp(uWind / 28.0, 0.0, 1.0));
   float foam = 1.0 - smoothstep(foamGate - 0.35, foamGate, vJacobian);
   foam = clamp(foam + smoothstep(0.22, 0.45, vSlope) * 0.35 + wakeFoam(worldXY), 0.0, 1.0);
+  float lace = foamLace(worldXY);
+  foam *= smoothstep(0.18, 0.55, lace + foam * 0.35);
   col = mix(col, srgbToLinear(vec3(0.90, 0.94, 0.96)), foam * 0.9);
 
   if (uOverlay > 0.5 && uOverlay < 1.5) {
