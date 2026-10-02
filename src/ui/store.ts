@@ -147,6 +147,7 @@ export function sanitizeAmbience(raw: Partial<AmbienceSettings>): AmbienceSettin
     islands: bool(raw.islands, d.islands),
     wildlife: bool(raw.wildlife, d.wildlife),
     sailors: bool(raw.sailors, d.sailors),
+    planes: bool(raw.planes, d.planes),
   };
 }
 

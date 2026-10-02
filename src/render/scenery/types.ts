@@ -21,6 +21,8 @@ export interface AmbienceSettings {
   /** Dolphins, whales, turtles, fish and seabirds (shown in fair weather). */
   wildlife: boolean;
   sailors: boolean;
+  /** Rare old aircraft passing overhead (the Bermuda Triangle's lost flights). */
+  planes: boolean;
 }
 
 export const DEFAULT_AMBIENCE: AmbienceSettings = {
@@ -30,6 +32,7 @@ export const DEFAULT_AMBIENCE: AmbienceSettings = {
   islands: true,
   wildlife: true,
   sailors: true,
+  planes: true,
 };
 
 export const DAY_LENGTH_RANGE = { min: 1, max: 120 } as const;

@@ -15,6 +15,7 @@ import { calmFromConditions, ease } from './scenery/ambience';
 import { SeabirdLayer } from './scenery/birds';
 import { IslandLayer } from './scenery/islands';
 import { SkyLighting } from './scenery/lighting';
+import { PlaneLayer } from './scenery/planes';
 import { SailorLayer } from './scenery/sailors';
 import {
   DEFAULT_AMBIENCE,
@@ -120,7 +121,14 @@ export class LabRenderer implements LabRendererApi {
   private readonly wildlife = new WildlifeLayer();
   private readonly birds = new SeabirdLayer();
   private readonly sailors = new SailorLayer();
-  private readonly layers: SceneryLayer[] = [this.islands, this.wildlife, this.birds, this.sailors];
+  private readonly planes = new PlaneLayer();
+  private readonly layers: SceneryLayer[] = [
+    this.islands,
+    this.wildlife,
+    this.birds,
+    this.sailors,
+    this.planes,
+  ];
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
   private readonly vessels = new Map<string, VesselView>();
@@ -351,6 +359,7 @@ export class LabRenderer implements LabRendererApi {
     this.wildlife.setEnabled(this.ambience.wildlife);
     this.birds.setEnabled(this.ambience.wildlife);
     this.sailors.setEnabled(this.ambience.sailors);
+    this.planes.setEnabled(this.ambience.planes);
   }
 
   private updateLighting(dt: number) {
