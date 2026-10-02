@@ -1,16 +1,16 @@
 /**
- * Sun, moon, sky, fog and exposure. With the day:night cycle off it reproduces the experiment's
- * fixed sun; with it on, the clock time moves the sun (and an opposing moon) across the sky.
- * The weather mood (`calm`) turns a clear sky overcast and hazy as a storm approaches.
+ * Sun and moon. With the day:night cycle off it reproduces the experiment's fixed sun; with it
+ * on, the clock time moves the sun (and a roughly opposite moon) across the sky.
  *
- * Shader uniforms added here (shared by the sky dome and the ocean, all 0 = old daytime look):
- *   uNight     0 day … 1 night (sky gradient, moon, reflections)
- *   uDusk      0 … 1 golden-hour tint around sunrise and sunset
- *   uOvercast  0 clear … 1 storm grey
- *   uStars     0 … 1 star visibility (sky dome only)
- *   uWaterDim  0 … 1 how much the water body, crest scatter and foam darken
- *   uGlintDim  0 … 1 how much the sun glint fades (below the horizon, overcast)
- *   uMoonDir   unit vector toward the moon, Three.js axes
+ * LabRenderer.updateWeather() owns fog, clear colour, hemisphere intensity and exposure; it
+ * multiplies in `exposureScale`, takes `hemiSky`/`hemiGround` and passes `night`/`dusk` to its
+ * horizon colour. The sun intensity set here is the clear-sky value that the weather dims.
+ *
+ * Shader uniforms added here (shared by the sky dome and the ocean, all 0 = plain daytime):
+ *   uNight   0 day … 1 night (night sky gradient, moonlight floor, moon, moon glint)
+ *   uDusk    0 … 1 golden-hour tint around sunrise and sunset
+ *   uStars   0 … 1 star visibility (sky dome only)
+ *   uMoonDir unit vector toward the moon, Three.js axes
  */
 import * as THREE from 'three';
 import type { Environment } from '../../schema/experiment';
@@ -37,10 +37,21 @@ export interface LightingInput {
 export interface LightingState {
   /** Unit vector toward the sun, Three.js axes. */
   sunDir: THREE.Vector3;
-  /** 0 = deep night, 1 = full daylight. */
+  /** 0 = deep night, 1 = full daylight (for the scenery layers). */
   daylight: number;
+  /** Sky brightness as `daylight()` in the sky shader computes it (for the weather's lights). */
+  skyLight: number;
   /** Clock time [h]; derived from the fixed sun when the cycle is off. */
   timeOfDay: number;
+  /** 0 day … 1 night; same as the uNight uniform. */
+  night: number;
+  /** 0 … 1 golden-hour strength; same as the uDusk uniform. */
+  dusk: number;
+  /** Multiplies the weather's tone-mapping exposure (lifts the night so it stays readable). */
+  exposureScale: number;
+  /** Hemisphere light colours for the time of day (the weather sets the intensity). */
+  hemiSky: THREE.Color;
+  hemiGround: THREE.Color;
 }
 
 /** Peak solar elevation at noon [deg] (a mid-latitude summer-ish day). */
@@ -96,7 +107,7 @@ function smoothstep(a: number, b: number, x: number): number {
   return u * u * (3 - 2 * u);
 }
 
-/** Look of the sky for a sun elevation and weather. All outputs are 0–1. */
+/** Look of the sky for a sun elevation. All outputs are 0–1. */
 export interface SkyMood {
   /** 0 = deep night, 1 = full daylight (reported to the other layers). */
   daylight: number;
@@ -104,89 +115,58 @@ export interface SkyMood {
   night: number;
   /** Golden-hour strength. */
   dusk: number;
-  /** Storm grey. */
-  overcast: number;
-  /** Star visibility. */
+  /** Star visibility (before cloud, which the shader applies). */
   stars: number;
 }
 
-export function skyMood(sunElevationDeg: number, calm: number): SkyMood {
+export function skyMood(sunElevationDeg: number): SkyMood {
   const e = sunElevationDeg;
-  const overcast = 1 - smoothstep(0.1, 0.9, THREE.MathUtils.clamp(calm, 0, 1));
-  const night = 1 - smoothstep(-16, 1, e);
-  const dusk = smoothstep(-10, -1, e) * (1 - smoothstep(4, 22, e)) * (1 - overcast * 0.85);
   return {
     daylight: smoothstep(-9, 6, e),
-    night,
-    dusk,
-    overcast,
-    stars: smoothstep(-6, -16, e) * (1 - overcast),
+    night: 1 - smoothstep(-16, 1, e),
+    dusk: smoothstep(-10, -1, e) * (1 - smoothstep(4, 22, e)),
+    stars: smoothstep(-6, -16, e),
   };
 }
 
-// Colours in linear RGB (the shaders work in linear and the renderer tone-maps).
+/**
+ * Mirror of `daylight()` in the sky shader: the weather's clear-sky curve, brightened a little
+ * through the golden hour and with a moonlight floor at night.
+ */
+export function skyLightLevel(sunY: number, night: number, dusk: number): number {
+  const base = THREE.MathUtils.clamp(sunY * 4 + 0.25, 0.08 + 0.14 * night, 1);
+  return Math.min(1, base + dusk * 0.25);
+}
+
 const lin = (hex: number) => new THREE.Color(hex);
-const DAY_HORIZON = new THREE.Color().setRGB(0.78, 0.84, 0.9, THREE.SRGBColorSpace);
-const DUSK_HORIZON = new THREE.Color().setRGB(0.95, 0.66, 0.46, THREE.SRGBColorSpace);
-const NIGHT_HORIZON = new THREE.Color().setRGB(0.15, 0.2, 0.3, THREE.SRGBColorSpace);
-const STORM_HORIZON = new THREE.Color().setRGB(0.55, 0.58, 0.61, THREE.SRGBColorSpace);
 const SUN_WHITE = lin(0xfff4e0);
 const SUN_LOW = lin(0xffb27a);
-const SUN_STORM = lin(0xd8dde2);
 const MOON_LIGHT = lin(0x9db4e0);
 const HEMI_SKY_DAY = lin(0xc5ddf2);
 const HEMI_SKY_DUSK = lin(0xf2c9a8);
 const HEMI_SKY_NIGHT = lin(0x5a78a8);
-const HEMI_SKY_STORM = lin(0xa4adb6);
 const HEMI_GROUND_DAY = lin(0x1c3344);
 const HEMI_GROUND_NIGHT = lin(0x0a1420);
-
-const BASE_EXPOSURE = 1.05;
-const NIGHT_EXPOSURE = 1.9;
-const BASE_FOG_DENSITY = 1.4e-6;
-
-/**
- * Average horizon colour of the sky shader (what distant sea and scenery fade into). Mirrors the
- * mixing order in `skyColor`; the dusk tint is averaged around the horizon.
- */
-export function horizonColor(mood: SkyMood, out = new THREE.Color()): THREE.Color {
-  out.copy(DAY_HORIZON).lerp(DUSK_HORIZON, mood.dusk * 0.45);
-  out.lerp(NIGHT_HORIZON, mood.night);
-  const stormLevel = 1 - 0.82 * mood.night;
-  const r = STORM_HORIZON.r * stormLevel;
-  const g = STORM_HORIZON.g * stormLevel;
-  const b = STORM_HORIZON.b * stormLevel;
-  const k = mood.overcast * 0.85;
-  return out.setRGB(out.r + (r - out.r) * k, out.g + (g - out.g) * k, out.b + (b - out.b) * k);
-}
+const NIGHT_EXPOSURE_SCALE = 1.7;
 
 export class SkyLighting {
   private readonly state: LightingState = {
     sunDir: new THREE.Vector3(0, 1, 0),
     daylight: 1,
+    skyLight: 1,
     timeOfDay: 12,
+    night: 0,
+    dusk: 0,
+    exposureScale: 1,
+    hemiSky: HEMI_SKY_DAY.clone(),
+    hemiGround: HEMI_GROUND_DAY.clone(),
   };
   private readonly moonDir = new THREE.Vector3(0, -1, 0);
-  private readonly u: Record<
-    'uNight' | 'uDusk' | 'uOvercast' | 'uStars' | 'uWaterDim' | 'uGlintDim',
-    THREE.IUniform<number>
-  >;
-  private readonly fogColor = new THREE.Color();
-  private readonly tmp = new THREE.Color();
+  private readonly u: Record<'uNight' | 'uDusk' | 'uStars', THREE.IUniform<number>>;
 
   constructor(private readonly parts: LightingParts) {
-    this.u = {
-      uNight: { value: 0 },
-      uDusk: { value: 0 },
-      uOvercast: { value: 0 },
-      uStars: { value: 0 },
-      uWaterDim: { value: 0 },
-      uGlintDim: { value: 0 },
-    };
-    const shared: Record<string, THREE.IUniform> = {
-      ...this.u,
-      uMoonDir: { value: this.moonDir },
-    };
+    this.u = { uNight: { value: 0 }, uDusk: { value: 0 }, uStars: { value: 0 } };
+    const shared: Record<string, THREE.IUniform> = { ...this.u, uMoonDir: { value: this.moonDir } };
     // The ocean ShaderMaterial uses `oceanUniforms` directly, so adding keys here reaches it.
     Object.assign(parts.oceanUniforms, shared);
     Object.assign(parts.skyMaterial.uniforms, shared);
@@ -194,36 +174,39 @@ export class SkyLighting {
 
   update(input: LightingInput): LightingState {
     const { env } = input;
-    const { sun: sunLight, hemi, oceanUniforms } = this.parts;
-    const calm = THREE.MathUtils.clamp(input.calm, 0, 1);
-    const sun = this.state.sunDir;
-    let mood: SkyMood;
+    const sunLight = this.parts.sun;
+    const st = this.state;
+    const sun = st.sunDir;
 
     if (input.timeOfDay === null) {
-      // Fixed sun from the experiment: the original behaviour, plus the weather mood.
+      // Fixed sun from the experiment: the original behaviour.
       directionFromAngles(env.sunElevationDeg, env.sunAzimuthDeg, sun);
-      mood = { ...skyMood(90, calm), daylight: 1, night: 0, dusk: 0, stars: 0 };
-      this.state.daylight = THREE.MathUtils.clamp((env.sunElevationDeg + 6) / 16, 0, 1);
-      this.state.timeOfDay = 12;
       sunLight.position.copy(sun).multiplyScalar(2000);
       sunLight.intensity = THREE.MathUtils.clamp(0.35 + env.sunElevationDeg / 28, 0.25, 2.6);
       sunLight.color.copy(env.sunElevationDeg < 8 ? SUN_LOW : SUN_WHITE);
       this.moonDir.set(0, -1, 0);
-      hemi.color.copy(HEMI_SKY_DAY);
-      hemi.groundColor.copy(HEMI_GROUND_DAY);
-      hemi.intensity = 0.9;
-      this.u.uWaterDim.value = 0;
-      this.u.uGlintDim.value = 0;
-      this.parts.renderer.toneMappingExposure = BASE_EXPOSURE;
+      st.night = 0;
+      st.dusk = 0;
+      this.u.uStars.value = 0;
+      st.skyLight = skyLightLevel(sun.y, 0, 0);
+      st.daylight = st.skyLight;
+      st.timeOfDay = 12;
+      st.exposureScale = 1;
+      st.hemiSky.copy(HEMI_SKY_DAY);
+      st.hemiGround.copy(HEMI_GROUND_DAY);
     } else {
       const hours = ((input.timeOfDay % 24) + 24) % 24;
       const sp = sunPositionAt(hours);
       const mp = moonPositionAt(hours);
       directionFromAngles(sp.elevationDeg, sp.azimuthDeg, sun);
       directionFromAngles(mp.elevationDeg, mp.azimuthDeg, this.moonDir);
-      mood = skyMood(sp.elevationDeg, calm);
-      this.state.daylight = mood.daylight;
-      this.state.timeOfDay = hours;
+      const mood = skyMood(sp.elevationDeg);
+      st.night = mood.night;
+      st.dusk = mood.dusk;
+      this.u.uStars.value = mood.stars;
+      st.skyLight = skyLightLevel(sun.y, mood.night, mood.dusk);
+      st.daylight = mood.daylight;
+      st.timeOfDay = hours;
 
       // Direct light: the sun by day, swapped to the moon once the sun is well down.
       const sunUp = smoothstep(-4, 3, sp.elevationDeg);
@@ -232,52 +215,24 @@ export class SkyLighting {
         sunLight.intensity =
           THREE.MathUtils.clamp(0.35 + sp.elevationDeg / 28, 0.25, 2.6) * sunUp +
           (1 - sunUp) * 0.25;
-        const low = 1 - smoothstep(2, 24, sp.elevationDeg);
-        sunLight.color.copy(SUN_WHITE).lerp(SUN_LOW, low);
+        sunLight.color.copy(SUN_WHITE).lerp(SUN_LOW, 1 - smoothstep(2, 24, sp.elevationDeg));
       } else {
         sunLight.position.copy(this.moonDir).multiplyScalar(2000);
         sunLight.intensity = 0.7 * smoothstep(2, 20, mp.elevationDeg) + 0.25;
         sunLight.color.copy(MOON_LIGHT);
       }
-      hemi.color
+      st.exposureScale = THREE.MathUtils.lerp(1, NIGHT_EXPOSURE_SCALE, mood.night);
+      st.hemiSky
         .copy(HEMI_SKY_DAY)
         .lerp(HEMI_SKY_DUSK, mood.dusk * 0.6)
         .lerp(HEMI_SKY_NIGHT, mood.night);
-      hemi.groundColor.copy(HEMI_GROUND_DAY).lerp(HEMI_GROUND_NIGHT, mood.night);
-      hemi.intensity = THREE.MathUtils.lerp(0.9, 0.75, mood.night);
-      this.u.uWaterDim.value = mood.night * 0.65;
-      this.u.uGlintDim.value = 1 - sunUp;
-      this.parts.renderer.toneMappingExposure = THREE.MathUtils.lerp(
-        BASE_EXPOSURE,
-        NIGHT_EXPOSURE,
-        mood.night,
-      );
+      st.hemiGround.copy(HEMI_GROUND_DAY).lerp(HEMI_GROUND_NIGHT, mood.night);
     }
 
-    // Weather: the storm greys the sky, dims and whitens the sun, thickens the haze.
-    const oc = mood.overcast;
-    sunLight.intensity *= 1 - 0.6 * oc;
-    sunLight.color.lerp(SUN_STORM, oc * 0.7);
-    hemi.color.lerp(this.tmp.copy(HEMI_SKY_STORM).multiplyScalar(1 - 0.75 * mood.night), oc * 0.7);
-    this.u.uGlintDim.value = 1 - (1 - this.u.uGlintDim.value) * (1 - 0.75 * oc);
-    this.u.uWaterDim.value = 1 - (1 - this.u.uWaterDim.value) * (1 - 0.35 * oc);
-
-    this.u.uNight.value = mood.night;
-    this.u.uDusk.value = mood.dusk;
-    this.u.uOvercast.value = oc;
-    this.u.uStars.value = mood.stars;
-
-    (oceanUniforms.uSunDir!.value as THREE.Vector3).copy(sun);
-    horizonColor(mood, this.fogColor);
-    (oceanUniforms.uFogColor!.value as THREE.Color).copy(this.fogColor);
-    const density = BASE_FOG_DENSITY * (1 + 2.2 * oc) * (1 + 0.6 * mood.night);
-    oceanUniforms.uFogDensity!.value = density;
-    const fog = this.parts.scene.fog;
-    if (fog instanceof THREE.FogExp2) {
-      fog.color.copy(this.fogColor);
-      fog.density = Math.sqrt(density);
-    }
-    return this.state;
+    this.u.uNight.value = st.night;
+    this.u.uDusk.value = st.dusk;
+    (this.parts.oceanUniforms.uSunDir!.value as THREE.Vector3).copy(sun);
+    return st;
   }
 
   dispose(): void {}

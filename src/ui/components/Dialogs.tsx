@@ -1,5 +1,10 @@
 import { PRESETS, presetExperiment } from '../../schema/presets';
-import { detectDeviceProfile, type PerformanceMode } from '../deviceProfile';
+import {
+  detectDeviceProfile,
+  PERFORMANCE_LABELS,
+  PERFORMANCE_MODES,
+  type PerformanceMode,
+} from '../deviceProfile';
 import { DAY_LENGTH_RANGE } from '../../render/scenery/types';
 import { useLab, type ThemePreference } from '../store';
 import { Dialog } from './Dialog';
@@ -83,11 +88,11 @@ function HelpContent() {
       <p>
         The sky follows a day:night cycle: the sun rises in the east around 06:00, crosses the south
         and sets in the west around 18:00, and the moon and stars come out at night. The clock runs
-        with the simulation (faster at higher speeds, stopped while paused). In calm weather the sky
-        is clear and warm; as the sea and wind rise toward a storm it turns overcast and hazy. Turn
-        the cycle off, change the day length or set the time under{' '}
-        <strong>Settings → Day &amp; night</strong>; islands, sea life, birds and sailors can be
-        switched off there too. None of this affects the physics.
+        with the simulation (faster at higher speeds, stopped while paused). Clouds, rain and
+        squalls come from the experiment's weather (Weather in the Scene panel) and darken the sky
+        by day and night alike. Turn the cycle off, change the day length or set the time under{' '}
+        <strong>Settings → Day &amp; night</strong>; islands, sea life, birds, sailors and planes
+        can be switched off there too. None of this affects the physics.
       </p>
       <h3>Keyboard shortcuts</h3>
       <table className="data-table">
@@ -145,13 +150,9 @@ function SettingsContent() {
       <SelectField<PerformanceMode>
         label="Graphics"
         value={performance}
-        options={[
-          { value: 'auto', label: 'Auto (recommended)' },
-          { value: 'saver', label: 'Battery saver' },
-          { value: 'quality', label: 'Best quality' },
-        ]}
+        options={PERFORMANCE_MODES.map((m) => ({ value: m, label: PERFORMANCE_LABELS[m] }))}
         onChange={(v) => lab().setPerformance(v)}
-        hint={`Detected: ${detectDeviceProfile().description}. The physics is identical in every mode.`}
+        hint={`Detected: ${detectDeviceProfile().description}. Higher levels draw a denser sea, finer ripples and more rain and spray at a higher resolution. The physics is identical at every level.`}
       />
       <DayNightSettings />
       <ScenerySettings />

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   NOON_ELEVATION_DEG,
   directionFromAngles,
-  horizonColor,
   moonPositionAt,
+  skyLightLevel,
   skyMood,
   sunPositionAt,
 } from './lighting';
@@ -69,54 +69,41 @@ describe('directionFromAngles', () => {
 
 describe('skyMood', () => {
   it('goes from full day to deep night as the sun sets', () => {
-    const day = skyMood(40, 1);
+    const day = skyMood(40);
     expect(day.daylight).toBe(1);
     expect(day.night).toBe(0);
     expect(day.stars).toBe(0);
-    const night = skyMood(-40, 1);
+    const night = skyMood(-40);
     expect(night.daylight).toBe(0);
     expect(night.night).toBe(1);
     expect(night.stars).toBe(1);
   });
 
-  it('glows golden around sunset in fair weather but not in a storm', () => {
-    expect(skyMood(2, 1).dusk).toBeGreaterThan(0.7);
-    expect(skyMood(45, 1).dusk).toBe(0);
-    expect(skyMood(2, 0).dusk).toBeLessThan(0.2);
-  });
-
-  it('turns overcast smoothly as calm falls', () => {
-    expect(skyMood(30, 1).overcast).toBe(0);
-    expect(skyMood(30, 0).overcast).toBe(1);
-    let prev = -1;
-    for (let c = 1; c >= 0; c -= 0.05) {
-      const o = skyMood(30, c).overcast;
-      expect(o).toBeGreaterThanOrEqual(prev);
-      expect(o - Math.max(prev, 0)).toBeLessThan(0.12);
-      prev = o;
-    }
+  it('glows golden around sunset but not at noon or midnight', () => {
+    expect(skyMood(2).dusk).toBeGreaterThan(0.7);
+    expect(skyMood(45).dusk).toBe(0);
+    expect(skyMood(-40).dusk).toBe(0);
   });
 
   it('daylight is monotonic in sun elevation', () => {
     let prev = -1;
     for (let e = -30; e <= 30; e += 1) {
-      const d = skyMood(e, 1).daylight;
+      const d = skyMood(e).daylight;
       expect(d).toBeGreaterThanOrEqual(prev);
       prev = d;
     }
   });
 });
 
-describe('horizonColor', () => {
-  it('is bright by day, dark but not black at night, warm at dusk and grey in a storm', () => {
-    const day = horizonColor(skyMood(40, 1));
-    const night = horizonColor(skyMood(-40, 1));
-    const dusk = horizonColor(skyMood(1, 1));
-    const storm = horizonColor(skyMood(40, 0));
-    expect(day.b).toBeGreaterThan(0.5);
-    expect(night.b).toBeLessThan(0.1);
-    expect(night.b).toBeGreaterThan(0.005);
-    expect(dusk.r - dusk.b).toBeGreaterThan(day.r - day.b);
-    expect(Math.abs(storm.r - storm.b)).toBeLessThan(Math.abs(day.r - day.b));
+describe('skyLightLevel', () => {
+  it('matches the weather sky curve by day and in fixed-sun mode', () => {
+    expect(skyLightLevel(1, 0, 0)).toBe(1);
+    expect(skyLightLevel(0, 0, 0)).toBeCloseTo(0.25, 9);
+    expect(skyLightLevel(-0.5, 0, 0)).toBeCloseTo(0.08, 9);
+  });
+
+  it('keeps a moonlight floor at night and brightens the golden hour', () => {
+    expect(skyLightLevel(-0.8, 1, 0)).toBeCloseTo(0.22, 9);
+    expect(skyLightLevel(0, 0, 1)).toBeCloseTo(0.5, 9);
   });
 });

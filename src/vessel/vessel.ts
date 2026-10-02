@@ -35,6 +35,12 @@ import { buildHydroModel, CROSS_FLOW_CD, type HydroModel } from './hydroModel';
 import { quatToMat3, solveFloating } from './hydrostatics';
 import { meshBounds } from './mesh';
 import { LocalWater, type Footprint } from './waterPatch';
+import { emptyLoad, reefedSet, sailLoad, windageLoad } from './windLoads';
+
+/** Source of the 10 m wind at a point (world frame, air velocity toward). */
+export interface WindProvider {
+  windAt(x: number, y: number, t: number, out: { u: number; v: number; speed: number }): unknown;
+}
 
 const DEG = Math.PI / 180;
 /** Fraction of the propeller race that reaches the rudder (velocity² increase). */
@@ -48,6 +54,8 @@ const RUDDER_SPAN_EFFICIENCY = 0.9;
 export interface VesselOptions {
   /** Max columns of the local water patch. */
   patchColumns?: number;
+  /** Weather wind acting on the windage and sails (none = still air). */
+  wind?: WindProvider;
 }
 
 export interface VesselDiagnostics {
@@ -108,6 +116,22 @@ export class Vessel {
   /** Thrust actually delivered at the last substep (after emergence loss) [N]. */
   private deliveredThrust = 0;
   private readonly resistance: ResistanceParams;
+  private readonly wind: WindProvider | undefined;
+  private readonly windSample = { u: 0, v: 0, speed: 0, squall: 0 };
+  private readonly windageOut = emptyLoad();
+  private readonly sailOut = emptyLoad();
+  /** True wind at the vessel for the current step (world) [m/s]. */
+  private windU = 0;
+  private windV = 0;
+  private sailSet = 0;
+  private apparentX = 0;
+  private apparentY = 0;
+  private windForce = 0;
+  /**
+   * Sail centre of effort after the crew balances the helm with head sails and spanker: just
+   * aft of the hull's centre of lateral resistance x = (N_v / Y_v) L (a little weather helm).
+   */
+  private readonly sailBalanceX: number;
 
   // ---- per-step outputs
   private slamming = false;
@@ -128,6 +152,7 @@ export class Vessel {
   ) {
     this.id = id;
     this.definition = definition;
+    this.wind = options.wind;
     const rho = field.env.waterDensity;
     const g = field.env.gravity;
     const hydro = buildHydroModel(definition, rho, g);
@@ -144,6 +169,8 @@ export class Vessel {
     };
     const L = hydro.lwl;
     const def = definition;
+    this.sailBalanceX =
+      Math.abs(hydro.clarke.yv) > 1e-9 ? (hydro.clarke.nv / hydro.clarke.yv) * L - 0.03 * L : 0;
 
     // Equilibrium in this environment (water density may differ from the design density).
     const eq = solveFloating(def.physicsHull, def.mass / rho, 0, {
@@ -211,6 +238,16 @@ export class Vessel {
     this.autopilotOn = config.autopilot;
     this.headingCmdDeg = config.headingDeg;
     this.speedCmdKn = config.speedKn;
+    if (definition.sails) {
+      // Start with the canvas the crew would carry in this wind (the helmsman starts furled).
+      let set = config.autopilot ? 1 : 0;
+      if (this.wind && config.autopilot) {
+        const w = { u: 0, v: 0, speed: 0 };
+        this.wind.windAt(config.x, config.y, 0, w);
+        set = reefedSet(w.speed);
+      }
+      this.sailSet = set;
+    }
     if (this.autopilotOn) {
       // Start with the steady-state thrust for the initial speed (no start-up transient).
       const r = this.s.u / def.maxSpeed;
@@ -334,6 +371,24 @@ export class Vessel {
     } else {
       rudderTarget = this.rudderCmdDeg * DEG;
       throttleTarget = this.throttleCmd;
+    }
+    // ---- weather: true wind at the CoG for this step
+    if (this.wind) {
+      this.wind.windAt(s.px, s.py, t, this.windSample);
+      this.windU = this.windSample.u;
+      this.windV = this.windSample.v;
+    }
+    if (def.sails) {
+      // The engine-less ship sets canvas instead of throttle; the autopilot crew reefs as the
+      // apparent wind rises, a helmsman (autopilot off) carries whatever is ordered.
+      const R0 = s.rot;
+      const ax = this.windU - (R0[0]! * s.u + R0[1]! * s.v);
+      const ay = this.windV - (R0[3]! * s.u + R0[4]! * s.v);
+      const apparent = Math.hypot(ax, ay);
+      const target = Math.max(0, Math.min(1, throttleTarget));
+      const wanted = this.autopilotOn ? Math.min(target, reefedSet(apparent)) : target;
+      // Setting or taking in sail takes time (~20 s for the full plan).
+      this.sailSet = rateLimit(this.sailSet, wanted, 0.05, dt);
     }
     const maxR = prop.maxRudderDeg * DEG;
     rudderTarget = Math.max(-maxR, Math.min(maxR, rudderTarget));
@@ -536,13 +591,53 @@ export class Vessel {
       mz += rp.x * rfy - rp.y * rfx;
     }
 
-    // 8. Gravity (world −z) in the body frame.
+    // 8. Wind on the windage and the sails (relative air velocity in the body frame).
+    if (this.wind) {
+      const shipX = R[0]! * s.u + R[1]! * s.v + R[2]! * s.w;
+      const shipY = R[3]! * s.u + R[4]! * s.v + R[5]! * s.w;
+      const ax = this.windU - shipX;
+      const ay = this.windV - shipY;
+      const vax = R[0]! * ax + R[3]! * ay;
+      const vay = R[1]! * ax + R[4]! * ay;
+      this.apparentX = vax;
+      this.apparentY = vay;
+      const wl = windageLoad(def.windage, hy.lwl, vax, vay, this.windageOut);
+      fx += wl.fx;
+      fy += wl.fy;
+      mx += wl.mx;
+      my += wl.my;
+      mz += wl.mz;
+      let tx = wl.fx;
+      let ty = wl.fy;
+      if (def.sails) {
+        const heelCos = Math.max(0, R[8]!);
+        const sl = sailLoad(
+          def.sails,
+          vax,
+          vay,
+          this.sailSet,
+          heelCos * heelCos,
+          this.sailOut,
+          this.sailBalanceX,
+        );
+        fx += sl.fx;
+        fy += sl.fy;
+        mx += sl.mx;
+        my += sl.my;
+        mz += sl.mz;
+        tx += sl.fx;
+        ty += sl.fy;
+      }
+      this.windForce = Math.hypot(tx, ty);
+    }
+
+    // 9. Gravity (world −z) in the body frame.
     const mg = hy.mass * g;
     fx -= mg * R[6]!;
     fy -= mg * R[7]!;
     fz -= mg * R[8]!;
 
-    // 9. Coriolis/centripetal (translational, rigid + added mass) and gyroscopic terms.
+    // 10. Coriolis/centripetal (translational, rigid + added mass) and gyroscopic terms.
     const A = hy.addedMass;
     const ax = (hy.mass + A[0]!) * s.u;
     const ay = (hy.mass + A[7]!) * s.v;
@@ -609,6 +704,13 @@ export class Vessel {
       slamming: this.slamming,
       greenWater: this.greenWater,
       capsized: heel > 90 || heel > avs,
+      windSpeed: Math.hypot(this.windU, this.windV),
+      windFromDeg: compassFrom(this.windU, this.windV),
+      apparentWind: Math.hypot(this.apparentX, this.apparentY),
+      apparentWindAngleDeg: Math.atan2(-this.apparentY, -this.apparentX) / DEG,
+      windForce: this.windForce,
+      sailSet: this.definition.sails ? this.sailSet : 0,
+      braceDeg: this.sailOut.braceDeg,
     };
   }
 
@@ -627,6 +729,14 @@ export class Vessel {
       waterColumnCalls: this.water.columnCalls,
     };
   }
+}
+
+/** Compass bearing [deg] a wind with world velocity (u, v) comes FROM. */
+function compassFrom(u: number, v: number): number {
+  if (Math.hypot(u, v) < 1e-9) return 0;
+  // Air moving toward bearing b comes from b + 180; bearing of a vector = atan2(east, north).
+  const toward = Math.atan2(u, v) / DEG;
+  return (((toward + 180) % 360) + 360) % 360;
 }
 
 /** Row-major rotation matrix of q written into `out` (allocation-free `quatToMat3`). */

@@ -10,7 +10,8 @@ import type { Experiment, OceanQuality, VesselConfig } from '../schema/experimen
 import type { VesselCommand, VesselDefinition, VesselTelemetry } from '../vessel/api';
 import { seaDiagnostics } from './diagnostics';
 import { Recorder } from './recorder';
-import type { ProbeReading, SeaDiagnostics, SimFrame } from './types';
+import { WeatherField } from '../weather/weather';
+import type { ProbeReading, SeaDiagnostics, SimFrame, WeatherReading } from './types';
 
 /** What the simulation needs from a vessel implementation. */
 export interface SimVessel {
@@ -21,7 +22,11 @@ export interface SimVessel {
   telemetry(): VesselTelemetry;
 }
 
-export type VesselFactory = (config: VesselConfig, field: OceanField) => SimVessel;
+export type VesselFactory = (
+  config: VesselConfig,
+  field: OceanField,
+  weather: WeatherField,
+) => SimVessel;
 
 export interface SimulationOptions {
   createVessel: VesselFactory;
@@ -32,6 +37,7 @@ export interface SimulationOptions {
 export class Simulation {
   readonly experiment: Experiment;
   readonly field: OceanField;
+  readonly weather: WeatherField;
   readonly vessels: SimVessel[] = [];
   readonly clock: FixedStepClock;
   readonly recorder: Recorder;
@@ -40,9 +46,11 @@ export class Simulation {
   constructor(experiment: Experiment, options: SimulationOptions) {
     this.experiment = experiment;
     this.field = new OceanField(experiment.waves, experiment.environment);
+    this.weather = new WeatherField(experiment.weather, experiment.environment);
     this.clock = new FixedStepClock(experiment.timestep, 64);
     this.recorder = new Recorder(options.recordRate ?? 10);
-    for (const v of experiment.vessels) this.vessels.push(options.createVessel(v, this.field));
+    for (const v of experiment.vessels)
+      this.vessels.push(options.createVessel(v, this.field, this.weather));
     this.field.prepare(0);
     this.recordIfDue();
   }
@@ -110,6 +118,19 @@ export class Simulation {
       stepMs: this.lastStepMs,
       lagging: this.clock.lagging,
       samples: this.recorder.flush(),
+      weather: this.weatherAt(0, 0, this.clock.time),
+    };
+  }
+
+  /** Weather readout at a point (for the HUD). */
+  weatherAt(x: number, y: number, t: number): WeatherReading {
+    const w = this.weather.windAt(x, y, t, { u: 0, v: 0, speed: 0, squall: 0 });
+    const toward = Math.atan2(w.u, w.v) * (180 / Math.PI);
+    return {
+      windSpeed: w.speed,
+      windFromDeg: w.speed > 0 ? (((toward + 180) % 360) + 360) % 360 : 0,
+      squall: w.squall,
+      rainMmH: this.weather.rainAt(x, y, t),
     };
   }
 
@@ -119,6 +140,12 @@ export class Simulation {
     const t = this.clock.time;
     while (this.recorder.due(t)) {
       const values: Record<string, number> = {};
+      values['weather:wind'] = this.weather.windAt(0, 0, t, {
+        u: 0,
+        v: 0,
+        speed: 0,
+        squall: 0,
+      }).speed;
       for (const p of this.experiment.probes) {
         values[`${p.id}:eta`] = this.field.surface(p.x, p.y, t).eta;
       }
@@ -131,6 +158,7 @@ export class Simulation {
         values[`${v.id}:heading`] = tel.headingDeg;
         values[`${v.id}:bridgeAccel`] = tel.bridgeAccel;
         values[`${v.id}:bowAccel`] = tel.bowAccel;
+        values[`${v.id}:wind`] = tel.windSpeed;
       }
       this.recorder.record(values);
     }
