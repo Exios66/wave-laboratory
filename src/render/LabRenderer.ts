@@ -213,6 +213,7 @@ export class LabRenderer implements LabRendererApi {
   private fpsElapsed = 0;
   private disposed = false;
   private hs = 1;
+  private hasOcean = false;
   private ambience: AmbienceSettings = { ...DEFAULT_AMBIENCE };
   private timeOfDay: number | null = null;
   private storminess: number | null = null;
@@ -405,6 +406,7 @@ export class LabRenderer implements LabRendererApi {
   setOcean(data: GpuOceanData): void {
     this.ocean.setData(data);
     this.hs = data.hs;
+    this.hasOcean = true;
   }
 
   setEnvironment(env: Environment): void {
@@ -863,8 +865,10 @@ export class LabRenderer implements LabRendererApi {
     const windSpeed = this.weatherField ? this.localWind : (this.env?.windSpeed ?? 0);
     const storm = Math.max(this.weatherStorm, this.storminess ?? 0);
     const target = calmFromConditions(this.hs, windSpeed, storm);
-    this.calm = this.calmPrimed ? ease(this.calm, target, dt, 6) : target;
-    this.calmPrimed = true;
+    // Until the sea is known, report no calm (nothing spawns), then start from the real value.
+    const known = this.env !== null && this.hasOcean;
+    this.calm = !known ? 0 : this.calmPrimed ? ease(this.calm, target, dt, 6) : target;
+    this.calmPrimed = known;
     const light = this.updateLighting(dt);
     const vessels = this.frame?.vessels ?? [];
     while (this.vesselPositions.length < vessels.length)
