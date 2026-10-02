@@ -89,6 +89,8 @@ export function Menu({ label, ariaLabel, items, className = 'btn' }: MenuProps) 
               focusItem(els.length - 1);
             } else if (e.key === 'Escape' || e.key === 'Tab') {
               e.preventDefault();
+              // Escape closes only the menu, not the selection behind it.
+              if (e.key === 'Escape') e.stopPropagation();
               close();
             }
           }}

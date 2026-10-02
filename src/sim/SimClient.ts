@@ -5,7 +5,7 @@
  */
 import { Emitter } from '../core/emitter';
 import type { GpuOceanData } from '../ocean/gpuData';
-import type { Experiment, OceanQuality } from '../schema/experiment';
+import type { Experiment, OceanQuality, Weather } from '../schema/experiment';
 import type { VesselCommand } from '../vessel/api';
 import type { FromWorker, SimFrame, ToWorker } from './types';
 
@@ -94,11 +94,9 @@ export class SimClient extends Emitter<SimClientEvents> {
     this.send({ type: 'step', count });
   }
 
-  reset(): void {
-    this.pendingDt = 0;
-    this.loading = true;
-    this.inFlight = true;
-    this.send({ type: 'reset' });
+  /** Update rain, cloud, visibility and lightning in the running simulation. */
+  setWeather(weather: Weather): void {
+    this.send({ type: 'weather', weather });
   }
 
   command(vesselId: string, command: VesselCommand): void {

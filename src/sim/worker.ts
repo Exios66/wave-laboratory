@@ -50,9 +50,8 @@ function handle(msg: ToWorker): void {
       );
       return;
     }
-    case 'reset': {
-      if (!sim) return;
-      handle({ type: 'load', experiment: sim.experiment });
+    case 'weather': {
+      sim?.weather.setAtmosphere(msg.weather);
       return;
     }
     case 'advance': {

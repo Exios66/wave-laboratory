@@ -14,6 +14,14 @@ import { z } from 'zod';
 export const SCHEMA_VERSION = 1 as const;
 
 const finite = () => z.number().finite();
+/**
+ * Scene-object ids appear in CSV headers and telemetry channel names, so they are short and
+ * plain: letters, digits, '-' and '_'.
+ */
+const objectId = () =>
+  z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, 'Ids use 1–64 letters, digits, "-" or "_".');
+/** Horizontal position [m]; the lab is a few kilometres across, far inside float32 range. */
+const position = () => finite().min(-20000).max(20000);
 
 export const SpreadingSchema = z.object({
   model: z.enum(['cos2s', 'mitsuyasu', 'donelan-banner', 'none']).default('mitsuyasu'),
@@ -23,7 +31,7 @@ export const SpreadingSchema = z.object({
 export type Spreading = z.infer<typeof SpreadingSchema>;
 
 const waveSystemBase = {
-  id: z.string().min(1),
+  id: objectId(),
   name: z.string().min(1).max(60),
   enabled: z.boolean().default(true),
   /** Compass bearing the waves come FROM [deg]. */
@@ -176,13 +184,13 @@ export const VesselTypeSchema = z.enum([
 export type VesselType = z.infer<typeof VesselTypeSchema>;
 
 export const VesselSchema = z.object({
-  id: z.string().min(1),
+  id: objectId(),
   name: z.string().min(1).max(60),
   type: VesselTypeSchema,
   /** Uniform scale relative to the type's design length (0.25–4). */
   scale: finite().min(0.25).max(4).default(1),
-  x: finite(),
-  y: finite(),
+  x: position(),
+  y: position(),
   /** Compass heading the bow points toward [deg]. */
   headingDeg: finite().min(0).max(360),
   /** Initial and commanded speed through water [knots]. */
@@ -195,11 +203,11 @@ export const VesselSchema = z.object({
 export type VesselConfig = z.infer<typeof VesselSchema>;
 
 export const ProbeSchema = z.object({
-  id: z.string().min(1),
+  id: objectId(),
   name: z.string().min(1).max(60),
   kind: z.literal('wave-gauge'),
-  x: finite(),
-  y: finite(),
+  x: position(),
+  y: position(),
 });
 export type ProbeConfig = z.infer<typeof ProbeSchema>;
 
@@ -253,7 +261,13 @@ export function encodeExperiment(exp: Experiment): string {
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+/** Share links longer than this are refused before decoding (real experiments are < 10 kB). */
+const MAX_ENCODED_LENGTH = 200_000;
+
 export function decodeExperiment(encoded: string): ParseResult {
+  if (encoded.length > MAX_ENCODED_LENGTH) {
+    return { ok: false, errors: ['The shared experiment is too large.'] };
+  }
   try {
     const b64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
     const bin = atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4));

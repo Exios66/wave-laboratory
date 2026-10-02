@@ -71,8 +71,8 @@ into [`docs/`](docs/) beside the markdown notes.
 [`vite.index.html`](vite.index.html); `pnpm dev` serves that file at `/`.
 
 1. `pnpm deploy:pages` builds the app and commits `index.html`, `assets/` and `docs/` on the
-   current branch. Use `--dry-run` to update the files without committing. Merge that commit
-   to `main`.
+   current branch. `--dry-run` builds the site into a temporary folder and changes nothing in
+   the repository. Merge that commit to `main`.
 2. Pages source, already set: **Settings → Pages → Deploy from a branch → `main` → `/ (root)`**.
 
 The site is served at `https://exios66.github.io/wave-laboratory/`. The build uses relative
