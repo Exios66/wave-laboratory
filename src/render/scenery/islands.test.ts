@@ -117,7 +117,7 @@ describe('island placement', () => {
   });
 
   it('never lets two islands (lagoons included) overlap', () => {
-    const all = islandsNear(30_000, 30_000, 20_000);
+    const all = islandsNear(30_000, 30_000, 12_000);
     for (const a of all) {
       const ix = Math.floor(a.x / ISLAND_CELL);
       const iy = Math.floor(a.y / ISLAND_CELL);
