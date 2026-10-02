@@ -88,6 +88,9 @@ export function Dock() {
         role="tabpanel"
         id={`panel-${tab}`}
         aria-labelledby={`tab-${tab}`}
+        // The chart pane scrolls; it has to be a tab stop so it can be reached from the keyboard.
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+        tabIndex={0}
       >
         {tab === 'gauges' && <GaugeCharts />}
         {tab === 'motions' && <MotionCharts />}

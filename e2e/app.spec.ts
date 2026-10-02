@@ -73,7 +73,7 @@ test.describe('Wave Laboratory app', () => {
     );
 
     const vesselButton = page.getByRole('navigation', { name: 'Scene' }).getByRole('button', {
-      name: /FV Northern Star/,
+      name: /^FV Northern Star/,
     });
     await vesselButton.focus();
     await page.keyboard.press('Enter');
@@ -115,7 +115,7 @@ test.describe('Wave Laboratory app', () => {
     await waitForSimulation(page);
     await page
       .getByRole('navigation', { name: 'Scene' })
-      .getByRole('button', { name: /Wind sea/ })
+      .getByRole('button', { name: /^Wind sea/ })
       .click();
     const hs = page.getByRole('textbox', { name: 'Significant wave height Hs' });
     await hs.fill('abc');

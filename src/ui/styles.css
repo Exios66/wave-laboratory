@@ -1123,18 +1123,18 @@ kbd {
     min-width: 0;
   }
 
-  .app__scene,
-  .app__inspector,
-  .app__dock {
+  .app__scene.panel,
+  .app__inspector.panel,
+  .app__dock.panel {
     grid-area: panel;
     display: none;
     border-width: 0 !important;
   }
-  .app[data-mobile-panel='scene'] .app__scene,
-  .app[data-mobile-panel='inspector'] .app__inspector {
+  .app[data-mobile-panel='scene'] .app__scene.panel,
+  .app[data-mobile-panel='inspector'] .app__inspector.panel {
     display: block;
   }
-  .app[data-mobile-panel='data'] .app__dock {
+  .app[data-mobile-panel='data'] .app__dock.panel {
     display: flex;
   }
 
