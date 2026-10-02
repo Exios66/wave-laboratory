@@ -443,11 +443,13 @@ function Statistics() {
                 <td>
                   {r.tel?.capsized
                     ? 'Capsized'
-                    : r.tel?.slamming
-                      ? 'Slamming'
-                      : r.tel?.greenWater
-                        ? 'Green water'
-                        : 'Normal'}
+                    : r.tel?.disabled
+                      ? 'Disabled'
+                      : r.tel?.slamming
+                        ? 'Slamming'
+                        : r.tel?.greenWater
+                          ? 'Green water'
+                          : 'Normal'}
                 </td>
               </tr>
             ))}

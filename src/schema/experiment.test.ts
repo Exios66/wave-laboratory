@@ -16,6 +16,15 @@ describe('experiment schema', () => {
     expect(r.ok && r.experiment).toEqual(exp);
   });
 
+  it('older files without the damage setting parse with damage on', () => {
+    const { damage, ...old } = presetExperiment();
+    expect(damage).toBe(true);
+    const r = parseExperiment(old);
+    expect(r.ok && r.experiment.damage).toBe(true);
+    const off = parseExperiment({ ...old, damage: false });
+    expect(off.ok && off.experiment.damage).toBe(false);
+  });
+
   it('reports readable errors', () => {
     const exp = presetExperiment();
     const bad = { ...exp, waves: [{ ...exp.waves[0], hs: -3 }] };

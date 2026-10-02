@@ -42,6 +42,9 @@ function stubVessel(id: string): SimVessel & { steps: number } {
         windForce: 0,
         sailSet: 0,
         braceDeg: 90,
+        health: 1,
+        disabled: false,
+        damageCause: null,
       };
     },
   };

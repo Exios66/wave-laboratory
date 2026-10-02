@@ -9,6 +9,7 @@ export function createSimVessel(
   config: VesselConfig,
   field: OceanField,
   weather?: WeatherField,
+  options: { damage?: boolean } = {},
 ): SimVessel {
   const definition = createVesselDefinition(
     config.type,
@@ -16,5 +17,8 @@ export function createSimVessel(
     config.kgFactor,
     config.loadFactor,
   );
-  return new Vessel(config.id, definition, config, field, weather ? { wind: weather } : {});
+  return new Vessel(config.id, definition, config, field, {
+    ...(weather ? { wind: weather } : {}),
+    damage: options.damage ?? true,
+  });
 }

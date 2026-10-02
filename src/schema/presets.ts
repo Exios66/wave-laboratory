@@ -316,6 +316,28 @@ export const PRESETS: readonly Preset[] = [
     ),
   },
   {
+    id: 'collision-course',
+    title: 'Collision course · cargo ship and trawler',
+    summary:
+      'A container ship and a trawler on crossing courses meet at the same spot about a minute ' +
+      'in. Steer one away, or watch the impact.',
+    experiment: experiment(
+      'Collision course',
+      'The ship stands on to the east at 12 knots; the trawler, crossing from the south at 6 ' +
+        'knots, has her on the starboard bow and must give way (COLREGs rule 15), but nobody ' +
+        'alters course. Turn either vessel or cut its speed to pass clear. If they collide, the ' +
+        'hulls bounce apart and each loses health in proportion to the impact energy over its ' +
+        'own mass: the 340 t trawler suffers far more than the 12 600 t ship.',
+      env({ windSpeed: 9, windDirectionDeg: 250, sunElevationDeg: 30 }),
+      [weatherSea('local-sea', 'Local sea', 40, 2718, 10)],
+      [
+        vessel('ship-1', 'cargo-ship', 'MV Stand-On', { x: -370, headingDeg: 90, speedKn: 12 }),
+        vessel('trawler-1', 'trawler', 'FV Give-Way', { y: -185, headingDeg: 0, speedKn: 6 }),
+      ],
+      [gauge(-60, 60)],
+    ),
+  },
+  {
     id: 'squall-line',
     title: 'Squall line · aircraft carrier',
     summary:
