@@ -19,6 +19,7 @@ import { parsePerformanceMode, type PerformanceMode } from './deviceProfile';
 
 export type Selection =
   | { kind: 'environment' }
+  | { kind: 'weather' }
   | { kind: 'wave'; id: string }
   | { kind: 'vessel'; id: string }
   | { kind: 'probe'; id: string }

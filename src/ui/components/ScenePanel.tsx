@@ -1,4 +1,5 @@
-import type { VesselType, WaveSystem } from '../../schema/experiment';
+import { beaufortFromWind } from '../../core/units';
+import type { VesselType, WaveSystem, Weather } from '../../schema/experiment';
 import { newProbe, newVessel, newWaveSystem, VESSEL_TYPE_LABELS } from '../factories';
 import { useLab, type Selection } from '../store';
 import { Icon, type IconName } from './icons';
@@ -7,6 +8,14 @@ import { Menu } from './Menu';
 function isSelected(sel: Selection, kind: string, id?: string): boolean {
   if (!sel || sel.kind !== kind) return false;
   return id === undefined || ('id' in sel && sel.id === id);
+}
+
+function weatherMeta(wind: number, w: Weather): string {
+  const parts = [`Bf ${beaufortFromWind(wind)}`];
+  if (w.squalls.enabled) parts.push('squalls');
+  else if (w.rainMmH > 0.5) parts.push('rain');
+  else if (w.visibilityKm < 1) parts.push('fog');
+  return parts.join(' · ');
 }
 
 function waveMeta(w: WaveSystem): string {
@@ -129,6 +138,13 @@ export function ScenePanel() {
               meta={exp.environment.depth >= 1000 ? 'deep' : `${exp.environment.depth} m`}
               current={isSelected(selection, 'environment')}
               onSelect={() => lab().select({ kind: 'environment' })}
+            />
+            <TreeItem
+              icon="cloud"
+              label="Weather"
+              meta={weatherMeta(exp.environment.windSpeed, exp.weather)}
+              current={isSelected(selection, 'weather')}
+              onSelect={() => lab().select({ kind: 'weather' })}
             />
           </ul>
         </section>

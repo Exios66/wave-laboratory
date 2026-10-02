@@ -8,11 +8,13 @@ import type {
   VesselConfig,
   VesselType,
   WaveSystem,
+  Weather,
 } from '../../schema/experiment';
+import { WEATHER_PRESETS } from '../../weather/presets';
 import { detectDeviceProfile, effectiveQuality } from '../deviceProfile';
 import { getRuntime } from '../runtime';
 import { findProbe, findVessel, findWave, useLab } from '../store';
-import { VESSEL_TYPE_LABELS } from '../factories';
+import { newWaveSystem, VESSEL_TYPE_LABELS } from '../factories';
 import { fmt, NumberField, Readout, SelectField, Switch, TextField } from './fields';
 import { Icon } from './icons';
 
@@ -25,6 +27,9 @@ export function Inspector() {
   if (selection?.kind === 'environment') {
     title = 'Environment';
     body = <EnvironmentInspector env={exp.environment} quality={exp.quality} />;
+  } else if (selection?.kind === 'weather') {
+    title = 'Weather';
+    body = <WeatherInspector />;
   } else if (selection?.kind === 'wave') {
     const w = findWave(exp, selection.id);
     if (w) {
@@ -190,7 +195,7 @@ function EnvironmentInspector({ env, quality }: { env: Environment; quality: Oce
         />
       </fieldset>
       <fieldset className="fieldset">
-        <legend>Wind (visuals & whitecaps)</legend>
+        <legend>Mean wind</legend>
         <NumberField
           label="Wind speed (10 m)"
           value={env.windSpeed}
@@ -199,8 +204,8 @@ function EnvironmentInspector({ env, quality }: { env: Environment; quality: Oce
           step={0.5}
           unit="m/s"
           unitLabel="metres per second"
-          onCommit={(v) => set('windSpeed', v, false)}
-          hint={`Beaufort ${beaufortFromWind(env.windSpeed)}. To generate waves from wind, add a “Wind sea” system.`}
+          onCommit={(v) => set('windSpeed', v)}
+          hint={`Beaufort ${beaufortFromWind(env.windSpeed)}. Pushes on the vessels and sails, sets the whitecaps and drives any wind sea that follows the weather. Gusts and squalls are under Weather.`}
         />
         <NumberField
           label="Wind from"
@@ -210,7 +215,7 @@ function EnvironmentInspector({ env, quality }: { env: Environment; quality: Oce
           step={5}
           unit="°"
           unitLabel="degrees"
-          onCommit={(v) => set('windDirectionDeg', v, false)}
+          onCommit={(v) => set('windDirectionDeg', v)}
         />
       </fieldset>
       <fieldset className="fieldset">
@@ -271,6 +276,229 @@ function DeviceInfo({ quality }: { quality: OceanQuality }) {
       {eff !== quality ? ` (capped from ${quality})` : ''}, {Math.round(scale * 100)} % resolution.
       Change this with the Graphics setting in the top bar.
     </p>
+  );
+}
+
+// ------------------------------------------------------------------ weather
+
+function WeatherInspector() {
+  const lab = useLab.getState;
+  const weather = useLab((s) => s.experiment.weather);
+  const wind = useLab((s) => s.experiment.environment.windSpeed);
+  const windFrom = useLab((s) => s.experiment.environment.windDirectionDeg);
+  const followers = useLab(
+    (s) => s.experiment.waves.filter((w) => w.kind === 'wind' && w.followWeather).length,
+  );
+  const reading = useLab((s) => s.frame?.weather);
+  const set = (recipe: (w: Weather) => void, reload = true) =>
+    lab().updateExperiment((d) => recipe(d.weather), { reload });
+  const applyPreset = (id: string) => {
+    const p = WEATHER_PRESETS.find((x) => x.id === id);
+    if (!p) return;
+    lab().updateExperiment((d) => {
+      d.environment.windSpeed = p.wind.windSpeed;
+      if (p.wind.sunElevationDeg !== undefined)
+        d.environment.sunElevationDeg = p.wind.sunElevationDeg;
+      d.weather = structuredClone(p.weather);
+    });
+  };
+  const addWeatherSea = () =>
+    lab().updateExperiment((d) => {
+      const sea = newWaveSystem('wind', d.waves.length);
+      if (sea.kind === 'wind') {
+        sea.name = 'Weather sea';
+        sea.followWeather = true;
+        sea.fetchKm = 200;
+      }
+      d.waves.push(sea);
+    });
+  const sq = weather.squalls;
+  return (
+    <>
+      <div className="prose">
+        <p>
+          Gusts, squalls and the mean wind act on every vessel (windage and sails). Rain, cloud,
+          visibility and lightning change what you see.
+        </p>
+      </div>
+      {reading && (
+        <Readout
+          items={[
+            {
+              label: 'Wind now',
+              value: `${fmt(reading.windSpeed, 1, 'm/s')}`,
+              title: 'At the origin',
+            },
+            { label: 'From', value: `${reading.windFromDeg.toFixed(0)}°` },
+            { label: 'Beaufort', value: String(beaufortFromWind(reading.windSpeed)) },
+            { label: 'Rain', value: fmt(reading.rainMmH, 0, 'mm/h') },
+          ]}
+        />
+      )}
+      <fieldset className="fieldset">
+        <legend>Situation</legend>
+        <div className="chip-grid" role="group" aria-label="Weather presets">
+          {WEATHER_PRESETS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className="btn btn--chip"
+              title={p.summary}
+              onClick={() => applyPreset(p.id)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {followers === 0 ? (
+          <>
+            <p className="field__hint">
+              No wave system follows the weather yet, so the sea will not change with the wind.
+            </p>
+            <button type="button" className="btn" onClick={addWeatherSea}>
+              <Icon name="wave" size={16} /> Let the wind raise the sea
+            </button>
+          </>
+        ) : (
+          <p className="field__hint">
+            {followers === 1 ? 'One wind sea follows' : `${followers} wind seas follow`} this
+            weather: {fmt(wind, 0, 'm/s')} from {windFrom.toFixed(0)}° builds the waves.
+          </p>
+        )}
+      </fieldset>
+      <fieldset className="fieldset">
+        <legend>Wind</legend>
+        <NumberField
+          label="Mean wind (10 m)"
+          value={wind}
+          min={0}
+          max={45}
+          step={0.5}
+          unit="m/s"
+          unitLabel="metres per second"
+          onCommit={(v) =>
+            lab().updateExperiment((d) => {
+              d.environment.windSpeed = v;
+            })
+          }
+          hint={`Beaufort ${beaufortFromWind(wind)}.`}
+        />
+        <NumberField
+          label="Gustiness"
+          value={weather.gustiness * 100}
+          min={0}
+          max={40}
+          step={1}
+          unit="%"
+          unitLabel="percent"
+          onCommit={(v) => set((w) => void (w.gustiness = v / 100))}
+          hint="Turbulence intensity σu/U (open sea 6–12 %). Gusts sweep downwind as patches you can see on the water."
+        />
+      </fieldset>
+      <fieldset className="fieldset">
+        <legend>Squalls</legend>
+        <Switch
+          label="Squall fronts"
+          checked={sq.enabled}
+          onChange={(c) => set((w) => void (w.squalls.enabled = c))}
+          hint="Fronts sweep through with a sudden jump in wind, a veer and a downpour."
+        />
+        {sq.enabled && (
+          <>
+            <NumberField
+              label="Every"
+              value={sq.intervalMin}
+              min={2}
+              max={60}
+              step={1}
+              unit="min"
+              unitLabel="minutes"
+              onCommit={(v) => set((w) => void (w.squalls.intervalMin = v))}
+            />
+            <NumberField
+              label="Lasting"
+              value={sq.durationMin}
+              min={0.5}
+              max={30}
+              step={0.5}
+              unit="min"
+              unitLabel="minutes"
+              onCommit={(v) => set((w) => void (w.squalls.durationMin = v))}
+            />
+            <NumberField
+              label="Peak wind"
+              value={sq.strength}
+              min={1}
+              max={2.5}
+              step={0.05}
+              unit="×"
+              unitLabel="times the mean wind"
+              onCommit={(v) => set((w) => void (w.squalls.strength = v))}
+            />
+            <NumberField
+              label="Veer"
+              value={sq.veerDeg}
+              min={-90}
+              max={90}
+              step={5}
+              unit="°"
+              unitLabel="degrees"
+              onCommit={(v) => set((w) => void (w.squalls.veerDeg = v))}
+            />
+          </>
+        )}
+      </fieldset>
+      <fieldset className="fieldset">
+        <legend>Sky and visibility</legend>
+        <NumberField
+          label="Cloud cover"
+          value={weather.cloudCover * 100}
+          min={0}
+          max={100}
+          step={5}
+          unit="%"
+          unitLabel="percent"
+          onCommit={(v) => set((w) => void (w.cloudCover = v / 100), false)}
+        />
+        <NumberField
+          label="Rain"
+          value={weather.rainMmH}
+          min={0}
+          max={150}
+          step={1}
+          unit="mm/h"
+          unitLabel="millimetres per hour"
+          onCommit={(v) => set((w) => void (w.rainMmH = v), false)}
+          hint="Moderate 2–10, heavy 10–50, violent above 50. Rain also cuts the visibility."
+        />
+        <NumberField
+          label="Visibility"
+          value={weather.visibilityKm}
+          min={0.1}
+          max={60}
+          step={0.1}
+          unit="km"
+          unitLabel="kilometres"
+          onCommit={(v) => set((w) => void (w.visibilityKm = v), false)}
+        />
+        <Switch
+          label="Lightning"
+          checked={weather.lightning}
+          onChange={(c) => set((w) => void (w.lightning = c), false)}
+        />
+      </fieldset>
+      <NumberField
+        label="Weather seed"
+        value={weather.seed}
+        min={0}
+        max={4294967295}
+        step={1}
+        slider={false}
+        precision={0}
+        onCommit={(v) => set((w) => void (w.seed = Math.round(v)))}
+        hint="Same seed = the same gusts, squalls and lightning, every run."
+      />
+    </>
   );
 }
 
@@ -624,6 +852,22 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
               { label: 'Speed', value: fmt(tel.speedKn, 1, 'kn') },
               { label: 'Heading', value: fmt(tel.headingDeg, 0, '°') },
               { label: 'Rudder', value: fmt(tel.rudderDeg, 1, '°') },
+              {
+                label: 'Apparent wind',
+                value: `${fmt(tel.apparentWind, 0, 'm/s')} ${Math.abs(tel.apparentWindAngleDeg).toFixed(0)}° ${tel.apparentWindAngleDeg >= 0 ? 'P' : 'S'}`,
+                title: 'Apparent wind speed and angle off the bow (P = port, S = starboard)',
+              },
+              {
+                label: 'Wind force',
+                value: fmt(tel.windForce / 1000, 0, 'kN'),
+                title: 'Aerodynamic force on the windage and sails',
+              },
+              ...(def?.sails
+                ? [
+                    { label: 'Sail set', value: fmt(tel.sailSet * 100, 0, '%') },
+                    { label: 'Yards braced', value: fmt(Math.abs(tel.braceDeg), 0, '°') },
+                  ]
+                : []),
             ]}
           />
           <p
@@ -649,7 +893,11 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
             update((x) => void (x.autopilot = c), false);
             live({ autopilot: c });
           }}
-          hint="Holds heading and speed. Turn off to steer by hand."
+          hint={
+            def?.sails
+              ? 'Holds heading and trims the sails for the ordered speed, reefing as the wind rises. She cannot sail closer than about 60° to the wind.'
+              : 'Holds heading and speed. Turn off to steer by hand.'
+          }
         />
         <NumberField
           label="Heading"
@@ -691,14 +939,26 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
               onCommit={(v) => live({ rudderDeg: v })}
               hint="Positive turns to port."
             />
-            <NumberField
-              label="Throttle (manual)"
-              value={0}
-              min={-1}
-              max={1}
-              step={0.05}
-              onCommit={(v) => live({ throttle: v })}
-            />
+            {def?.sails ? (
+              <NumberField
+                label="Sail set (manual)"
+                value={0}
+                min={0}
+                max={1}
+                step={0.05}
+                onCommit={(v) => live({ throttle: v })}
+                hint="Fraction of canvas set. The crew no longer reefs for you — full sail in a gale will lay her on her beam ends."
+              />
+            ) : (
+              <NumberField
+                label="Throttle (manual)"
+                value={0}
+                min={-1}
+                max={1}
+                step={0.05}
+                onCommit={(v) => live({ throttle: v })}
+              />
+            )}
           </>
         )}
       </fieldset>
