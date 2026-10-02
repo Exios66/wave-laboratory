@@ -4,6 +4,8 @@ import {
   omegaOf,
   phaseVelocity,
   pressureAttenuation,
+  stokesSecondAmplitude,
+  verticalAttenuation,
   wavenumberOf,
   type DispersionParams,
 } from './dispersion';
@@ -58,5 +60,21 @@ describe('dispersion relation (V1)', () => {
     expect(pressureAttenuation(0.3, 0, 50)).toBeCloseTo(1, 12);
     expect(pressureAttenuation(0.3, -4, 1e4)).toBeCloseTo(Math.exp(-1.2), 12);
     expect(pressureAttenuation(0.3, -10, 10)).toBeCloseTo(1 / Math.cosh(3), 12);
+  });
+});
+
+describe('shallow-water limits', () => {
+  it('holds the Stokes harmonic at a/4 so troughs keep a single minimum', () => {
+    const k = (2 * Math.PI) / 120; // a 12 s wave in 5 m of water is ~120 m long
+    expect(stokesSecondAmplitude(1, k, 5)).toBeCloseTo(0.25, 12);
+    // Deep water is untouched: a₂ = k a² / 2.
+    expect(stokesSecondAmplitude(1, 0.05, 4000)).toBeCloseTo(0.025, 6);
+  });
+
+  it('attenuates vertical velocity to zero at the seabed', () => {
+    expect(verticalAttenuation(0.05, 0, 5)).toBeCloseTo(1, 12);
+    expect(verticalAttenuation(0.05, -5, 5)).toBeCloseTo(0, 12);
+    expect(verticalAttenuation(0.05, -2.5, 5)).toBeCloseTo(Math.sinh(0.125) / Math.sinh(0.25), 9);
+    expect(verticalAttenuation(1, -3, 4000)).toBeCloseTo(Math.exp(-3), 9);
   });
 });

@@ -19,7 +19,12 @@ import {
   PHYSICS_GRID,
   type CascadeSpectrum,
 } from './cascades';
-import { pressureAttenuation, stokesSecondAmplitude, tanhKh } from './dispersion';
+import {
+  pressureAttenuation,
+  stokesSecondAmplitude,
+  tanhKh,
+  verticalAttenuation,
+} from './dispersion';
 import { FFT, signedIndex } from './fft';
 import { resolveSea, type ResolvedRegularWave, type ResolvedSea } from './systems';
 
@@ -439,7 +444,7 @@ export class OceanField {
       const uh = r.amplitude * r.omega * r.cothKh * c * att;
       u += uh * r.dirX;
       v += uh * r.dirY;
-      wv += r.amplitude * r.omega * s * att;
+      wv += r.amplitude * r.omega * s * verticalAttenuation(r.k, zeta, h);
     }
     res.pressure = this.rho * this.g * (head - z);
     res.u = u;
@@ -515,7 +520,7 @@ export class OceanField {
         const uh = r.amplitude * r.omega * r.cothKh * cs * att;
         out.u[j]! += uh * r.dirX;
         out.v[j]! += uh * r.dirY;
-        out.w[j]! += r.amplitude * r.omega * sn * att;
+        out.w[j]! += r.amplitude * r.omega * sn * verticalAttenuation(r.k, zeta, h);
       }
     }
     return out;

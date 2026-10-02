@@ -17,11 +17,21 @@ function post(msg: FromWorker, transfer: Transferable[] = []): void {
   self.postMessage(msg, transfer);
 }
 
+/** Longest stretch of simulated time one advance message may cover [s]. */
+const MAX_ADVANCE = 0.5;
+
+function noSimulation(): void {
+  post({ type: 'error', message: 'No experiment is loaded.' });
+}
+
 function handle(msg: ToWorker): void {
   switch (msg.type) {
     case 'load': {
       const parsed = parseExperiment(msg.experiment);
       if (!parsed.ok) {
+        // Drop the previous simulation too, so nothing keeps running an experiment the UI no
+        // longer shows.
+        sim = null;
         post({ type: 'error', message: `Invalid experiment: ${parsed.errors.join('; ')}` });
         return;
       }
@@ -55,13 +65,18 @@ function handle(msg: ToWorker): void {
       return;
     }
     case 'advance': {
-      if (!sim) return;
-      sim.advance(Math.min(Math.max(msg.dt, 0), 0.5));
-      post({ type: 'frame', frame: sim.frame() });
+      // The client waits for a reply to every advance and step, so never stay silent.
+      if (!sim) return noSimulation();
+      const dt = Math.max(msg.dt, 0);
+      sim.advance(Math.min(dt, MAX_ADVANCE));
+      const frame = sim.frame();
+      // Time beyond the cap is dropped: the run is slower than requested, so say so.
+      if (dt > MAX_ADVANCE) frame.lagging = true;
+      post({ type: 'frame', frame });
       return;
     }
     case 'step': {
-      if (!sim) return;
+      if (!sim) return noSimulation();
       sim.step(Math.max(0, Math.min(msg.count, 10_000)));
       post({ type: 'frame', frame: sim.frame() });
       return;

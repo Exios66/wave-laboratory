@@ -3,7 +3,7 @@
  *
  * `OceanField.column` costs ~10 µs (choppy inversion + cascade interpolation), far too much to
  * call for every hull vertex at every substep. Instead each vessel samples a small
- * world-aligned grid of water columns (≤ ~150) covering its footprint, at the ocean snapshot
+ * world-aligned grid of water columns (≤ 280 by default) covering its footprint, at the ocean snapshot
  * instants t_k = k·Δt_snap, and keeps two such patches (t_k and t_{k+1}). Any query in between
  * is bilinear in space, piece-wise linear over a few stretched depth levels, and linear in time
  * — the same temporal scheme the ocean itself uses, so no accuracy is lost in time.
@@ -118,12 +118,22 @@ export class LocalWater {
   }
 
   private fill(p: Patch, t: number, fp: Footprint): void {
+    if (
+      !Number.isFinite(fp.minX) ||
+      !Number.isFinite(fp.maxX) ||
+      !Number.isFinite(fp.minY) ||
+      !Number.isFinite(fp.maxY)
+    ) {
+      // A diverged vessel state would otherwise spin the sizing loop below forever and freeze
+      // the worker; throwing reaches the UI as a simulation error.
+      throw new RangeError('Vessel state is not finite (the simulation diverged).');
+    }
     const w = Math.max(fp.maxX - fp.minX, 1e-3);
     const h = Math.max(fp.maxY - fp.minY, 1e-3);
     let s = Math.max(this.minSpacing, Math.sqrt((w * h) / this.maxColumns));
     let nx = 0;
     let ny = 0;
-    for (;;) {
+    for (let i = 0; i < 1000; i++) {
       nx = Math.ceil(w / s) + 1;
       ny = Math.ceil(h / s) + 1;
       if (nx * ny <= this.maxColumns) break;

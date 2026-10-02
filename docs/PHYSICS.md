@@ -71,8 +71,8 @@ For a single Airy wave this produces the exact Gerstner trochoid; the Eulerian m
 **Jacobian / folding:** `J = (1 + ∂Dₓ/∂x)(1 + ∂D_y/∂y) − (∂Dₓ/∂y)²`. `J < 0` means the surface
 has folded (a breaking crest).
 
-Vessel forces sample the sea on a moving patch of up to 220 columns (0.35 m minimum
-spacing), so waves of a few hull-breadths contribute to the pressure integral instead of
+Vessel forces sample the sea on a moving patch of up to 280 columns (minimum spacing
+max(0.25 m, 0.012 L)), so waves of a few hull-breadths contribute to the pressure integral instead of
 being averaged away.
 
 **What the GPU actually draws.** `render/ocean` inverse-FFTs η and the packed horizontal
@@ -86,7 +86,9 @@ orbital velocity and the other rows of the table above stay on the CPU.
     θ = k (d̂·x₀) − ω t + φ,   η = a cos θ,   D = −λ a coth(kh) sin θ · d̂
 
 When choppiness λ > 0 a second-order Stokes harmonic is added, a₂ cos 2θ, with
-a₂ = (k a² / 4) (3 − σ²) / σ³ and σ = tanh(kh). That raises crests and lifts troughs.
+a₂ = (k a² / 4) (3 − σ²) / σ³ and σ = tanh(kh), held at a/4. That raises crests and
+lifts troughs. The cap is where the harmonic would put a second crest in the trough, the
+shallow-water regime (Ursell number ≳ 26) where Stokes theory no longer applies.
 It is omitted for λ = 0 so a pure Airy wave stays linear. The harmonic averages to zero,
 so the Eulerian mean level of the choppy wave is still −k a² / 2.
 
@@ -100,7 +102,8 @@ where `head(ζ)` is the sum over cascades of the depth-attenuated dynamic head. 
 evaluates it exactly at three levels `k_ref·|ζ| = 0.5, 1.5, 3.5` (k_ref = energy-weighted mean
 wavenumber of the cascade), interpolates linearly between levels and decays as `e^{k_ref ζ}`
 below. Particle velocities use the surface orbital velocity attenuated by `e^{k_ref ζ}`
-(deep-water approximation per cascade). Regular components are evaluated exactly.
+(deep-water approximation per cascade). Regular components are evaluated exactly, with
+vertical velocity attenuated by sinh(k(z+h))/sinh(kh) so it vanishes at the seabed.
 
 Fields are evaluated at snapshot instants (default every 1/20 s) and interpolated linearly in
 time. η uses bicubic Hermite interpolation with spectrally exact derivatives (< 0.5 % error at
@@ -112,7 +115,8 @@ the shortest physics wavelength); other fields use Catmull–Rom.
 - **Pierson–Moskowitz / Bretschneider**: JONSWAP with γ = 1, normalised to H_s.
 - **TMA**: multiplied by the Kitaigorodskii depth factor when depth < 1000 m; H_s re-normalised.
 - **Wind sea**: Hasselmann et al. (1973) fetch-limited growth, capped by the fully developed
-  Pierson–Moskowitz limit (H_s ≈ 0.209 U²/g).
+  Pierson–Moskowitz limit (H_s ≈ 0.209 U²/g): when the fetch-limited H_s reaches the
+  fully developed one, the fully developed sea is used, so a longer fetch never gives a smaller sea.
 - **Spreading**: cos-2s, Mitsuyasu (frequency-dependent s), Donelan–Banner sech², all
   normalised to ∫D dθ = 1.
 

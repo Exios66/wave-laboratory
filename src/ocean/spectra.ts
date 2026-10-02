@@ -95,23 +95,26 @@ export function windSeaParameters(
 ): WindSeaParameters {
   const U = Math.max(windSpeed, 0.5);
   const g = gravity;
-  const wpFetch = 22 * Math.cbrt((g * g) / (U * fetchMeters));
-  const wpFull = (0.877 * g) / U;
-  const fullyDeveloped = wpFetch <= wpFull;
-  const omegaPeak = fullyDeveloped ? wpFull : wpFetch;
-  const alpha = fullyDeveloped ? 0.0081 : 0.076 * Math.pow((U * U) / (fetchMeters * g), 0.22);
-  const gamma = fullyDeveloped ? 1 : 3.3;
-  const density = (w: number): number =>
-    alpha *
-    jonswapShape(w, omegaPeak, gamma, g) *
-    (tmaDepth !== undefined ? kitaigorodskiiFactor(w, tmaDepth, g) : 1);
-  const m0 = zerothMoment(density, omegaPeak);
-  return {
-    hs: 4 * Math.sqrt(m0),
-    tp: (2 * Math.PI) / omegaPeak,
-    gamma,
-    fullyDeveloped,
-    alpha,
-    omegaPeak,
+  const depthFactor = (w: number) =>
+    tmaDepth !== undefined ? kitaigorodskiiFactor(w, tmaDepth, g) : 1;
+  const build = (omegaPeak: number, alpha: number, gamma: number, fullyDeveloped: boolean) => {
+    const density = (w: number): number =>
+      alpha * jonswapShape(w, omegaPeak, gamma, g) * depthFactor(w);
+    const m0 = zerothMoment(density, omegaPeak);
+    return {
+      hs: 4 * Math.sqrt(m0),
+      tp: (2 * Math.PI) / omegaPeak,
+      gamma,
+      fullyDeveloped,
+      alpha,
+      omegaPeak,
+    };
   };
+  const full = build((0.877 * g) / U, 0.0081, 1, true);
+  const wpFetch = 22 * Math.cbrt((g * g) / (U * fetchMeters));
+  if (wpFetch <= full.omegaPeak) return full;
+  const limited = build(wpFetch, 0.076 * Math.pow((U * U) / (fetchMeters * g), 0.22), 3.3, false);
+  // The fetch-limited sea (α, γ = 3.3) can overshoot the fully developed height just before the
+  // peak frequencies meet; a longer fetch must never give a smaller sea, so cap it there.
+  return limited.hs >= full.hs ? full : limited;
 }

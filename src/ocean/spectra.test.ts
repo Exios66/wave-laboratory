@@ -68,3 +68,17 @@ describe('directional spreading', () => {
     }
   });
 });
+
+describe('fetch-limited wind sea', () => {
+  it('never shrinks as the fetch grows (capped at the fully developed sea)', () => {
+    for (const U of [5, 10, 15, 25, 40]) {
+      let prev = 0;
+      for (let km = 1; km <= 3000; km *= 1.05) {
+        const { hs } = windSeaParameters(U, km * 1000, g);
+        expect(hs).toBeGreaterThanOrEqual(prev - 1e-9);
+        prev = hs;
+      }
+      expect(prev).toBeCloseTo(windSeaParameters(U, 1e8, g).hs, 6);
+    }
+  });
+});
