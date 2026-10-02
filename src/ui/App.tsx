@@ -96,7 +96,7 @@ function useGlobalShortcuts(): void {
         case 'Delete':
         case 'Backspace': {
           const sel = lab.selection;
-          if (!sel || sel.kind === 'environment') return;
+          if (!sel || sel.kind === 'environment' || sel.kind === 'weather') return;
           const key = sel.kind === 'wave' ? 'waves' : sel.kind === 'vessel' ? 'vessels' : 'probes';
           lab.updateExperiment((d) => {
             const list = d[key] as { id: string }[];

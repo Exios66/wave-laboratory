@@ -5,15 +5,18 @@
 import { EnvironmentSchema, ExperimentSchema, SCHEMA_VERSION, type Experiment } from './experiment';
 
 /**
- * Seed of the Draupner sea: the largest crest at the platform gauge within the first two minutes,
- * out of seeds 1 to 40. Its biggest wave (about 8.5 m crest, 19 m trough to crest) arrives about a
- * minute after the experiment loads. A linear sea almost never makes the real 18.5 m crest.
- * `src/schema/secretPresets.test.ts` checks that the crest is still there.
+ * Seed of the background storm sea: out of seeds 1 to 40 it has the largest natural crest at the
+ * platform gauge in the first two minutes (about 8.5 m at t ≈ 62.8 s). A focused wave group is
+ * added at that place and moment, so the two together reach the recorded 18.5 m crest.
+ * `src/schema/secretPresets.test.ts` checks the crest.
  */
 export const DRAUPNER_SEED = 19;
 
 /** Time the largest crest passes the gauge with {@link DRAUPNER_SEED} [s]. */
 export const DRAUPNER_PEAK_T = 62.8;
+
+/** Linear crest of the focused group added on top of the storm sea at that moment [m]. */
+export const DRAUPNER_FOCUS_CREST = 10;
 
 /**
  * The New Year's Wave: 1 January 1995, Draupner E jacket platform, central North Sea, 70 m of water.
@@ -27,9 +30,9 @@ export function draupnerExperiment(): Experiment {
     description:
       'Draupner E platform, central North Sea, 1 January 1995. In a storm sea of Hs ≈ 12 m the ' +
       'platform laser recorded a 25.6 m wave with an 18.5 m crest, the first rogue wave measured ' +
-      'by an instrument. This sea has the same depth and sea state. Watch the gauge about a minute ' +
-      'in: its biggest wave is roughly 19 m high. A linear sea almost never builds the real one, ' +
-      'which also needed nonlinear focusing.',
+      'by an instrument. This sea has the same depth and sea state, plus a focused wave group ' +
+      '(NewWave) that meets the largest natural crest at the gauge about a minute in, so the ' +
+      'gauge sees an 18.5 m crest again.',
     environment: EnvironmentSchema.parse({
       depth: 70,
       windSpeed: 24,
@@ -51,6 +54,19 @@ export function draupnerExperiment(): Experiment {
         depthLimited: true,
         spreading: { model: 'mitsuyasu', s: 25 },
         seed: DRAUPNER_SEED,
+      },
+      {
+        id: 'draupner-wave',
+        name: 'New Year’s Wave',
+        enabled: true,
+        kind: 'focused',
+        crestHeight: DRAUPNER_FOCUS_CREST,
+        tp: 13,
+        directionDeg: 200,
+        focusX: 0,
+        focusY: 0,
+        focusTime: DRAUPNER_PEAK_T,
+        seed: 1995,
       },
     ],
     vessels: [],

@@ -166,7 +166,9 @@ describe('design particulars', () => {
       expect(h.blockCoefficient).toBeLessThanOrEqual(1 + 1e-9);
       expect(d.gm).toBeGreaterThan(0);
       expect(h.avsDeg).toBeGreaterThan(60);
-      expect(d.propulsion.maxThrust).toBeGreaterThan(0);
+      // Sailing ships have no engine; the sails drive them.
+      if (d.sails) expect(d.propulsion.maxThrust).toBe(0);
+      else expect(d.propulsion.maxThrust).toBeGreaterThan(0);
       expect(d.maxSpeed).toBeGreaterThan(0);
       // The GZ curve starts with slope GM.
       expect(h.gz[1]! / Math.sin((5 * Math.PI) / 180) / d.gm).toBeGreaterThan(0.9);

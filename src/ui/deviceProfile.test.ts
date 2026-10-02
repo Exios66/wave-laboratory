@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { effectiveQuality, ResolutionGovernor, type DeviceProfile } from './deviceProfile';
+import {
+  effectiveQuality,
+  parsePerformanceMode,
+  ResolutionGovernor,
+  type DeviceProfile,
+} from './deviceProfile';
 
 const weak: DeviceProfile = { maxQuality: 'low', maxPixelRatio: 1, description: '', gpu: '' };
 const strong: DeviceProfile = { maxQuality: 'ultra', maxPixelRatio: 2, description: '', gpu: '' };
@@ -9,9 +14,16 @@ describe('effectiveQuality', () => {
     expect(effectiveQuality('high', 'auto', weak)).toBe('low');
     expect(effectiveQuality('high', 'auto', strong)).toBe('high');
   });
-  it('honours the request in quality mode and caps at medium in saver mode', () => {
-    expect(effectiveQuality('ultra', 'quality', weak)).toBe('ultra');
-    expect(effectiveQuality('ultra', 'saver', strong)).toBe('medium');
+  it('uses an explicit level as chosen, whatever the device or request', () => {
+    expect(effectiveQuality('high', 'ultra', weak)).toBe('ultra');
+    expect(effectiveQuality('ultra', 'low', strong)).toBe('low');
+  });
+  it('reads settings saved by earlier versions', () => {
+    expect(parsePerformanceMode('saver')).toBe('low');
+    expect(parsePerformanceMode('quality')).toBe('ultra');
+    expect(parsePerformanceMode('medium')).toBe('medium');
+    expect(parsePerformanceMode('bogus')).toBe('auto');
+    expect(parsePerformanceMode(null)).toBe('auto');
   });
 });
 
