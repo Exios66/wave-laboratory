@@ -11,9 +11,11 @@ oceanographic wave spectra, drop ships into it, and measure how they handle the 
   includes finite depth and surface tension. The surface is synthesised from four FFT
   cascades (1 km swells down to centimetre ripples) with choppy (Lagrangian) displacement.
 - **Ships:** 6-DOF rigid-body dynamics. Forces come from pressure integration over the
-  instantaneous wetted hull (hydrostatics + Froude–Krylov), plus added mass, radiation and
-  viscous damping, propulsion, rudder and autopilot. Slamming, green water and capsize are
-  detected.
+  instantaneous wetted hull (hydrostatics + Froude–Krylov), sampled on up to 280 water
+  columns, plus added mass, radiation and viscous damping, propulsion, rudder and autopilot.
+  Slamming, green water and capsize are detected. The hull you see is lofted more finely than
+  the physics mesh, with antifouling below the waterline, deck cargo and a foam wake that
+  does not feed back into the forces.
 - **Instruments:** wave gauges, vessel motion recorders, Welch spectra, zero-crossing
   statistics, motion-sickness incidence and CSV export.
 - **What you see is what the ships feel.** The GPU renderer inverse-FFTs the same h₀ amplitudes
