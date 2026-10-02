@@ -5,8 +5,8 @@
  *   pnpm deploy:pages            build and commit the site here
  *   pnpm deploy:pages --dry-run  build the site into a temporary folder; touch nothing here
  *
- * GitHub Pages is "Deploy from a branch" → main → / (root). The same files are copied
- * into docs/ next to the markdown notes.
+ * GitHub Pages is "Deploy from a branch" → main → /docs. The site (index.html, 404.html,
+ * assets/ and .nojekyll) is written into docs/ next to the markdown notes, which are kept.
  * Asset paths are relative, so the site works at any URL prefix.
  */
 import { execFileSync } from 'node:child_process';
@@ -23,8 +23,6 @@ const KEEP = new Set(['PLAN.md', 'ARCHITECTURE.md', 'PHYSICS.md']);
 function builtIndex() {
   const named = join(dist, 'index.html');
   if (existsSync(named)) return named;
-  const alt = join(dist, 'vite.index.html');
-  if (existsSync(alt)) return alt;
   throw new Error('Build produced no index.html');
 }
 
@@ -83,21 +81,10 @@ if (dryRun) {
   process.exit(0);
 }
 
-// Pages is configured as main / (root). docs/ gets the same build.
-copySite(root, {});
 copySite(docs, { preserve: KEEP });
 
-run('git', ['add', '--all', 'docs', 'index.html', '404.html', '.nojekyll', 'assets']);
-const changed = out('git', [
-  'status',
-  '--porcelain',
-  '--',
-  'docs',
-  'index.html',
-  '404.html',
-  '.nojekyll',
-  'assets',
-]);
+run('git', ['add', '--all', 'docs']);
+const changed = out('git', ['status', '--porcelain', '--', 'docs']);
 if (!changed) {
   console.info('› Nothing changed since the last deployment.');
 } else {
