@@ -5,9 +5,11 @@ import {
   PERFORMANCE_MODES,
   type PerformanceMode,
 } from '../deviceProfile';
+import { DAY_LENGTH_RANGE } from '../../render/scenery/types';
 import { useLab, type ThemePreference } from '../store';
 import { Dialog } from './Dialog';
-import { SelectField } from './fields';
+import { NumberField, SelectField, Switch } from './fields';
+import { formatClock } from './clock';
 
 export function Dialogs() {
   const dialog = useLab((s) => s.dialog);
@@ -82,6 +84,16 @@ function HelpContent() {
         two fingers to zoom. Presets stays in the header; everything else is in the More menu,
         including Settings for theme and graphics quality.
       </p>
+      <h3>Day, night and weather</h3>
+      <p>
+        The sky follows a day:night cycle: the sun rises in the east around 06:00, crosses the south
+        and sets in the west around 18:00, and the moon and stars come out at night. The clock runs
+        with the simulation (faster at higher speeds, stopped while paused). Clouds, rain and
+        squalls come from the experiment's weather (Weather in the Scene panel) and darken the sky
+        by day and night alike. Turn the cycle off, change the day length or set the time under{' '}
+        <strong>Settings → Day &amp; night</strong>; islands, sea life, birds, sailors and planes
+        can be switched off there too. None of this affects the physics.
+      </p>
       <h3>Keyboard shortcuts</h3>
       <table className="data-table">
         <caption className="visually-hidden">Keyboard shortcuts</caption>
@@ -142,6 +154,78 @@ function SettingsContent() {
         onChange={(v) => lab().setPerformance(v)}
         hint={`Detected: ${detectDeviceProfile().description}. Higher levels draw a denser sea, finer ripples and more rain and spray at a higher resolution. The physics is identical at every level.`}
       />
+      <DayNightSettings />
+      <ScenerySettings />
     </>
+  );
+}
+
+const HOURS = Array.from({ length: 24 }, (_, h) => ({
+  value: String(h),
+  label: formatClock(h),
+}));
+
+function DayNightSettings() {
+  const ambience = useLab((s) => s.ambience);
+  const timeOfDay = useLab((s) => s.timeOfDay);
+  const set = useLab.getState().setAmbience;
+  const currentHour = Math.floor(timeOfDay) % 24;
+  return (
+    <fieldset className="fieldset">
+      <legend>Day &amp; night</legend>
+      <Switch
+        label="Day:night cycle"
+        checked={ambience.dayNight}
+        onChange={(v) => set({ dayNight: v })}
+        hint="When off, the sun stays where the experiment puts it (Inspector → Environment)."
+      />
+      <NumberField
+        label="Day length"
+        value={ambience.dayLengthMin}
+        min={DAY_LENGTH_RANGE.min}
+        max={DAY_LENGTH_RANGE.max}
+        step={1}
+        unit="min"
+        unitLabel="minutes"
+        disabled={!ambience.dayNight}
+        onCommit={(v) => set({ dayLengthMin: Math.round(v) })}
+        hint="Real minutes per 24 h day at 1× simulation speed. The clock runs faster at higher speeds and stops while paused."
+      />
+      <SelectField
+        label="Time of day"
+        value={String(currentHour)}
+        options={HOURS}
+        disabled={!ambience.dayNight}
+        onChange={(v) => set({ startHour: Number(v) })}
+        hint={`Now ${formatClock(timeOfDay)}. Choosing an hour jumps the clock there and is remembered as the start time.`}
+      />
+    </fieldset>
+  );
+}
+
+function ScenerySettings() {
+  const ambience = useLab((s) => s.ambience);
+  const set = useLab.getState().setAmbience;
+  return (
+    <fieldset className="fieldset">
+      <legend>Scenery</legend>
+      <p className="field__hint" style={{ marginTop: 0 }}>
+        Decoration only: none of it changes the waves or the ships.
+      </p>
+      <Switch label="Islands" checked={ambience.islands} onChange={(v) => set({ islands: v })} />
+      <Switch
+        label="Sea life & birds"
+        checked={ambience.wildlife}
+        onChange={(v) => set({ wildlife: v })}
+        hint="Dolphins, whales, turtles, fish and seabirds appear in fair weather."
+      />
+      <Switch label="Sailors" checked={ambience.sailors} onChange={(v) => set({ sailors: v })} />
+      <Switch
+        label="Passing planes"
+        checked={ambience.planes}
+        onChange={(v) => set({ planes: v })}
+        hint="The odd old aircraft droning overhead."
+      />
+    </fieldset>
   );
 }

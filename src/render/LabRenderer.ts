@@ -27,7 +27,7 @@ import { OCEAN_FRAG, OCEAN_VERT, SKY_FRAG, SKY_VERT } from './ocean/shaders';
 import { calmFromConditions, ease } from './scenery/ambience';
 import { SeabirdLayer } from './scenery/birds';
 import { IslandLayer } from './scenery/islands';
-import { SkyLighting } from './scenery/lighting';
+import { SkyLighting, type LightingState } from './scenery/lighting';
 import { PlaneLayer } from './scenery/planes';
 import { SailorLayer } from './scenery/sailors';
 import {
@@ -100,16 +100,26 @@ const smooth = (e0: number, e1: number, x: number): number => {
 };
 
 /** Horizon colour, matching `horizonColor()` in the sky shader (linear RGB). */
-function horizonColor(cloud: number, daylight: number, flash: number, out: THREE.Color) {
+function horizonColor(
+  cloud: number,
+  daylight: number,
+  flash: number,
+  out: THREE.Color,
+  night = 0,
+  dusk = 0,
+) {
   const mix = (a: number, b: number, t: number) => a + (b - a) * t;
-  const c = [0.78, 0.84, 0.9].map(srgbToLinear);
+  const warm = [0.95, 0.66, 0.46].map(srgbToLinear);
+  const nightRgb = [0.15, 0.2, 0.3].map(srgbToLinear);
+  const c = [0.78, 0.84, 0.9].map(srgbToLinear).map((v, i) => mix(v, warm[i]!, dusk * 0.45));
   const g = [0.5, 0.54, 0.58].map(srgbToLinear);
   const st = [0.26, 0.29, 0.32].map(srgbToLinear);
   const flashRgb = [0.55, 0.6, 0.75];
   const t1 = smooth(0.2, 0.75, cloud);
   const t2 = smooth(0.75, 1, cloud);
   const ch = (i: number) =>
-    mix(mix(c[i]!, g[i]!, t1), st[i]!, t2) * daylight + flashRgb[i]! * flash * 0.6;
+    mix(mix(mix(c[i]!, g[i]!, t1), st[i]!, t2) * daylight, nightRgb[i]! * (1 - 0.5 * t1), night) +
+    flashRgb[i]! * flash * 0.6;
   return out.setRGB(ch(0), ch(1), ch(2));
 }
 
@@ -174,6 +184,8 @@ export class LabRenderer implements LabRendererApi {
   private sunBase = 2.4;
   private lastRenderT = Number.NaN;
   private daylight = 1;
+  /** Time-of-day factors from SkyLighting (night, dusk, exposure and hemisphere tint). */
+  private lightState: LightingState | null = null;
   /** Last frame's weather at the camera, as 0–1 storm intensity and wind [m/s]. */
   private weatherStorm = 0;
   private localWind = 0;
@@ -449,7 +461,8 @@ export class LabRenderer implements LabRendererApi {
     });
     // updateWeather() dims these for cloud each frame, so hand it the clear-sky values.
     this.sunBase = this.sun.intensity;
-    this.daylight = state.daylight;
+    this.daylight = state.skyLight;
+    this.lightState = state;
     return state;
   }
 
@@ -551,12 +564,17 @@ export class LabRenderer implements LabRendererApi {
       Math.min(1, rain / 6),
       this.windSample.squall,
     );
-    horizonColor(cloud, this.daylight, flash, this.fogColor);
+    const ls = this.lightState;
+    horizonColor(cloud, this.daylight, flash, this.fogColor, ls?.night ?? 0, ls?.dusk ?? 0);
     this.fog.color.copy(this.fogColor);
     this.renderer.setClearColor(this.fogColor, 1);
     this.sun.intensity = this.sunBase * (1 - 0.85 * smooth(0.3, 1, cloud));
     this.hemi.intensity = 0.9 * (0.45 + 0.55 * light) + flash * 2.5;
-    this.renderer.toneMappingExposure = 1.05 * (1 + 0.35 * cloud);
+    this.renderer.toneMappingExposure = 1.05 * (1 + 0.35 * cloud) * (ls?.exposureScale ?? 1);
+    if (ls) {
+      this.hemi.color.copy(ls.hemiSky);
+      this.hemi.groundColor.copy(ls.hemiGround);
+    }
 
     const camDt = Number.isFinite(dt) ? Math.min(0.1, Math.max(0, dt)) : 0;
     this.rain.update(t, rain, this.windThree, light);
