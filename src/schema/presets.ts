@@ -140,15 +140,14 @@ export const PRESETS: readonly Preset[] = [
   {
     id: 'rogue-wave',
     title: 'Rogue wave · container ship',
-    summary:
-      'A Draupner-class 17 m focused crest rises out of a 6 m sea right in front of a ship at ' +
-      't = 75 s.',
+    summary: 'A Draupner-class focused crest (1.5 Hs) meets a container ship at t = 75 s.',
     experiment: experiment(
       'Rogue wave · container ship',
-      'A NewWave focused group (crest 17 m, like the 1995 Draupner wave) builds out of a ' +
-        'Hs 6 m storm sea and peaks at the gauge, 380 m ahead of the ship, at t = 75 s. Use ' +
-        'the Follow camera and watch the bow slam and take green water.',
-      env({ windSpeed: 20, windDirectionDeg: 0, sunElevationDeg: 14 }),
+      'A NewWave focused group (crest 12 m, 1.5 times the 8 m significant height — the same ' +
+        'crest-to-Hs ratio as the 1995 Draupner wave) is phased to the storm peak period of 13 s ' +
+        'so the crest stays below the Miche breaking limit. It peaks at the gauge, 380 m ahead of ' +
+        'the ship, at t = 75 s. Use the Follow camera and watch the bow slam and take green water.',
+      env({ depth: 70, windSpeed: 20, windDirectionDeg: 0, sunElevationDeg: 14 }),
       [
         {
           id: 'storm-sea',
@@ -156,8 +155,8 @@ export const PRESETS: readonly Preset[] = [
           kind: 'spectrum',
           enabled: true,
           spectrum: 'jonswap',
-          hs: 6,
-          tp: 11,
+          hs: 8,
+          tp: 13,
           gamma: 3.3,
           directionDeg: 0,
           depthLimited: true,
@@ -169,8 +168,8 @@ export const PRESETS: readonly Preset[] = [
           name: 'Rogue wave',
           kind: 'focused',
           enabled: true,
-          crestHeight: 17,
-          tp: 12,
+          crestHeight: 12,
+          tp: 13,
           focusX: 0,
           focusY: 380,
           focusTime: 75,

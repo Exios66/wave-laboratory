@@ -9,7 +9,7 @@ import { createSimVessel } from './vessels';
 vi.setConfig({ testTimeout: 600_000 });
 
 describe('rogue wave preset', () => {
-  it('a 17 m crest peaks at the focus gauge near t = 75 s and the ship ships green water', () => {
+  it('a 12 m NewWave crest peaks at the focus gauge near t = 75 s and the ship ships green water', () => {
     const sim = new Simulation(presetExperiment('rogue-wave'), { createVessel: createSimVessel });
     let peak = -Infinity;
     let peakT = 0;
@@ -29,7 +29,7 @@ describe('rogue wave preset', () => {
     process.stdout.write(
       `\n[rogue] gauge peak ${peak.toFixed(2)} m at t = ${peakT.toFixed(1)} s; green water ${green}, slamming ${slam}`,
     );
-    expect(peak).toBeGreaterThan(14);
+    expect(peak).toBeGreaterThan(10);
     expect(Math.abs(peakT - 75)).toBeLessThan(4);
     expect(green || slam).toBe(true);
   });

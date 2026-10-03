@@ -51,7 +51,7 @@ export function newWaveSystem(kind: WaveSystem['kind'], count: number): WaveSyst
         kind,
         name: `Rogue wave ${count + 1}`,
         crestHeight: 12,
-        tp: 12,
+        tp: 13,
         focusX: 0,
         focusY: 0,
         focusTime: 60,

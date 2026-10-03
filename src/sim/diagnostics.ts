@@ -41,13 +41,35 @@ export function seaDiagnostics(
       wavelength: f.wavelength,
       note: `Focused crest of ${f.crestHeight.toFixed(1)} m at t = ${f.focusTime.toFixed(0)} s`,
     });
+    // Crest steepness as the H/L of a sinusoid with the same crest elevation A. Miche's
+    // limit is the regular-wave breaking steepness; a NewWave crest past it would break
+    // even if the group's troughs are shallower than −A.
+    const kp = (2 * Math.PI) / f.wavelength;
     const steep = (2 * f.crestHeight) / f.wavelength;
-    if (steep > 0.12) {
+    const limit = micheLimit(kp, depth);
+    if (steep > limit) {
       warnings.push(
-        `${f.id}: the focused crest is very steep (2A/λp = ${steep.toFixed(2)}); a real wave ` +
-          'group would break before reaching it, and linear theory under-predicts its shape.',
+        `${f.id}: the focused crest is past breaking (2A/λp = ${steep.toFixed(3)}, Miche limit ` +
+          `${limit.toFixed(3)}). A real group would break before reaching it, and linear ` +
+          'NewWave under-predicts the crest.',
+      );
+    } else if (steep > 0.85 * limit) {
+      warnings.push(
+        `${f.id}: steep focused crest (2A/λp = ${steep.toFixed(3)}; Miche limit ` +
+          `${limit.toFixed(3)}). Linear theory is approximate this close to breaking.`,
       );
     }
+    if (representedHs > 0.05) {
+      const ratio = f.crestHeight / representedHs;
+      if (ratio > 1.8) {
+        warnings.push(
+          `${f.id}: focused crest is ${ratio.toFixed(1)} Hs of the background sea. Recorded ` +
+            'rogue crests are typically 1.2–1.6 Hs (Draupner 1.55 Hs); this amplitude is a ' +
+            'design wave, not a likely sea.',
+        );
+      }
+    }
+    checkShallow(f.id, 2 * f.crestHeight, f.wavelength, kp);
   }
   for (const r of sea.regular) {
     if (r.group) continue;
