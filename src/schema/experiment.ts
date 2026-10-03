@@ -112,6 +112,20 @@ export type WindSeaSystem = z.infer<typeof WindSeaSystemSchema>;
 export type RegularWaveSystem = z.infer<typeof RegularWaveSystemSchema>;
 export type FocusedWaveSystem = z.infer<typeof FocusedWaveSystemSchema>;
 
+export const WaterTypeSchema = z.enum([
+  'oceanic-i',
+  'oceanic-ia',
+  'oceanic-ib',
+  'oceanic-ii',
+  'oceanic-iii',
+  'coastal-1',
+  'coastal-3',
+  'coastal-5',
+  'coastal-7',
+  'coastal-9',
+]);
+export type WaterType = z.infer<typeof WaterTypeSchema>;
+
 export const EnvironmentSchema = z.object({
   /** Still-water depth [m]. Values ≥ 1000 behave as deep water. */
   depth: finite().min(1).max(11000).default(4000),
@@ -135,6 +149,8 @@ export const EnvironmentSchema = z.object({
   /** Sun elevation/azimuth for rendering [deg]. */
   sunElevationDeg: finite().min(-10).max(90).default(28),
   sunAzimuthDeg: finite().min(0).max(360).default(220),
+  /** Jerlov optical water type: colour and clarity of the water (rendering only). */
+  waterType: WaterTypeSchema.default('oceanic-ib'),
 });
 export type Environment = z.infer<typeof EnvironmentSchema>;
 

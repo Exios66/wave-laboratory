@@ -157,6 +157,27 @@ test.describe('Wave Laboratory app', () => {
     await expect(page.getByRole('alert').filter({ hasText: 'Enter a number' })).toBeVisible();
   });
 
+  test('picks a Jerlov water type without restarting the sea', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    await page
+      .getByRole('navigation', { name: 'Scene' })
+      .getByRole('button', { name: /Water, wind/ })
+      .click();
+    const water = page.getByLabel('Water type');
+    await expect(water).toHaveValue('oceanic-ib');
+    await water.selectOption('coastal-9');
+    await expect(water).toHaveValue('coastal-9');
+    await page.waitForTimeout(800);
+    await page.screenshot({ path: 'test-results/water-type-coastal-9.png' });
+    await water.selectOption('oceanic-i');
+    await expect(water).toHaveValue('oceanic-i');
+    await page.waitForTimeout(800);
+    await page.screenshot({ path: 'test-results/water-type-oceanic-i.png' });
+    expect(errors).toEqual([]);
+  });
+
   test('round-trips an experiment through a share link', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await page.goto('/');

@@ -25,6 +25,19 @@ describe('experiment schema', () => {
     expect(off.ok && off.experiment.damage).toBe(false);
   });
 
+  it('older files without a Jerlov water type load as open-ocean IB', () => {
+    const exp = presetExperiment();
+    expect(exp.environment.waterType).toBe('oceanic-ib');
+    const { waterType: _w, ...env } = exp.environment;
+    const r = parseExperiment({ ...exp, environment: env });
+    expect(r.ok && r.experiment.environment.waterType).toBe('oceanic-ib');
+  });
+
+  it('gives Agulhas tropical blue water and the harbour a coastal type', () => {
+    expect(presetExperiment('agulhas-current').environment.waterType).toBe('oceanic-i');
+    expect(presetExperiment('calm-harbour').environment.waterType).toBe('coastal-5');
+  });
+
   it('reports readable errors', () => {
     const exp = presetExperiment();
     const bad = { ...exp, waves: [{ ...exp.waves[0], hs: -3 }] };
