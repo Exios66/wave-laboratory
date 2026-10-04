@@ -177,6 +177,7 @@ test.describe('Wave Laboratory app', () => {
     const time = page.locator('.transport__time');
     await expect(water).toHaveValue('oceanic-ib');
 
+    await expect.poll(() => simulationSeconds(time)).toBeGreaterThan(2);
     const t0 = await simulationSeconds(time);
     await water.selectOption('coastal-9');
     await expect(water).toHaveValue('coastal-9');
@@ -185,10 +186,12 @@ test.describe('Wave Laboratory app', () => {
     expect(t1).toBeGreaterThan(t0);
     await page.screenshot({ path: 'test-results/water-type-coastal-9.png' });
 
+    await expect.poll(() => simulationSeconds(time)).toBeGreaterThan(t1 + 2);
+    const t2 = await simulationSeconds(time);
     await water.selectOption('oceanic-i');
     await expect(water).toHaveValue('oceanic-i');
     await page.waitForTimeout(800);
-    expect(await simulationSeconds(time)).toBeGreaterThan(t1);
+    expect(await simulationSeconds(time)).toBeGreaterThan(t2);
     await page.screenshot({ path: 'test-results/water-type-oceanic-i.png' });
     expect(errors).toEqual([]);
   });
