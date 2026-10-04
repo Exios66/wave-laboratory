@@ -371,6 +371,9 @@ uniform vec2 uDrift;
 uniform float uWind;
 uniform float uTime;
 uniform float uHs;
+uniform vec3 uScatter;
+uniform vec3 uAtten;
+uniform float uWaterDepth;
 uniform float uOverlay;
 uniform float uFogDensity;
 uniform float uWakeCount;
@@ -620,9 +623,14 @@ void main() {
   vec3 reflection = skyColor(R, uSunDir);
   float crest = clamp(vEta / max(uHs, 0.4) * 0.5 + 0.5, 0.0, 1.0);
   float light = daylight() * (1.0 - 0.55 * uCloud) + uFlash * 0.5;
-  vec3 deep = srgbToLinear(vec3(0.012, 0.06, 0.10));
-  vec3 shallow = srgbToLinear(vec3(0.04, 0.36, 0.44));
-  vec3 stormy = srgbToLinear(vec3(0.03, 0.10, 0.11));
+  // Jerlov body colour and Beer–Lambert transmission. Scatter is already linear RGB.
+  vec3 scatter = uScatter;
+  vec3 kd = max(uAtten, vec3(1.0e-4));
+  float crestPath = mix(1.6, 0.22, crest);
+  vec3 transCrest = exp(-kd * crestPath);
+  vec3 deep = scatter * 1.7;
+  vec3 shallow = scatter * 0.35 + transCrest * vec3(0.10, 0.28, 0.26);
+  vec3 stormy = mix(deep, scatter * 0.9, 0.45);
   vec3 water = mix(deep, mix(shallow, stormy, smoothstep(0.4, 1.0, uCloud)), crest) * light;
   water *= 1.0 - 0.25 * squall;
   vec3 col = mix(water, reflection, fresnel);
@@ -636,19 +644,24 @@ void main() {
   // Moon glitter path at night.
   float moonGlint = pow(max(dot(normalize(R), uMoonDir), 0.0), 220.0) * uNight * step(0.0, uMoonDir.y);
   col += srgbToLinear(vec3(0.75, 0.82, 0.95)) * moonGlint * 0.5 * (1.0 - smoothstep(0.4, 0.9, uCloud));
-  // Subsurface glow through thin crests.
+  // Subsurface glow through thin crests, tinted by what this water type transmits.
+  vec3 sssTint = scatter * 10.0 + transCrest * vec3(0.08, 0.32, 0.28);
   float sss = pow(crest, 2.0) * (1.0 - fresnel) * max(dot(V, -uSunDir) * 0.5 + 0.5, 0.0);
-  col += srgbToLinear(vec3(0.10, 0.40, 0.38)) * sss * 0.5 * light;
-  // Diffuse light through steep, thin crests, also under an overcast sky.
+  col += sssTint * sss * 0.5 * light;
   float thin = clamp(length(sl.xy) * 2.5, 0.0, 1.0) * crest;
-  col += srgbToLinear(vec3(0.06, 0.24, 0.24)) * thin * light * 0.6;
+  col += sssTint * thin * light * 0.45;
   // Crest glow: sunlight through thin crests when looking toward a low sun.
   vec3 sunFlat = normalize(vec3(uSunDir.x, 0.0, uSunDir.z) + vec3(0.0, 1e-4, 0.0));
   float backlit = pow(clamp(dot(-V, sunFlat), 0.0, 1.0), 3.0);
   float glowCrest = smoothstep(0.55, 1.0, crest) * smoothstep(0.05, 0.3, length(sl.xy) + 0.08);
   float sunUp = smoothstep(-0.05, 0.25, uSunDir.y);
-  col += srgbToLinear(vec3(0.12, 0.72, 0.58)) * backlit * glowCrest * sunUp * sunVis
-    * (1.0 - fresnel) * 0.55;
+  vec3 glowTint = scatter * 14.0 + transCrest * vec3(0.10, 0.62, 0.48);
+  col += glowTint * backlit * glowCrest * sunUp * sunVis * (1.0 - fresnel) * 0.65;
+  // Optically shallow water: the bottom shows through where K_d · depth is small.
+  vec3 bottom = srgbToLinear(vec3(0.30, 0.26, 0.16));
+  float kdMean = dot(kd, vec3(0.3, 0.45, 0.25));
+  float seeBottom = exp(-kdMean * uWaterDepth) * (1.0 - smoothstep(20.0, 70.0, uWaterDepth));
+  col = mix(col, mix(col, bottom * transCrest * light, 0.6), seeBottom * (1.0 - fresnel));
 
   // Whitecaps: breaking where the surface compresses (Jacobian), with coverage that follows
   // the Monahan whitecap law for the wind, plus wind-aligned foam streaks above Beaufort 8.

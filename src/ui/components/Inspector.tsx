@@ -10,6 +10,7 @@ import type {
   WaveSystem,
   Weather,
 } from '../../schema/experiment';
+import { WATER_TYPE_OPTIONS } from '../../ocean/waterTypes';
 import { WEATHER_PRESETS } from '../../weather/presets';
 import { detectDeviceProfile, effectiveQuality } from '../deviceProfile';
 import { getRuntime } from '../runtime';
@@ -188,6 +189,13 @@ function EnvironmentInspector({
         />
         <SelectField
           label="Water type"
+          value={env.waterType}
+          options={WATER_TYPE_OPTIONS}
+          onChange={(v) => set('waterType', v, false)}
+          hint="Jerlov optical type: colour and how far light travels (rendering only). Oceanic I is tropical blue; coastal 9 is a turbid harbour."
+        />
+        <SelectField
+          label="Salinity"
           value={env.waterDensity > 1010 ? 'sea' : 'fresh'}
           options={[
             { value: 'sea', label: 'Seawater (1025 kg/m³)' },

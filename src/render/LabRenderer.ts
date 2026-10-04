@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { rotate, type Quat, type Vec3 } from '../core/vec';
 import type { GpuOceanData } from '../ocean/gpuData';
 import { currentVelocity } from '../ocean/oceanField';
+import { waterOptics } from '../ocean/waterTypes';
 import {
   DEFAULT_WEATHER,
   type Environment,
@@ -516,6 +517,10 @@ export class LabRenderer implements LabRendererApi {
     const current = currentVelocity(env);
     this.ocean.setCurrent(current.x, current.y);
     (this.ocean.uniforms.uWind!.value as number) = env.windSpeed;
+    const optics = waterOptics(env.waterType);
+    (this.ocean.uniforms.uScatter!.value as THREE.Vector3).fromArray(optics.scatter);
+    (this.ocean.uniforms.uAtten!.value as THREE.Vector3).fromArray(optics.attenuation);
+    this.ocean.uniforms.uWaterDepth!.value = env.depth;
     this.updateLighting(0);
   }
 

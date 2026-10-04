@@ -202,6 +202,7 @@ export const PRESETS: readonly Preset[] = [
         windSpeed: 12,
         windDirectionDeg: 225,
         sunElevationDeg: 35,
+        waterType: 'oceanic-i',
       }),
       [
         {
@@ -499,7 +500,7 @@ export const PRESETS: readonly Preset[] = [
       'Calm harbour',
       'Short fetch, light wind: a young sea of short waves. Surface tension matters at the ' +
         'smallest scales.',
-      env({ windSpeed: 4, depth: 12, sunElevationDeg: 45 }),
+      env({ windSpeed: 4, depth: 12, sunElevationDeg: 45, waterType: 'coastal-5' }),
       [
         {
           id: 'wind-1',
