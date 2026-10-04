@@ -310,4 +310,24 @@ test.describe('Wave Laboratory app', () => {
     await expect(page.getByText(/^Riding with /)).toHaveCount(0);
     expect(errors).toEqual([]);
   });
+
+  test('rogue-wave preset loads without a model-validity error', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    await page.getByRole('button', { name: 'Presets' }).click();
+    await page.getByRole('button', { name: /Rogue wave/ }).click();
+    await waitForSimulation(page);
+    await expect(page.getByRole('textbox', { name: 'Experiment name' })).toHaveValue(
+      'Rogue wave · container ship',
+    );
+    await expect(page.getByText('Model validity')).toHaveCount(0);
+    await page
+      .getByRole('navigation', { name: 'Scene' })
+      .getByRole('button', { name: /^Rogue wave/ })
+      .click();
+    await expect(page.getByRole('heading', { name: 'Wave system', exact: true })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Crest height' })).toHaveValue('12.0');
+    expect(errors).toEqual([]);
+  });
 });

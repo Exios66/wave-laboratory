@@ -155,6 +155,10 @@ components between 0.6 ω_p and 3 ω_p with amplitudes `a_n = A_c S(ω_n)Δω / 
 (`k·x_f − ω t_f + φ = 0`). Frequencies are jittered inside their bins so the group does not
 refocus periodically. The components are evaluated exactly like regular waves and add to the
 spectral sea, so the crest height at the focus is A_c above the background sea.
+The inspector treats the equivalent steepness `2A_c / λp` as the H/L of a sinusoid
+with the same crest elevation, and compares it to the Miche limit `0.142 tanh(kh)`.
+A NewWave crest past that limit would break; linear theory then under-predicts the shape.
+Recorded rogue crests are typically 1.2–1.6 Hs (Draupner 18.5 m / 11.9 m = 1.55).
 
 ## Weather (`src/weather`)
 
