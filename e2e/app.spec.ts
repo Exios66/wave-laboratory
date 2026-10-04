@@ -166,6 +166,7 @@ test.describe('Wave Laboratory app', () => {
   });
 
   test('picks a Jerlov water type without restarting the sea', async ({ page }) => {
+    test.setTimeout(90_000);
     const errors = trackErrors(page);
     await page.goto('/');
     await waitForSimulation(page);
@@ -177,7 +178,10 @@ test.describe('Wave Laboratory app', () => {
     const time = page.locator('.transport__time');
     await expect(water).toHaveValue('oceanic-ib');
 
-    await expect.poll(() => simulationSeconds(time)).toBeGreaterThan(2);
+    // t0 must exceed the 800 ms post-change wait: a restart at t=0 would then
+    // fail t1 > t0 even at 1× realtime. SwiftShader is slower than wall clock,
+    // so poll well beyond the default 5 s.
+    await expect.poll(() => simulationSeconds(time), { timeout: 30_000 }).toBeGreaterThan(1);
     const t0 = await simulationSeconds(time);
     await water.selectOption('coastal-9');
     await expect(water).toHaveValue('coastal-9');
@@ -186,7 +190,7 @@ test.describe('Wave Laboratory app', () => {
     expect(t1).toBeGreaterThan(t0);
     await page.screenshot({ path: 'test-results/water-type-coastal-9.png' });
 
-    await expect.poll(() => simulationSeconds(time)).toBeGreaterThan(t1 + 2);
+    await expect.poll(() => simulationSeconds(time), { timeout: 30_000 }).toBeGreaterThan(t1 + 1);
     const t2 = await simulationSeconds(time);
     await water.selectOption('oceanic-i');
     await expect(water).toHaveValue('oceanic-i');
