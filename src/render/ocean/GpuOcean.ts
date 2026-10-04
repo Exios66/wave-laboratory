@@ -1,12 +1,14 @@
 /**
  * Tessendorf ocean on the GPU: upload the CPU's h₀, evolve it, inverse-FFT each cascade,
- * and expose displacement textures the water shader samples. One shot per new sea compares
- * a texel against the CPU FFT so a shader regression fails loudly.
+ * and expose displacement textures the water shader samples. One shot per new sea can compare
+ * a texel against the CPU FFT so a shader regression fails loudly. That readback stalls the GPU,
+ * so visitors skip it; Playwright, `vite` dev, and `?verify-gpu` still run the check.
  */
 import * as THREE from 'three';
 import { FFT } from '../../ocean/fft';
 import type { GpuOceanData } from '../../ocean/gpuData';
 import { evolveSpectra } from './evolve';
+import { gpuVerifyWanted } from './gpuVerify';
 import { COMBINE_FRAG, FFT_FRAG, FFT_VERT, GRADIENT_FRAG, SPECTRUM_FRAG } from './shaders';
 
 const MAX_CASCADES = 4;
@@ -87,6 +89,7 @@ export class GpuOcean {
   private lastRefresh = 0;
   private readonly live: boolean[] = [];
   private verified = false;
+  private fftCpu: FFT | null = null;
 
   constructor(renderer: THREE.WebGLRenderer, texType: THREE.TextureDataType = THREE.FloatType) {
     this.renderer = renderer;
@@ -274,7 +277,11 @@ export class GpuOcean {
       u[`uC${i}`]!.value = (live && this.outputs[i]?.texture) || this.black;
       u[`uS${i}`]!.value = (live && this.slopes[i]?.texture) || this.black;
     }
-    if (!this.verified) this.verify(t);
+    this.renderer.setRenderTarget(null);
+    if (!this.verified) {
+      if (gpuVerifyWanted()) this.verify(t);
+      else this.verified = true;
+    }
   }
 
   dispose(): void {
@@ -364,7 +371,6 @@ export class GpuOcean {
     this.quad.material = material;
     this.renderer.setRenderTarget(target);
     this.renderer.render(this.quadScene, this.quadCamera);
-    this.renderer.setRenderTarget(null);
   }
 
   private allocate(n: number): void {
@@ -394,9 +400,9 @@ export class GpuOcean {
     const cascade = data?.cascades[0];
     if (!data || !out || !cascade || cascade.variance < 1e-8 || cascade.n !== this.n) return;
     const evolved = evolveSpectra(cascade.h0, this.n, cascade.size, t, this.depth, this.lambda);
-    const fft = new FFT(this.n);
-    fft.inverse2D(evolved.height);
-    fft.inverse2D(evolved.packedDisp);
+    if (!this.fftCpu || this.fftCpu.n !== this.n) this.fftCpu = new FFT(this.n);
+    this.fftCpu.inverse2D(evolved.height);
+    this.fftCpu.inverse2D(evolved.packedDisp);
     const buf = new Float32Array(4);
     const points = [
       [1, 0],
