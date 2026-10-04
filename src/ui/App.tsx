@@ -5,10 +5,12 @@ import { Dock } from './components/Dock';
 import { Inspector } from './components/Inspector';
 import { Notices } from './components/Notices';
 import { ScenePanel } from './components/ScenePanel';
+import { Splitters } from './components/Splitters';
 import { TopBar } from './components/TopBar';
 import { Viewport } from './components/Viewport';
 import { useEasterEggs } from './easterEggs';
 import { experimentFromLocation } from './fileOps';
+import { layoutCssVars } from './layout';
 import { getRuntime } from './runtime';
 import { useLab, type MobilePanel } from './store';
 import './styles.css';
@@ -92,6 +94,14 @@ function useGlobalShortcuts(): void {
         case 'F':
           if (lab.selection?.kind === 'vessel') lab.setCamera('follow', lab.selection.id);
           break;
+        case 'v':
+        case 'V':
+          lab.toggleExpandedView();
+          lab.notify(
+            'info',
+            useLab.getState().layout.sceneCollapsed ? '3D view enlarged' : 'Panels restored',
+          );
+          break;
         case 'Escape':
           lab.select(null);
           break;
@@ -118,6 +128,29 @@ function useGlobalShortcuts(): void {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+}
+
+function useLayoutChrome(): void {
+  const layout = useLab((s) => s.layout);
+  useEffect(() => {
+    const apply = () => {
+      useLab.getState().patchLayout({});
+    };
+    window.addEventListener('resize', apply);
+    return () => window.removeEventListener('resize', apply);
+  }, []);
+  useEffect(() => {
+    const vars = layoutCssVars(layout);
+    const root = document.documentElement;
+    root.style.setProperty('--panel-w', `${vars.scene}px`);
+    root.style.setProperty('--inspector-w', `${vars.inspector}px`);
+    root.style.setProperty('--dock-h', `${vars.dock}px`);
+    const app = document.querySelector('.app');
+    if (!(app instanceof HTMLElement)) return;
+    app.dataset.sceneCollapsed = layout.sceneCollapsed ? 'true' : 'false';
+    app.dataset.inspectorCollapsed = layout.inspectorCollapsed ? 'true' : 'false';
+    app.dataset.dockCollapsed = layout.dockCollapsed ? 'true' : 'false';
+  }, [layout]);
 }
 
 function useTheme(): void {
@@ -197,6 +230,7 @@ export function App() {
   useGlobalShortcuts();
   useEasterEggs();
   useTheme();
+  useLayoutChrome();
   useInitialExperimentFromUrl();
   useDocumentTitle();
   const mobilePanel = useLab((s) => s.mobilePanel);
@@ -212,6 +246,7 @@ export function App() {
         <TopBar />
         <ScenePanel />
         <Viewport />
+        <Splitters />
         <MobileTabs />
         <Inspector />
         <Dock />

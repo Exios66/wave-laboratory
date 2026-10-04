@@ -21,6 +21,7 @@ import { thrustFactor } from '../../vessel/damage';
 import type { VesselTelemetry } from '../../vessel/api';
 import { fmt, NumberField, Readout, SelectField, Switch, TextField } from './fields';
 import { Icon } from './icons';
+import { HidePanelButton } from './Splitters';
 
 export function Inspector() {
   const selection = useLab((s) => s.selection);
@@ -67,15 +68,18 @@ export function Inspector() {
         <h2 className="panel__title" id="inspector-title">
           {title}
         </h2>
-        {selection && (
-          <button
-            type="button"
-            className="btn btn--ghost"
-            onClick={() => useLab.getState().select(null)}
-          >
-            Overview
-          </button>
-        )}
+        <div className="panel__header-actions">
+          {selection && (
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => useLab.getState().select(null)}
+            >
+              Overview
+            </button>
+          )}
+          <HidePanelButton axis="inspector" label="inspector" />
+        </div>
       </div>
       <div className="panel__body">{body}</div>
     </aside>

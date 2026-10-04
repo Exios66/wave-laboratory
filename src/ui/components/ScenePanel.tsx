@@ -6,6 +6,7 @@ import { healthPercent, healthTone } from '../health';
 import { useLab, type Selection } from '../store';
 import { Icon, type IconName } from './icons';
 import { Menu } from './Menu';
+import { HidePanelButton } from './Splitters';
 
 function isSelected(sel: Selection, kind: string, id?: string): boolean {
   if (!sel || sel.kind !== kind) return false;
@@ -160,6 +161,7 @@ export function ScenePanel() {
         <h2 className="panel__title" id="scene-title">
           Scene
         </h2>
+        <HidePanelButton axis="scene" label="scene panel" />
       </div>
       <div className="panel__body">
         <section className="tree-section" aria-labelledby="env-h">

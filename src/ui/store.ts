@@ -22,6 +22,16 @@ import { presetExperiment } from '../schema/presets';
 import type { SeaDiagnostics, SimFrame } from '../sim/types';
 import type { VesselDefinition } from '../vessel/api';
 import { parsePerformanceMode, type PerformanceMode } from './deviceProfile';
+import {
+  clampLayout,
+  defaultLayout,
+  isDesktopLayout,
+  isViewExpanded,
+  readLayout,
+  viewportSize,
+  writeLayout,
+  type LabLayout,
+} from './layout';
 
 export type Selection =
   | { kind: 'environment' }
@@ -81,6 +91,8 @@ export interface LabState {
   notices: Notice[];
   /** Easter egg: hulls drawn as rubber ducks. Session only, never saved in the experiment. */
   duckMode: boolean;
+  /** Desktop chrome sizes and collapsed panels (persisted; not part of the experiment). */
+  layout: LabLayout;
 
   // actions
   /** Apply an edit; returns false (and shows why) when the result fails validation. */
@@ -106,6 +118,9 @@ export interface LabState {
   notify(tone: Notice['tone'], message: string): void;
   dismissNotice(id: number): void;
   setDuckMode(on: boolean): void;
+  patchLayout(patch: Partial<LabLayout>): void;
+  toggleExpandedView(): void;
+  resetLayout(): void;
   // simulation bridge callbacks
   simLoaded(defs: Record<string, VesselDefinition>, diagnostics: SeaDiagnostics): void;
   simFrame(frame: SimFrame): void;
@@ -141,6 +156,11 @@ function dropMissingTargets(
   return out;
 }
 let noticeId = 0;
+
+function persistLayout(layout: LabLayout): LabLayout {
+  writeLayout(layout);
+  return layout;
+}
 
 function readPerformance(): PerformanceMode {
   try {
@@ -217,6 +237,7 @@ export const useLab = create<LabState>()((set, get) => ({
   dialog: null,
   notices: [],
   duckMode: false,
+  layout: readLayout(),
 
   updateExperiment(recipe, opts) {
     const prev = get().experiment;
@@ -295,8 +316,16 @@ export const useLab = create<LabState>()((set, get) => ({
   },
 
   select(selection) {
-    // On phones, selecting something reveals its editor.
-    set(selection ? { selection, mobilePanel: 'inspector' } : { selection });
+    // On phones, selecting something reveals its editor via the panel switcher. On desktop,
+    // unhide the inspector so a pick in the 3D view is not lost behind a collapsed panel —
+    // but do not persist that unhide from a phone, or a laptop's saved hide is wiped.
+    set((s) => {
+      const layout =
+        selection && s.layout.inspectorCollapsed && isDesktopLayout()
+          ? persistLayout({ ...s.layout, inspectorCollapsed: false })
+          : s.layout;
+      return selection ? { selection, mobilePanel: 'inspector' as const, layout } : { selection };
+    });
   },
   setPlaying(playing) {
     set({ playing });
@@ -370,6 +399,44 @@ export const useLab = create<LabState>()((set, get) => ({
   },
   setDuckMode(on) {
     set({ duckMode: on });
+  },
+  patchLayout(patch) {
+    set((s) => {
+      const layout = clampLayout({ ...s.layout, ...patch }, viewportSize());
+      if (
+        layout.sceneWidth === s.layout.sceneWidth &&
+        layout.inspectorWidth === s.layout.inspectorWidth &&
+        layout.dockHeight === s.layout.dockHeight &&
+        layout.sceneCollapsed === s.layout.sceneCollapsed &&
+        layout.inspectorCollapsed === s.layout.inspectorCollapsed &&
+        layout.dockCollapsed === s.layout.dockCollapsed
+      ) {
+        return s;
+      }
+      return { layout: persistLayout(layout) };
+    });
+  },
+  toggleExpandedView() {
+    set((s) => {
+      const expanded = isViewExpanded(s.layout);
+      return {
+        layout: persistLayout(
+          clampLayout(
+            {
+              ...s.layout,
+              sceneCollapsed: !expanded,
+              inspectorCollapsed: !expanded,
+              dockCollapsed: !expanded,
+            },
+            viewportSize(),
+          ),
+        ),
+      };
+    });
+  },
+  resetLayout() {
+    const layout = persistLayout(defaultLayout(viewportSize()));
+    set({ layout });
   },
   dismissNotice(id) {
     set((s) => ({ notices: s.notices.filter((n) => n.id !== id) }));

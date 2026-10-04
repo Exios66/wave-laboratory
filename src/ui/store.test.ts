@@ -44,4 +44,34 @@ describe('lab store', () => {
     lab().simLoaded({}, { hs: 0, systems: [], warnings: [] });
     expect(lab().status).toBe('unsupported');
   });
+
+  it('enlarges the 3D view by collapsing the chrome and restores it', () => {
+    lab().resetLayout();
+    expect(lab().layout.sceneCollapsed).toBe(false);
+    lab().toggleExpandedView();
+    expect(lab().layout.sceneCollapsed).toBe(true);
+    expect(lab().layout.inspectorCollapsed).toBe(true);
+    expect(lab().layout.dockCollapsed).toBe(true);
+    lab().toggleExpandedView();
+    expect(lab().layout.sceneCollapsed).toBe(false);
+    lab().patchLayout({ inspectorCollapsed: true });
+    lab().select({ kind: 'environment' });
+    expect(lab().layout.inspectorCollapsed).toBe(false);
+  });
+
+  it('does not persist an inspector reveal when selecting on a phone-sized window', () => {
+    lab().resetLayout();
+    lab().patchLayout({ inspectorCollapsed: true });
+    const g = globalThis as { window?: { innerWidth: number; innerHeight: number } };
+    const prev = g.window;
+    g.window = { innerWidth: 390, innerHeight: 844 };
+    try {
+      lab().select({ kind: 'environment' });
+      expect(lab().mobilePanel).toBe('inspector');
+      expect(lab().layout.inspectorCollapsed).toBe(true);
+    } finally {
+      if (prev) g.window = prev;
+      else delete g.window;
+    }
+  });
 });

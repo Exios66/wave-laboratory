@@ -311,6 +311,52 @@ test.describe('Wave Laboratory app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('enlarges the 3D view by hiding the side panels and chart dock', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    const canvas = page.locator('#viewport-canvas');
+    const before = (await canvas.boundingBox())!;
+    await page.getByRole('button', { name: 'Enlarge view' }).click();
+    await expect(page.getByRole('button', { name: 'Panels' })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Scene' })).toBeHidden();
+    const after = (await canvas.boundingBox())!;
+    expect(after.height).toBeGreaterThan(before.height + 60);
+    expect(after.width).toBeGreaterThan(before.width + 60);
+    await page.keyboard.press('v');
+    await expect(page.getByRole('navigation', { name: 'Scene' })).toBeVisible();
+    await expect(page.getByRole('separator', { name: 'Resize data dock' })).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test('gives a laptop a tall ocean and grows it when the dock is dragged', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await page.goto('/');
+    await waitForSimulation(page);
+    const canvas = page.locator('#viewport-canvas');
+    const before = (await canvas.boundingBox())!;
+    expect(before.height).toBeGreaterThan(480);
+    expect(before.width).toBeGreaterThan(700);
+
+    const dock = page.getByRole('separator', { name: 'Resize data dock' });
+    const handle = (await dock.boundingBox())!;
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + 90, { steps: 8 });
+    await page.mouse.up();
+    const afterDrag = (await canvas.boundingBox())!;
+    expect(afterDrag.height).toBeGreaterThan(before.height);
+
+    await page.getByRole('button', { name: 'Enlarge view' }).click();
+    const enlarged = (await canvas.boundingBox())!;
+    expect(enlarged.height).toBeGreaterThanOrEqual(afterDrag.height);
+    expect(enlarged.width).toBeGreaterThan(before.width + 200);
+    expect(enlarged.height).toBeGreaterThan(600);
+    await page.screenshot({ path: 'test-results/laptop-enlarged.png' });
+    expect(errors).toEqual([]);
+  });
+
   test('rogue-wave preset loads without a model-validity error', async ({ page }) => {
     const errors = trackErrors(page);
     await page.goto('/');

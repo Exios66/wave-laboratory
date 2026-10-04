@@ -8,6 +8,7 @@ import { dayPhase, formatClock } from './clock';
 import { fmt } from './fields';
 import { Icon } from './icons';
 import { Minimap } from './Minimap';
+import { ExpandViewButton, RevealButtons } from './Splitters';
 
 const CAMERAS: { mode: CameraMode; label: string; needsVessel: boolean }[] = [
   { mode: 'orbit', label: 'Orbit', needsVessel: false },
@@ -207,6 +208,7 @@ function Hud() {
             <Icon name="plane" size={16} />
             {camera === 'plane' ? 'Land' : 'Plane'}
           </button>
+          <ExpandViewButton />
           <label className="visually-hidden" htmlFor="overlay-select">
             Surface overlay
           </label>
@@ -239,6 +241,7 @@ function Hud() {
           <Minimap />
         </div>
       </div>
+      <RevealButtons />
     </div>
   );
 }
