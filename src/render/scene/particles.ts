@@ -139,6 +139,8 @@ export class SprayPool {
   private readonly alpha: Float32Array;
   private readonly sizeAttr: Float32Array;
   private next = 0;
+  /** Alive particles after the last `update`; 0 lets calm frames skip the CPU loop. */
+  private liveCount = 0;
   readonly capacity: number;
 
   constructor(capacity: number, style: ParticleStyle = SPRAY_STYLE) {
@@ -194,11 +196,16 @@ export class SprayPool {
       this.age[i] = 0;
       this.life[i] = e.life * (0.6 + 0.8 * Math.random());
       this.size[i] = e.size * (0.6 + 0.8 * Math.random());
+      this.liveCount++;
     }
   }
 
   /** Advance by dt with air drag relaxing toward the wind (three.js coordinates). */
   update(dt: number, wind: THREE.Vector3, light: number, pixelScale: number): void {
+    if (this.liveCount === 0) {
+      this.object.visible = false;
+      return;
+    }
     const st = this.style;
     const drag = 1 - Math.exp(-dt * st.drag);
     let alive = 0;
@@ -222,6 +229,7 @@ export class SprayPool {
       this.alpha[i] = st.alpha * Math.min(1, u * 8) * (1 - u) * (1 - u);
       this.sizeAttr[i] = this.size[i]! * (1 + st.growth * u);
     }
+    this.liveCount = alive;
     this.object.visible = alive > 0;
     const geo = this.object.geometry;
     geo.getAttribute('position').needsUpdate = true;
