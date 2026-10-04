@@ -17,6 +17,14 @@ async function waitForSimulation(page: Page): Promise<void> {
   });
 }
 
+/** Elapsed simulation time from the playback strip (`aria-label="Simulation time 12.3 seconds"`). */
+async function simulationSeconds(time: ReturnType<Page['locator']>): Promise<number> {
+  const label = await time.getAttribute('aria-label');
+  const m = /Simulation time ([\d.]+) seconds/.exec(label ?? '');
+  expect(m, `expected a simulation-time label, got ${label}`).toBeTruthy();
+  return Number(m![1]);
+}
+
 test.describe('Wave Laboratory app', () => {
   test('boots, simulates and renders without errors', async ({ page }) => {
     const errors = trackErrors(page);
@@ -166,14 +174,21 @@ test.describe('Wave Laboratory app', () => {
       .getByRole('button', { name: /Water, wind/ })
       .click();
     const water = page.getByLabel('Water type');
+    const time = page.locator('.transport__time');
     await expect(water).toHaveValue('oceanic-ib');
+
+    const t0 = await simulationSeconds(time);
     await water.selectOption('coastal-9');
     await expect(water).toHaveValue('coastal-9');
     await page.waitForTimeout(800);
+    const t1 = await simulationSeconds(time);
+    expect(t1).toBeGreaterThan(t0);
     await page.screenshot({ path: 'test-results/water-type-coastal-9.png' });
+
     await water.selectOption('oceanic-i');
     await expect(water).toHaveValue('oceanic-i');
     await page.waitForTimeout(800);
+    expect(await simulationSeconds(time)).toBeGreaterThan(t1);
     await page.screenshot({ path: 'test-results/water-type-oceanic-i.png' });
     expect(errors).toEqual([]);
   });
