@@ -240,7 +240,8 @@ export class LabRuntime {
     this.advanceDisplayClock(wall, s.playing && s.status === 'ready', s.timeScale);
     this.renderer?.setVisualTime(this.displayT);
     this.advanceClock(now, wall, s);
-    if (this.renderer && !document.hidden && this.governor.frame(wall) && this.canvas) {
+    if (document.hidden) return;
+    if (this.renderer && this.governor.frame(wall) && this.canvas) {
       this.resize(this.canvas);
       s.setRenderScale(this.governor.scale);
     }
