@@ -267,4 +267,22 @@ test.describe('Wave Laboratory app', () => {
     await expect(page.getByText(/^Riding with /)).toHaveCount(0);
     expect(errors).toEqual([]);
   });
+
+  test('enlarges the 3D view by hiding the side panels and chart dock', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    const canvas = page.locator('#viewport-canvas');
+    const before = (await canvas.boundingBox())!;
+    await page.getByRole('button', { name: 'Enlarge view' }).click();
+    await expect(page.getByRole('button', { name: 'Panels' })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Scene' })).toBeHidden();
+    const after = (await canvas.boundingBox())!;
+    expect(after.height).toBeGreaterThan(before.height + 60);
+    expect(after.width).toBeGreaterThan(before.width + 60);
+    await page.keyboard.press('v');
+    await expect(page.getByRole('navigation', { name: 'Scene' })).toBeVisible();
+    await expect(page.getByRole('separator', { name: 'Resize data dock' })).toBeVisible();
+    expect(errors).toEqual([]);
+  });
 });

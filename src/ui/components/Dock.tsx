@@ -13,6 +13,7 @@ import { telemetry } from '../telemetry';
 import { Chart, type ChartSeries } from './Chart';
 import { fmt } from './fields';
 import { Icon } from './icons';
+import { HidePanelButton } from './Splitters';
 
 const TABS: { id: DockTab; label: string }[] = [
   { id: 'gauges', label: 'Wave gauges' },
@@ -75,13 +76,19 @@ export function Dock() {
               aria-selected={tab === t.id}
               aria-controls={`panel-${t.id}`}
               tabIndex={tab === t.id ? 0 : -1}
-              onClick={() => lab().setDockTab(t.id)}
+              onClick={() => {
+                lab().setDockTab(t.id);
+                if (useLab.getState().layout.dockCollapsed) {
+                  lab().patchLayout({ dockCollapsed: false });
+                }
+              }}
               onKeyDown={onTabKey}
             >
               {t.label}
             </button>
           ))}
         </div>
+        <HidePanelButton axis="dock" label="data charts" />
       </div>
       <div
         className="dock__panel"

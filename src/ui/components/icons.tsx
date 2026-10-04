@@ -30,7 +30,12 @@ type IconName =
   | 'warning'
   | 'wrench'
   | 'settings'
-  | 'more';
+  | 'more'
+  | 'chevron-left'
+  | 'chevron-right'
+  | 'chevron-down'
+  | 'expand'
+  | 'compress';
 
 const paths: Record<IconName, ReactElement> = {
   logo: <path d="M2 15c3-5 6-5 9 0s6 5 9 0 2-2 2-2v8H2z" fill="currentColor" stroke="none" />,
@@ -118,6 +123,11 @@ const paths: Record<IconName, ReactElement> = {
       <circle cx="19" cy="12" r="1.6" fill="currentColor" />
     </>
   ),
+  'chevron-left': <path d="M14 6l-6 6 6 6" />,
+  'chevron-right': <path d="M10 6l6 6-6 6" />,
+  'chevron-down': <path d="M6 10l6 6 6-6" />,
+  expand: <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" />,
+  compress: <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />,
 };
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {

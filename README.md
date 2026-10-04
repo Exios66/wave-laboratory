@@ -85,7 +85,9 @@ paths, so it also works from any other static host or sub-folder.
    Ocean swell plus wind sea, a Wigley hull in a regular-wave tank, a box barge in beam seas,
    TMA swell in shallow water, and calm harbour ripples.
 2. In the **Scene** panel, add wave systems, vessels and wave gauges. Select anything to edit
-   it in the **Inspector**. The inspector shows the WMO sea state (from Hs rounded to the
+   it in the **Inspector**. Drag the edges of the 3D view to resize those panels and the data
+   dock, hide a panel from its header, or press <kbd>V</kbd> to give the ocean the rest of the
+   window (playback stays on a strip). The inspector shows the WMO sea state (from Hs rounded to the
    nearest centimetre), Beaufort wind, and model-validity warnings. Tapping a vessel or gauge
    on a phone opens the inspector. Select **Weather** in the Scene panel to pick a situation
    (calm to hurricane, squall line, fog bank) or tune gustiness, squalls, rain, cloud,

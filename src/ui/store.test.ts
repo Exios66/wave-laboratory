@@ -44,4 +44,18 @@ describe('lab store', () => {
     lab().simLoaded({}, { hs: 0, systems: [], warnings: [] });
     expect(lab().status).toBe('unsupported');
   });
+
+  it('enlarges the 3D view by collapsing the chrome and restores it', () => {
+    lab().resetLayout();
+    expect(lab().layout.sceneCollapsed).toBe(false);
+    lab().toggleExpandedView();
+    expect(lab().layout.sceneCollapsed).toBe(true);
+    expect(lab().layout.inspectorCollapsed).toBe(true);
+    expect(lab().layout.dockCollapsed).toBe(true);
+    lab().toggleExpandedView();
+    expect(lab().layout.sceneCollapsed).toBe(false);
+    lab().patchLayout({ inspectorCollapsed: true });
+    lab().select({ kind: 'environment' });
+    expect(lab().layout.inspectorCollapsed).toBe(false);
+  });
 });

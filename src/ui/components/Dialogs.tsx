@@ -57,6 +57,7 @@ const SHORTCUTS: [string, string][] = [
   ['C', 'Cycle camera (orbit, top, follow, bridge, plane)'],
   ['O', 'Cycle surface overlay'],
   ['F', 'Follow the selected vessel'],
+  ['V', 'Enlarge the 3D view (hide or restore the side panels and charts)'],
   ['Esc', 'Clear selection / close dialog'],
   ['Delete', 'Remove the selected item'],
   ['Ctrl + Z / Ctrl + Shift + Z', 'Undo / redo'],
@@ -81,8 +82,10 @@ function HelpContent() {
         in the <strong>Inspector</strong>. Data appears in the dock at the bottom; the Statistics
         tab can export everything as CSV. On a phone the ocean fills the top of the screen and
         Scene, Inspector and Data switch underneath it. Drag with one finger to orbit and pinch with
-        two fingers to zoom. Presets stays in the header; everything else is in the More menu,
-        including Settings for theme and graphics quality.
+        two fingers to zoom. On a laptop, drag the edges of the 3D view to make it larger, hide a
+        panel from its header, or press <kbd>V</kbd> to enlarge the ocean. Presets stays in the
+        header; everything else is in the More menu, including Settings for theme and graphics
+        quality.
       </p>
       <h3>Day, night and weather</h3>
       <p>
@@ -154,6 +157,16 @@ function SettingsContent() {
         onChange={(v) => lab().setPerformance(v)}
         hint={`Detected: ${detectDeviceProfile().description}. Higher levels draw a denser sea, finer ripples and more rain and spray at a higher resolution. The physics is identical at every level.`}
       />
+      <fieldset className="fieldset">
+        <legend>Layout</legend>
+        <p className="field__hint" style={{ marginTop: 0 }}>
+          Drag the edges of the 3D view to resize the scene list, inspector and data dock. Hide a
+          panel from its header, or press <kbd>V</kbd> to give the ocean the rest of the window.
+        </p>
+        <button type="button" className="btn" onClick={() => lab().resetLayout()}>
+          Reset panel sizes
+        </button>
+      </fieldset>
       <DayNightSettings />
       <ScenerySettings />
     </>
