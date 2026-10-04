@@ -205,13 +205,6 @@ textarea {
   grid-area: dock;
 }
 
-@media (max-width: 1180px) {
-  .app {
-    --inspector-w: 300px;
-    --panel-w: 260px;
-  }
-}
-
 .panel {
   background: var(--bg-elev);
   border-color: var(--border);
@@ -301,7 +294,7 @@ textarea {
   .app[data-dock-collapsed='true'] .tabs {
     display: none;
   }
-  .app[data-dock-collapsed='true'] .app__dock .btn--icon {
+  .app[data-dock-collapsed='true'] .app__dock .btn--hide-panel {
     display: none;
   }
 }

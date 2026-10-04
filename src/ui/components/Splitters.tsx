@@ -37,7 +37,7 @@ export function HidePanelButton({ axis, label }: { axis: Axis; label: string }) 
   return (
     <button
       type="button"
-      className="btn btn--ghost btn--icon desktop-only"
+      className="btn btn--ghost btn--icon btn--hide-panel desktop-only"
       aria-label={`Hide ${label}`}
       title={`Hide ${label}. Drag the edge to resize. V enlarges the 3D view.`}
       onClick={() =>
