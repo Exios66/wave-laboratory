@@ -580,12 +580,14 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
         <Readout
           items={[
             {
-              label: wave.kind === 'focused' ? 'Crest' : 'Hs',
+              label: wave.kind === 'focused' ? 'Crest' : wave.kind === 'regular' ? 'H' : 'Hs',
               value: fmt(diag.hs, 2, 'm'),
               title:
                 wave.kind === 'focused'
                   ? 'Linear crest elevation A at the focus, added to the background sea'
-                  : 'Significant wave height 4√m₀',
+                  : wave.kind === 'regular'
+                    ? 'Crest-to-trough height H'
+                    : 'Significant wave height 4√m₀',
             },
             { label: 'Tp', value: fmt(diag.tp, 1, 's') },
             { label: 'λ peak', value: fmt(diag.wavelength, 0, 'm') },

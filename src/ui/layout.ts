@@ -18,6 +18,13 @@ const VIEWPORT_MIN_H = 220;
 const HEADER_H = 56;
 const SPLIT = 6;
 
+/** Matches the CSS desktop grid (`min-width: 901px`). Phone chrome uses the panel switcher. */
+export const DESKTOP_MIN_W = 901;
+
+export function isDesktopLayout(vp = viewportSize()): boolean {
+  return vp.w >= DESKTOP_MIN_W;
+}
+
 export interface LabLayout {
   sceneWidth: number;
   inspectorWidth: number;

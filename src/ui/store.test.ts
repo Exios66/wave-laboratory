@@ -58,4 +58,20 @@ describe('lab store', () => {
     lab().select({ kind: 'environment' });
     expect(lab().layout.inspectorCollapsed).toBe(false);
   });
+
+  it('does not persist an inspector reveal when selecting on a phone-sized window', () => {
+    lab().resetLayout();
+    lab().patchLayout({ inspectorCollapsed: true });
+    const g = globalThis as { window?: { innerWidth: number; innerHeight: number } };
+    const prev = g.window;
+    g.window = { innerWidth: 390, innerHeight: 844 };
+    try {
+      lab().select({ kind: 'environment' });
+      expect(lab().mobilePanel).toBe('inspector');
+      expect(lab().layout.inspectorCollapsed).toBe(true);
+    } finally {
+      if (prev) g.window = prev;
+      else delete g.window;
+    }
+  });
 });

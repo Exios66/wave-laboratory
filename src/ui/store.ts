@@ -25,6 +25,7 @@ import { parsePerformanceMode, type PerformanceMode } from './deviceProfile';
 import {
   clampLayout,
   defaultLayout,
+  isDesktopLayout,
   isViewExpanded,
   readLayout,
   viewportSize,
@@ -315,11 +316,12 @@ export const useLab = create<LabState>()((set, get) => ({
   },
 
   select(selection) {
-    // On phones, selecting something reveals its editor. On desktop, unhide the inspector
-    // so a pick in the 3D view is not lost behind a collapsed panel.
+    // On phones, selecting something reveals its editor via the panel switcher. On desktop,
+    // unhide the inspector so a pick in the 3D view is not lost behind a collapsed panel —
+    // but do not persist that unhide from a phone, or a laptop's saved hide is wiped.
     set((s) => {
       const layout =
-        selection && s.layout.inspectorCollapsed
+        selection && s.layout.inspectorCollapsed && isDesktopLayout()
           ? persistLayout({ ...s.layout, inspectorCollapsed: false })
           : s.layout;
       return selection ? { selection, mobilePanel: 'inspector' as const, layout } : { selection };
