@@ -88,9 +88,9 @@ export const RegularWaveSystemSchema = z.object({
 export const FocusedWaveSystemSchema = z.object({
   ...waveSystemBase,
   kind: z.literal('focused'),
-  /** Linear crest elevation at the focus [m]. */
+  /** Linear crest elevation at the focus [m], added to the background sea. */
   crestHeight: finite().min(0).max(30),
-  /** Peak period of the underlying spectrum [s]. */
+  /** Peak period of the underlying JONSWAP shape [s] (keep 2A/λp below Miche ~ 0.14). */
   tp: finite().min(2).max(25),
   /** Focus point [m] and time [s]. */
   focusX: finite().min(-5000).max(5000).default(0),
