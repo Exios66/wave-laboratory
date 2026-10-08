@@ -7,7 +7,7 @@ import { Emitter } from '../core/emitter';
 import type { GpuOceanData } from '../ocean/gpuData';
 import type { Experiment, OceanQuality, Weather } from '../schema/experiment';
 import type { VesselCommand } from '../vessel/api';
-import type { FromWorker, SimFrame, ToWorker } from './types';
+import type { CameraProbe, FromWorker, SimFrame, ToWorker } from './types';
 
 type LoadedMessage = Extract<FromWorker, { type: 'loaded' }>;
 
@@ -78,20 +78,33 @@ export class SimClient extends Emitter<SimClientEvents> {
   }
 
   /** Request the simulation to advance by `dt` seconds of simulated time. */
-  advance(dt: number): void {
+  advance(dt: number, cameraProbe?: CameraProbe): void {
     this.pendingDt += dt;
     if (this.inFlight || this.loading || this.pendingDt <= 0) return;
     this.inFlight = true;
     const send = this.pendingDt;
     this.pendingDt = 0;
-    this.send({ type: 'advance', dt: send });
+    this.send(
+      cameraProbe ? { type: 'advance', dt: send, cameraProbe } : { type: 'advance', dt: send },
+    );
+  }
+
+  /**
+   * Ask for the sea surface at a point without advancing time (the sim is paused, or the camera
+   * moved). Skipped while a request is already in flight; returns whether it was sent.
+   */
+  probe(cameraProbe: CameraProbe): boolean {
+    if (this.inFlight || this.loading) return false;
+    this.inFlight = true;
+    this.send({ type: 'advance', dt: 0, cameraProbe });
+    return true;
   }
 
   /** Single-step (while paused). */
-  step(count = 1): void {
+  step(count = 1, cameraProbe?: CameraProbe): void {
     if (this.loading) return;
     this.inFlight = true;
-    this.send({ type: 'step', count });
+    this.send(cameraProbe ? { type: 'step', count, cameraProbe } : { type: 'step', count });
   }
 
   /** Update rain, cloud, visibility and lightning in the running simulation. */

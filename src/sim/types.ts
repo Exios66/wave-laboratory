@@ -24,6 +24,23 @@ export interface SimFrame {
   weather: WeatherReading;
   /** Vessel-to-vessel collisions since the previous frame (none are dropped between frames). */
   collisions: CollisionEvent[];
+  /**
+   * Sea surface at the camera probe point of the advance that produced this frame (absent when
+   * no probe was sent). The underwater camera uses it to stay below the waves.
+   */
+  cameraSurface?: CameraSurface;
+}
+
+/** Surface height [m] and its rate of change [m/s] at the point the camera asked about. */
+export interface CameraSurface {
+  eta: number;
+  etaT: number;
+}
+
+/** World-plane point (x east, y north) [m] the worker should sample the surface at. */
+export interface CameraProbe {
+  x: number;
+  y: number;
 }
 
 /** One vessel-to-vessel impact. */
@@ -67,8 +84,8 @@ export interface SeaDiagnostics {
 export type ToWorker =
   | { type: 'load'; experiment: Experiment; visualQuality?: OceanQuality }
   | { type: 'visual'; quality: OceanQuality }
-  | { type: 'advance'; dt: number }
-  | { type: 'step'; count: number }
+  | { type: 'advance'; dt: number; cameraProbe?: CameraProbe }
+  | { type: 'step'; count: number; cameraProbe?: CameraProbe }
   | { type: 'weather'; weather: Weather }
   | { type: 'command'; vesselId: string; command: VesselCommand };
 
