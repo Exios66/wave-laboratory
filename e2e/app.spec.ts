@@ -386,16 +386,15 @@ test.describe('Wave Laboratory app', () => {
     await page.getByRole('button', { name: 'Settings' }).click();
     const dialog = page.getByRole('dialog', { name: 'Settings' });
     await expect(dialog).toBeVisible();
+    const results = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
+      .analyze();
+    expect(results.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
     await dialog.getByLabel('Bloom').selectOption('on');
     await dialog.getByRole('switch', { name: 'Film grain' }).click();
     await dialog.getByRole('switch', { name: 'Vignette' }).click();
     await expect(dialog.getByRole('switch', { name: 'Film grain' })).toBeChecked();
     await expect(dialog.getByRole('switch', { name: 'Vignette' })).toBeChecked();
-
-    const results = await new AxeBuilder({ page })
-      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
-      .analyze();
-    expect(results.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
 
     await page.keyboard.press('Escape');
     const time = page.locator('.transport__time');
