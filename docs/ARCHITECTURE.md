@@ -43,6 +43,16 @@
   (a phone tab sent to the background) is rebuilt in `GpuOcean.restore()`. Phone-sized screens
   and software GPUs use a coarser ocean mesh; visual FFT resolution still comes from
   `ui/deviceProfile.ts` and does not change the physics grid.
+- **Post chain.** `render/post/PostStack.ts` draws the scene into a half-float target (with a
+  depth texture for later passes), then runs bloom (threshold 1.2, so only the sun disc, the sharp
+  sun glint and lightning glow), an optional vignette and film grain pass, and a final output pass
+  that applies exposure, ACES filmic tone mapping and sRGB once. The `uSunHdr` uniform lifts those
+  highlights above 1.0 only while bloom is on. With every effect off, or without half-float
+  colour buffers, the renderer draws straight to the canvas as before. On the full tier the HDR
+  target is multisampled (up to 4x), because the canvas MSAA does not reach off-screen targets;
+  the light tier (phones, software GPUs) has no MSAA either way. The settings are display
+  preferences (`wave-lab:display`), resolved against the device and quality in
+  `resolvePostSettings`, not part of the experiment.
 
 ## Performance budget (defaults)
 
