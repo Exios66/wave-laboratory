@@ -11,6 +11,18 @@ import type { AmbienceSettings } from './scenery/types';
 export type { AmbienceSettings } from './scenery/types';
 export { DAY_LENGTH_RANGE, DEFAULT_AMBIENCE } from './scenery/types';
 
+/** Display preferences for the HDR post chain (not experiment data). */
+export interface PostSettings {
+  /** Bloom on genuinely bright values: sun glint, sun disc, lightning. */
+  bloom: boolean;
+  /** Animated film grain. */
+  grain: boolean;
+  /** Darkened corners. */
+  vignette: boolean;
+}
+
+export const DEFAULT_POST: PostSettings = { bloom: false, grain: false, vignette: false };
+
 export type OverlayMode = 'none' | 'height' | 'steepness' | 'foam';
 /** `plane` rides one of the lost flights, circling high over the fleet. */
 export type CameraMode = 'orbit' | 'follow' | 'bridge' | 'top' | 'plane';
@@ -60,6 +72,8 @@ export interface LabRendererApi {
   setEnvironment(env: Environment): void;
   /** Viewer preferences: day:night cycle, islands, sea life, sailors. */
   setAmbience(settings: AmbienceSettings): void;
+  /** HDR post chain: bloom, film grain, vignette. All off draws straight to the canvas. */
+  setPost(settings: PostSettings): void;
   /** Clock time [h, 0–24] for the day:night cycle (ignored while the cycle is off). */
   setTimeOfDay(hours: number | null): void;
   /**

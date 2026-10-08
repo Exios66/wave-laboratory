@@ -30,10 +30,12 @@ import type {
   NavigationView,
   OverlayMode,
   PickResult,
+  PostSettings,
   RendererStats,
 } from './api';
 import { buildDuck } from './effects/duck';
 import { GpuOcean } from './ocean/GpuOcean';
+import { PostStack } from './post/PostStack';
 import { OCEAN_FRAG, OCEAN_VERT, SKY_FRAG, SKY_VERT } from './ocean/shaders';
 import { cameraNavigation, chartIslands } from './navigation';
 import { calmFromConditions, ease } from './scenery/ambience';
@@ -90,6 +92,9 @@ const BUDGET: Record<
   high: { rain: 7000, spray: 2600, octaves: 5, detail: 4 },
   ultra: { rain: 11000, spray: 4000, octaves: 6, detail: 4 },
 };
+
+/** Brightness multiplier of the sharp sun glint and sun disc while bloom is on (HDR, > threshold). */
+const SUN_HDR = 3.5;
 
 /** Rendering never looks further than this through the haze [m]. */
 const MAX_VIEW = 14_000;
@@ -213,6 +218,7 @@ export class LabRenderer implements LabRendererApi {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly camera: THREE.PerspectiveCamera;
+  private readonly post: PostStack;
   private readonly ocean: GpuOcean;
   private readonly oceanMesh: THREE.Mesh;
   private readonly sky: THREE.Mesh;
@@ -351,6 +357,7 @@ export class LabRenderer implements LabRendererApi {
     this.renderer.info.autoReset = false;
 
     this.camera = new THREE.PerspectiveCamera(48, 1, 0.2, 40000);
+    this.post = new PostStack(this.renderer, this.scene, this.camera, tier);
     this.ocean = new GpuOcean(this.renderer, texType);
     this.quality = tier === 'light' ? 'medium' : 'high';
     Object.assign(this.ocean.uniforms, {
@@ -397,6 +404,7 @@ export class LabRenderer implements LabRendererApi {
           uSunDir: u.uSunDir!,
           uCloud: u.uCloud!,
           uFlash: u.uFlash!,
+          uSunHdr: u.uSunHdr!,
           uSkyTime: u.uSkyTime!,
           uCloudDrift: u.uCloudDrift!,
           uCloudOctaves: u.uCloudOctaves!,
@@ -444,6 +452,7 @@ export class LabRenderer implements LabRendererApi {
     };
     this.onRestored = () => {
       this.ocean.restore();
+      this.post.restore();
       opts.onContextRestored?.();
     };
     this.onPointerDown = (ev: PointerEvent) => {
@@ -527,6 +536,12 @@ export class LabRenderer implements LabRendererApi {
   setAmbience(settings: AmbienceSettings): void {
     this.ambience = { ...settings };
     this.applyAmbience();
+  }
+
+  setPost(settings: PostSettings): void {
+    this.post.setSettings(settings);
+    // Sun glint, sun disc and lightning only exceed 1.0 when something will bloom them.
+    this.ocean.uniforms.uSunHdr!.value = this.post.bloomOn ? SUN_HDR : 1;
   }
 
   setTimeOfDay(hours: number | null): void {
@@ -1048,7 +1063,8 @@ export class LabRenderer implements LabRendererApi {
     const dt = t - this.lastRenderT;
     this.lastRenderT = t;
     this.updateWeather(t, dt);
-    this.renderer.render(this.scene, this.camera);
+    if (this.post.active) this.post.render();
+    else this.renderer.render(this.scene, this.camera);
     const now = performance.now();
     this.stats.frameMs = now - t0;
     this.stats.drawCalls = this.renderer.info.render.calls;
@@ -1071,6 +1087,7 @@ export class LabRenderer implements LabRendererApi {
     this.camera.updateProjectionMatrix();
     this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(width, height, false);
+    this.post.setSize(width, height, pixelRatio);
   }
 
   setDuckMode(on: boolean): void {
@@ -1281,6 +1298,7 @@ export class LabRenderer implements LabRendererApi {
     this.spray.dispose();
     this.smoke.dispose();
     this.wakes.dispose();
+    this.post.dispose();
     this.renderer.dispose();
   }
 
