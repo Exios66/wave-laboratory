@@ -49,6 +49,7 @@ export function sailAero(kind: ForeAftSail['kind'], aspect: number): SailAero {
     : { slope: helmboldSlope(aspect), alpha0: 2.5 * DEG, stall: 19 * DEG, cd0: 0.03, aspect };
 }
 
+/** Cubic transition from 0 to 1 across [e0, e1], clamped outside the interval. */
 const smooth = (e0: number, e1: number, x: number): number => {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
   return t * t * (3 - 2 * t);
@@ -76,7 +77,12 @@ export interface ApparentWind {
   y: number;
 }
 
-/** Apparent wind from the true wind (air velocity, world) and the boat velocity. */
+/**
+ * Apparent wind from world horizontal air and boat velocities [m/s]. Normalizes the heading
+ * direction (headingX, headingY), then overwrites and returns `out` in the heading frame.
+ * `beta` is the angle the wind comes from [rad], positive from port; it is zero when the
+ * apparent speed is at most 1e-9 m/s. A zero heading direction produces zero wind components.
+ */
 export function apparentWind(
   windU: number,
   windV: number,
@@ -98,7 +104,10 @@ export function apparentWind(
   return out;
 }
 
-/** Fraction of the headsail's lift left in the lee of the main when running. */
+/**
+ * Headsail area multiplier in the main's wind shadow, applied to both lift and drag.
+ * `b` is the absolute apparent wind angle off the bow [rad]: 1 through 135°, 0.2 from 165°.
+ */
 export function jibShadow(b: number): number {
   return 1 - 0.8 * smooth(135 * DEG, 165 * DEG, b);
 }
@@ -114,9 +123,15 @@ export interface SailItem {
   alpha: number;
 }
 
+/** Allocate a zeroed sail force and application point. */
 const newItem = (): SailItem => ({ fx: 0, fy: 0, px: 0, py: 0, pz: 0, alpha: 0 });
 
-/** Force of one sail at signed sheet angle `delta` [rad] (written into `out`). */
+/**
+ * Overwrite and return `out` with heading-frame force [N], body-frame application point [m],
+ * and angle of attack [rad]. `delta` is the sheet angle [rad], positive toward starboard;
+ * `areaFactor` scales sail area before headsail shadowing. Force is zero for nonpositive
+ * effective area or wind speed below 1e-6 m/s; the application point is still updated.
+ */
 export function sailForce(
   sail: ForeAftSail,
   aero: SailAero,
@@ -159,11 +174,17 @@ export interface ForeAftLoad {
   fy: number;
 }
 
+/** Allocate zeroed loads with one independent item per sail and one for rigging drag. */
 export function emptyForeAftLoad(rig: ForeAftRig): ForeAftLoad {
   return { items: rig.sails.map(newItem), rig: newItem(), fx: 0, fy: 0 };
 }
 
-/** Set a sail's sheet angle `delta` (signed rad per sail) and sum the loads on the rig. */
+/**
+ * Evaluate each sail at its signed `sheets` angle [rad] and include mast and rigging drag.
+ * Sail area uses `set` clamped to [0, 1] times nonnegative `heelFactor`; bare rigging still
+ * produces drag at zero set. `aeros`, `sheets`, and `out.items` must follow `rig.sails` order.
+ * Overwrites and returns the loads in `out`, allocated by `emptyForeAftLoad`.
+ */
 export function foreAftLoad(
   rig: ForeAftRig,
   aeros: SailAero[],
@@ -200,9 +221,12 @@ export function foreAftLoad(
 const scratch = newItem();
 
 /**
- * Sheet-angle magnitudes [rad] of the main (index 0) and headsail that give the most drive in
- * `wind`, then eased together until the heeling moment about the lateral-resistance height
- * `zRef` is no more than `mAllow` [N·m]. `sheetMin`/`sheetMax` bound the boom/sheet angle.
+ * Search sheet angles for maximum drive per sail, then ease together toward the heeling
+ * moment limit `mAllow` [N·m] about body-frame lateral-resistance height `zRef` [m].
+ * Sail area uses `set` clamped to [0, 1] times nonnegative `heelFactor`.
+ * Writes and returns signed angles [rad] in `out`, in `rig.sails` order, positive to starboard.
+ * The 2° search starts at 3°; easing is limited to 80° extra and a final 100° sheet angle,
+ * so the moment limit may remain exceeded. `aeros` and `out` need one entry per sail.
  */
 export function autoTrim(
   rig: ForeAftRig,

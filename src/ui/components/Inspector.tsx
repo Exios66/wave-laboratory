@@ -878,6 +878,7 @@ function SpreadingFields({
 
 // ------------------------------------------------------------------ vessels
 
+/** Edit vessel setup and issue live control, damage-control, and mooring orders. */
 function VesselInspector({ vessel }: { vessel: VesselConfig }) {
   const lab = useLab.getState;
   const tel = useLab((s) => s.frame?.vessels.find((v) => v.id === vessel.id));
@@ -1186,7 +1187,7 @@ function VesselHealth({ tel, onRepair }: { tel: VesselTelemetry; onRepair: () =>
   );
 }
 
-/** Compartment label from the bow: Bow, 2, 3 … Stern. */
+/** Label a zero-based compartment from the bow: Bow, Bay 2, Bay 3, …, Stern. */
 function bayName(i: number, n: number): string {
   return i === 0 ? 'Bow' : i === n - 1 ? 'Stern' : `Bay ${i + 1}`;
 }
