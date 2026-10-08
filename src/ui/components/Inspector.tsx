@@ -968,6 +968,11 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
             onFlood={(compartment) => live({ flood: { compartment } })}
             onPump={(on) => live({ pump: on })}
           />
+          <VesselAnchor
+            tel={tel}
+            onDrop={(anchorScope) => live({ anchor: 'drop', anchorScope })}
+            onWeigh={() => live({ anchor: 'weigh' })}
+          />
         </>
       )}
 
@@ -1284,6 +1289,98 @@ function VesselFlooding({
           aria-pressed={f.pumping}
         >
           <Icon name="wrench" size={16} /> Pump out / repair
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/** Anchor line: let go / weigh, the chain's scope and the pull on the bow. */
+function VesselAnchor({
+  tel,
+  onDrop,
+  onWeigh,
+}: {
+  tel: VesselTelemetry;
+  onDrop: (scope: number) => void;
+  onWeigh: () => void;
+}) {
+  const [scope, setScope] = useState('5');
+  const m = tel.mooring;
+  const kN = (n: number) => fmt(n / 1000, 0, 'kN');
+  let status: string;
+  if (!m.deployed)
+    status = m.available
+      ? 'Anchor stowed.'
+      : `Water too deep to anchor (${Math.round(m.chainCapacity)} m of chain).`;
+  else if (m.dragging) status = 'Anchor dragging.';
+  else if (m.regime === 'slack') status = 'Chain slack.';
+  else status = m.kind === 'buoy' ? 'Made fast to the buoy.' : 'Anchor holding.';
+  return (
+    <section className="health mooring" aria-labelledby="anchor-h">
+      <div className="health__head">
+        <h3 id="anchor-h" className="health__title">
+          Anchor
+        </h3>
+        <span
+          className={`health__value health__value--${m.dragging ? 'danger' : m.loadFraction > 0.7 ? 'warning' : 'ok'}`}
+        >
+          {m.deployed ? kN(m.tension) : '—'}
+        </span>
+      </div>
+      <Readout
+        items={[
+          { label: 'Tension', value: m.deployed ? kN(m.tension) : '—', title: 'At the hawse pipe' },
+          {
+            label: 'Scope',
+            value: m.deployed ? `${m.scope.toFixed(1)} : 1` : '—',
+            title: `${m.lineLength.toFixed(0)} m of chain out`,
+          },
+          {
+            label: 'Chain lifted',
+            value: m.deployed ? fmt(m.suspendedLength, 0, 'm') : '—',
+            title: `${m.groundedLength.toFixed(0)} m lies on the bottom`,
+          },
+          { label: 'Line angle', value: m.deployed ? fmt(m.fairleadAngleDeg, 0, '°') : '—' },
+          { label: 'Distance', value: m.deployed ? fmt(m.distance, 0, 'm') : '—' },
+          {
+            label: 'Holding',
+            value: m.deployed && m.holdingLimit > 0 ? `${Math.round(100 * m.loadFraction)} %` : '—',
+            title: `Anchor holds ${kN(m.holdingLimit)} horizontally before it drags`,
+          },
+        ]}
+      />
+      <p className="health__status" aria-live="polite">
+        {m.dragging && <span className="badge badge--danger">Dragging</span>}
+        <span>{status}</span>
+      </p>
+      <div className="toolbar" style={{ flexWrap: 'wrap' }}>
+        <label className="visually-hidden" htmlFor="anchor-scope">
+          Chain scope, times the depth
+        </label>
+        <select
+          id="anchor-scope"
+          className="select"
+          style={{ width: 'auto' }}
+          value={scope}
+          onChange={(e) => setScope(e.target.value)}
+        >
+          {[3, 4, 5, 6, 7].map((n) => (
+            <option key={n} value={String(n)}>
+              Scope {n} : 1
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => onDrop(Number(scope))}
+          disabled={!m.available}
+        >
+          <Icon name="download" size={16} /> {m.deployed ? 'Set scope' : 'Drop anchor'}
+        </button>
+        <button type="button" className="btn" onClick={onWeigh} disabled={!m.deployed}>
+          <Icon name="upload" size={16} /> Weigh anchor
         </button>
       </div>
     </section>

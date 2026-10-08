@@ -22,6 +22,7 @@ type IconName =
   | 'globe'
   | 'cloud'
   | 'download'
+  | 'upload'
   | 'presets'
   | 'eye'
   | 'eye-off'
@@ -86,6 +87,7 @@ const paths: Record<IconName, ReactElement> = {
     <path d="M7 18h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.1 10 4 4 0 0 0 7 18zM9 21l1-2M13 21l1-2" />
   ),
   download: <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />,
+  upload: <path d="M12 20V9M7 14l5-5 5 5M5 4h14" />,
   presets: <path d="M4 5h7v6H4zM13 5h7v6h-7zM4 13h7v6H4zM13 13h7v6h-7z" />,
   eye: (
     <>
