@@ -13,6 +13,7 @@ import type { VesselCommand } from '../vessel/api';
 import {
   detectDeviceProfile,
   effectiveQuality,
+  resolvePostSettings,
   graphicsBudget,
   ResolutionGovernor,
 } from './deviceProfile';
@@ -76,6 +77,7 @@ export class LabRuntime {
         if (s.revision !== this.loadedRevision) this.load();
         else {
           if (s.performance !== prev.performance) this.applyPerformanceMode();
+          else if (s.experiment.quality !== prev.experiment.quality) this.pushPost();
           // Visual-only weather edits do not reload; the worker still needs them for its readouts.
           if (s.experiment.weather !== prev.experiment.weather) {
             this.client.setWeather(s.experiment.weather);
@@ -97,6 +99,7 @@ export class LabRuntime {
           this.renderer.setEnvironment(s.experiment.environment);
         }
         if (s.ambience !== prev.ambience) this.renderer.setAmbience(s.ambience);
+        if (s.display !== prev.display) this.pushPost();
         if (s.timeOfDay !== prev.timeOfDay && Math.abs(s.timeOfDay - this.clockHours) > 1e-6) {
           // Someone set the clock (settings or reset): jump to it.
           this.clockHours = s.timeOfDay;
@@ -116,6 +119,13 @@ export class LabRuntime {
     }
   }
 
+  /** Resolve the display preferences against this device and quality, and hand them over. */
+  private pushPost(): void {
+    this.renderer?.setPost(
+      resolvePostSettings(useLab.getState().display, this.targetQuality(), detectDeviceProfile()),
+    );
+  }
+
   private targetQuality() {
     const s = useLab.getState();
     return effectiveQuality(s.experiment.quality, s.performance, detectDeviceProfile());
@@ -129,6 +139,7 @@ export class LabRuntime {
     const quality = this.targetQuality();
     this.visualQuality = quality;
     this.renderer?.setQuality(quality);
+    this.pushPost();
     this.client.load(s.experiment, quality);
   }
 
@@ -140,6 +151,7 @@ export class LabRuntime {
       this.client.setVisualQuality(quality);
     }
     this.renderer?.setQuality(quality);
+    this.pushPost();
     this.configureGovernor();
     if (this.canvas) this.resize(this.canvas);
   }
@@ -174,6 +186,7 @@ export class LabRuntime {
     this.renderer.setCamera(s.camera, s.cameraTarget);
     this.renderer.setSelection(selectionId(s.selection));
     this.renderer.setAmbience(s.ambience);
+    this.pushPost();
     this.renderer.setTimeOfDay(this.clockHours);
     this.pushSceneToRenderer();
     this.canvas = canvas;

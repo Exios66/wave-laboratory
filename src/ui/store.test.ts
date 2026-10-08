@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { presetExperiment } from '../schema/presets';
-import { useLab } from './store';
+import { readDisplay, useLab } from './store';
 
 const lab = useLab.getState;
 
@@ -73,5 +73,36 @@ describe('lab store', () => {
       if (prev) g.window = prev;
       else delete g.window;
     }
+  });
+});
+
+describe('display preferences', () => {
+  const saved = new Map<string, string>();
+  beforeEach(() => {
+    saved.clear();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => saved.get(k) ?? null,
+      setItem: (k: string, v: string) => void saved.set(k, v),
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('defaults to automatic bloom with grain and vignette off', () => {
+    expect(readDisplay()).toEqual({ bloom: 'auto', grain: false, vignette: false });
+  });
+
+  it('persists changes and reads them back', () => {
+    lab().setDisplay({ bloom: 'on', grain: true });
+    expect(lab().display).toEqual({ bloom: 'on', grain: true, vignette: false });
+    expect(JSON.parse(saved.get('wave-lab:display')!)).toEqual(lab().display);
+    expect(readDisplay()).toEqual(lab().display);
+    lab().setDisplay({ bloom: 'auto', grain: false });
+  });
+
+  it('survives corrupt storage', () => {
+    saved.set('wave-lab:display', '{not json');
+    expect(readDisplay()).toEqual({ bloom: 'auto', grain: false, vignette: false });
+    saved.set('wave-lab:display', JSON.stringify({ bloom: 7, grain: true }));
+    expect(readDisplay()).toEqual({ bloom: 'auto', grain: true, vignette: false });
   });
 });
