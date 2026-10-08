@@ -238,3 +238,47 @@ switch.
 - **Simplifications:** full-width bays flood level, so a one-sided hole does not list the ship
   directly (list appears through lost GM); no sloshing dynamics, no cross-flooding time, 100 %
   permeability, floodwater adds weight but not inertia, one lumped breach per bay.
+
+## Anchors and moorings (`src/vessel/mooring.ts`)
+
+The anchor line is a quasi-static elastic catenary on a frictionless flat seabed, solved afresh at
+every substep from the hawse pipe position (the bow reference point) and applied there as a force
+and its moment about the CoG. With `h` the fairlead height above the anchor level, `X` its
+horizontal distance from the anchor, `L` the unstretched line length, `w` the submerged weight per
+metre and `EA` the axial stiffness, the horizontal tension `H` is uniform along the line and the
+fairlead vertical tension `V` satisfies (Jonkman 2007, NREL/TP-500-41958, eqs. 2-28 to 2-31; Faltinsen 1990, ch. 8):
+
+- **part on the bottom** (`V <= wL`): `X = (L - V/w) + (H/w) asinh(V/H) + H L / EA` and
+  `h = (H/w)(sqrt(1 + (V/H)^2) - 1) + V^2 / (2 EA w)`; the hanging length is `V/w`. In the
+  inextensible limit this reduces to `Ls^2 = h^2 + 2 h H / w` and fairlead tension `T = H + w h`.
+- **fully lifted** (`V > wL`): the same with `asinh(V/H) - asinh((V - wL)/H)`; the anchor is pulled
+  up with `V - wL`.
+- **slack**: if `X <= L - s0` (`s0` the length that hangs vertically, `h = s0 + w s0^2 / (2 EA)`)
+  the horizontal force is exactly zero and only the hanging weight `w s0` pulls the bow down.
+  A line too short to reach the bottom is a straight elastic bar, `T = EA (D - L) / L`.
+
+For given `H` the first `h` equation is a quadratic in `(V/H)^2`, so `V(H)` is explicit and `X(H)`
+increases monotonically; `H` is found by a bracketed false-position/bisection search, which cannot
+diverge at slack, near-vertical or over-stretched lines (tested over a grid of 1800 cases for
+finite output). Chain scales with the ship: diameter `d = 5.5 (Delta/t)^(1/4)` mm, weight
+`0.0219 d^2 (1 - rho/7850) g` N/m, `EA = 47.4e9 d^2` N (d in m; Jonkman 2007 chain), carried
+length `90 + 1.2 L_ship` m; scope is line length over depth (3-7 from the inspector, limited by the
+chain carried, and no anchoring where the water is deeper than the chain reaches). The anchor has
+a mass `1.5 d^2` kg and holds `12` times its weight horizontally. Above that the anchor drags toward
+the vessel at `30 (H/H_hold - 1)` m/s (at most 20 m/s) and the pull settles near the holding
+limit. A mooring buoy (experiment `mooring.kind: "buoy"`) is a fixed point at the surface with
+a lighter pennant (a quarter of the chain weight) and unlimited holding. The chain adds damping
+of 8 % of critical for the surge/sway of the moored ship (line drag and bottom friction, from the
+tangent stiffness and the ship plus added mass); hull drag, radiation damping and wind damp the rest.
+
+- **Validation:** the unit tests reproduce a hand calculation (`H = 20 kN`, `w = 1 kN/m`, `h = 40 m`,
+  `L = 200 m`: hanging length 56.57 m, reach 178.69 m, `T = H + w h = 60 kN`), compare the elastic
+  solution with a direct numerical integration of the elastic-catenary ODEs for three stiffnesses,
+  and the taut limit with `EA` times the strain. In the moored-ship validation a trawler in a
+  15 m/s wind settles with a chain pull of 3.9 kN against a 3.8 kN wind load, a cargo ship in
+  wind and a 2 m swell stays inside its watch circle with the wave drift adding to the pull, drags
+  in a 45 m/s gale, and weighing the anchor lets it drift downwind.
+- **Simplifications:** quasi-static line (no line inertia or snap loads), frictionless bottom, flat
+  seabed at the still depth, the anchor sinks vertically from the hawse when dropped, current drag
+  on the chain is lumped into the damping above, anchor holding does not depend on the line
+  angle at the anchor.

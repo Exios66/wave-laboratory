@@ -53,6 +53,7 @@ import {
 import { WildlifeLayer } from './scenery/wildlife';
 import { createRadialOceanGeometry, OCEAN_DENSITY, OCEAN_SLICES } from './scene/oceanMesh';
 import { RainField, SMOKE_STYLE, SprayPool } from './scene/particles';
+import { ChainView } from './scene/chain';
 import { RigView } from './scene/rig';
 import { WakeField, type WakeSource } from './scene/wakes';
 import { flightDeckTexture, jollyRogerTexture } from './scene/textures';
@@ -106,6 +107,8 @@ interface VesselView {
   materials: THREE.MeshStandardMaterial[];
   textures: THREE.Texture[];
   rig: RigView | null;
+  /** Anchor chain, drawn in world coordinates while an anchor is down. */
+  chain: ChainView;
   /** Paint colours as built, darkened toward soot as the ship is damaged. */
   baseColors: THREE.Color[];
   /** Health the paint was last drawn for. */
@@ -880,7 +883,7 @@ export class LabRenderer implements LabRendererApi {
     for (const { id, definition } of vessels) {
       const view = this.buildVessel(id, definition);
       this.vessels.set(id, view);
-      this.scene.add(view.group);
+      this.scene.add(view.group, view.chain.group);
       this.pickables.push(view.group);
       maxLength = Math.max(maxLength, definition.length);
     }
@@ -997,6 +1000,15 @@ export class LabRenderer implements LabRendererApi {
     }
     view.group.userData.capsized = state.capsized;
     view.rig?.update(state.sailSet, state.braceDeg, state.apparentWindAngleDeg, state.apparentWind);
+    // The chain runs from the anchor to the hawse pipe of the hull as drawn.
+    const bow = view.definition.points.bow;
+    view.chain.update(
+      state.mooring,
+      this.tmpV
+        .set(bow.x, bow.z, -bow.y)
+        .applyQuaternion(view.group.quaternion)
+        .add(view.group.position),
+    );
   }
 
   setOverlay(mode: OverlayMode): void {
@@ -1444,6 +1456,7 @@ export class LabRenderer implements LabRendererApi {
       materials,
       textures,
       rig,
+      chain: new ChainView(definition.length),
       baseColors: materials.map((m) => m.color.clone()),
       shownHealth: 1,
       smokeFrom,
@@ -1509,7 +1522,8 @@ export class LabRenderer implements LabRendererApi {
   }
 
   private disposeVessel(view: VesselView): void {
-    this.scene.remove(view.group);
+    this.scene.remove(view.group, view.chain.group);
+    view.chain.dispose();
     view.group.traverse((child) => {
       if (child instanceof THREE.Mesh) child.geometry.dispose();
     });

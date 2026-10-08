@@ -207,6 +207,24 @@ export const VesselTypeSchema = z.enum([
 ]);
 export type VesselType = z.infer<typeof VesselTypeSchema>;
 
+/**
+ * Ground tackle a vessel starts with: an anchor already down (or a mooring buoy it is made fast
+ * to), so a scenario can open with the ship at anchor. Absent = the vessel is free; the anchor
+ * can still be dropped from its inspector.
+ */
+export const MooringSchema = z.object({
+  /** 'anchor' lies on the bottom and can drag; a 'buoy' floats at the surface and holds. */
+  kind: z.enum(['anchor', 'buoy']).default('anchor'),
+  /** Anchor/buoy position [m]; default: under the bow at the start. */
+  x: position().optional(),
+  y: position().optional(),
+  /** Chain paid out as a multiple of the water depth (limited by the chain carried). */
+  scope: finite().min(1).max(10).default(5),
+  /** Line length [m]; overrides the scope. */
+  length: finite().min(1).max(3000).optional(),
+});
+export type MooringConfig = z.infer<typeof MooringSchema>;
+
 export const VesselSchema = z.object({
   id: objectId(),
   name: z.string().min(1).max(60),
@@ -229,6 +247,8 @@ export const VesselSchema = z.object({
    * design load, above 1 overloaded with less freeboard.
    */
   loadFactor: finite().min(0.4).max(1.25).default(1),
+  /** Anchor or buoy mooring the vessel starts on (see `MooringSchema`). */
+  mooring: MooringSchema.optional(),
 });
 export type VesselConfig = z.infer<typeof VesselSchema>;
 

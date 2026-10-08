@@ -202,6 +202,16 @@ export interface VesselCommand {
   flood?: { compartment: number; area?: number };
   /** Plug the holes and run the pumps (true), or stop the pumps (false). */
   pump?: boolean;
+  /**
+   * Let go the anchor at the bow (it sinks to the bottom and the chain pays out to
+   * `anchorScope` × depth, or `anchorLength` m) or weigh it and come free. Dropping while
+   * anchored pays out or heaves in to the new length.
+   */
+  anchor?: 'drop' | 'weigh';
+  /** Chain paid out as a multiple of the water depth (3–7 is usual; default 5). */
+  anchorScope?: number;
+  /** Chain paid out [m]; overrides the scope. */
+  anchorLength?: number;
 }
 
 export type { DamageCause };
@@ -256,6 +266,41 @@ export interface FloodingTelemetry {
   foundered: boolean;
 }
 
+/** Anchor line state (zeros while no anchor is down). */
+export interface MooringTelemetry {
+  deployed: boolean;
+  /** 'anchor' on the bottom or a surface 'buoy'. */
+  kind: 'anchor' | 'buoy';
+  /** The water is shallow enough for the chain carried to reach the bottom. */
+  available: boolean;
+  /** Chain carried [m] and paid out [m] (and as a multiple of the depth). */
+  chainCapacity: number;
+  lineLength: number;
+  scope: number;
+  /** Tension at the fairlead, its horizontal part, and the pull on the anchor [N]. */
+  tension: number;
+  horizontalTension: number;
+  /** Angle of the line below horizontal at the fairlead [deg]. */
+  fairleadAngleDeg: number;
+  /** Chain hanging free and lying on the bottom [m]; touchdown distance from the anchor [m]. */
+  suspendedLength: number;
+  groundedLength: number;
+  touchdownDistance: number;
+  /** Anchor holding capacity [N] and horizontal tension as a fraction of it. */
+  holdingLimit: number;
+  loadFraction: number;
+  /** Anchor/buoy and fairlead positions (world) [m]. */
+  anchor: Vec3;
+  fairlead: Vec3;
+  /** Horizontal distance from the anchor to the fairlead [m]. */
+  distance: number;
+  /** The anchor is being dragged across the bottom. */
+  dragging: boolean;
+  regime: 'slack' | 'grounded' | 'suspended' | 'taut';
+  /** Line shape from the anchor: flat [d, z] pairs, d along the horizontal line to the fairlead. */
+  profile: number[];
+}
+
 export interface VesselTelemetry extends VesselKinematics {
   id: string;
   /** Euler angles [deg] (roll + = starboard down, pitch + = bow down) and compass heading. */
@@ -298,4 +343,6 @@ export interface VesselTelemetry extends VesselKinematics {
   damageCause: DamageCause | null;
   /** Flooding of the watertight compartments. */
   flooding: FloodingTelemetry;
+  /** Anchor line. */
+  mooring: MooringTelemetry;
 }

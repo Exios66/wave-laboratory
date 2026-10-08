@@ -491,6 +491,45 @@ export const PRESETS: readonly Preset[] = [
     ),
   },
   {
+    id: 'at-anchor',
+    title: 'At anchor in a swell',
+    summary:
+      'A cargo ship riding to her anchor in 28 m of water: she weathervanes into the wind, the chain lifts and settles with the swell.',
+    experiment: experiment(
+      'At anchor in a swell',
+      'The anchor is down with five times the depth in chain. Wind and swell load the catenary, ' +
+        'which pulls the bow back toward the anchor; weigh anchor from the inspector to set her ' +
+        'adrift, or raise the wind until the anchor drags.',
+      env({ depth: 28, windSpeed: 14, windDirectionDeg: 250, waterType: 'coastal-3' }),
+      [
+        {
+          id: 'swell-1',
+          name: 'Swell',
+          kind: 'spectrum',
+          enabled: true,
+          spectrum: 'jonswap',
+          hs: 1.6,
+          tp: 9,
+          gamma: 3.3,
+          directionDeg: 250,
+          depthLimited: true,
+          spreading: spreading(30, 'cos2s'),
+          seed: 18,
+        },
+      ],
+      [
+        vessel('cargo-1', 'cargo-ship', 'Cargo ship', {
+          // Upwind of the ship (the wind and swell come from 250°); she starts broadside to it
+          // and swings head to wind as the chain comes taut.
+          headingDeg: 300,
+          autopilot: false,
+          mooring: { kind: 'anchor', x: -85, y: -31, scope: 5 },
+        }),
+      ],
+      [gauge(120, 0)],
+    ),
+  },
+  {
     id: 'calm-harbour',
     title: 'Calm harbour ripples',
     summary:

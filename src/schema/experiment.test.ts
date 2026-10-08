@@ -25,6 +25,30 @@ describe('experiment schema', () => {
     expect(off.ok && off.experiment.damage).toBe(false);
   });
 
+  it('older files without a mooring load unmoored; a mooring gets its defaults', () => {
+    const exp = presetExperiment();
+    const old = {
+      ...exp,
+      vessels: exp.vessels.map(({ mooring: _m, ...v }) => v),
+    };
+    const r = parseExperiment(old);
+    expect(r.ok && r.experiment.vessels.every((v) => v.mooring === undefined)).toBe(true);
+    // a share link of such a file decodes unchanged
+    const back = decodeExperiment(encodeExperiment(old as typeof exp));
+    expect(back.ok && back.experiment.vessels[0]!.mooring).toBeUndefined();
+    const moored = parseExperiment({
+      ...old,
+      vessels: [{ ...old.vessels[0], mooring: {} }],
+    });
+    expect(moored.ok && moored.experiment.vessels[0]!.mooring).toEqual({
+      kind: 'anchor',
+      scope: 5,
+    });
+    expect(
+      parseExperiment({ ...old, vessels: [{ ...old.vessels[0], mooring: { scope: 0.5 } }] }).ok,
+    ).toBe(false);
+  });
+
   it('older files without a Jerlov water type load as open-ocean IB', () => {
     const exp = presetExperiment();
     expect(exp.environment.waterType).toBe('oceanic-ib');

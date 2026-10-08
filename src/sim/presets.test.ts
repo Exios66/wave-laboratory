@@ -26,3 +26,21 @@ describe('every preset runs end to end with real vessels', () => {
     });
   }
 });
+
+describe('at-anchor preset', () => {
+  it('starts with the anchor down and answers drop and weigh commands', () => {
+    const sim = new Simulation(presetExperiment('at-anchor'), { createVessel: createSimVessel });
+    sim.step(120);
+    const m = sim.frame().vessels[0]!.mooring;
+    expect(m.deployed).toBe(true);
+    expect(m.lineLength).toBeCloseTo(5 * 28, 6);
+    expect(sim.command('cargo-1', { anchor: 'weigh' })).toBe(true);
+    sim.step(10);
+    expect(sim.frame().vessels[0]!.mooring.deployed).toBe(false);
+    sim.command('cargo-1', { anchor: 'drop', anchorScope: 7 });
+    sim.step(10);
+    const again = sim.frame().vessels[0]!.mooring;
+    expect(again.deployed).toBe(true);
+    expect(again.lineLength).toBeCloseTo(7 * 28, 6);
+  });
+});
