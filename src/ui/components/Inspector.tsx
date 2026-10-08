@@ -1199,6 +1199,8 @@ function VesselFlooding({
   const [bay, setBay] = useState('0');
   const f = tel.flooding;
   const n = f.fill.length;
+  // Clamp a selection left over from a vessel with more compartments.
+  const selected = Math.min(Math.max(0, Number(bay) || 0), Math.max(0, n - 1));
   const pct = Math.round(100 * f.totalFraction * 10) / 10;
   const lostGm = f.gmIntact - f.gmEffective;
   let status = 'Dry.';
@@ -1264,7 +1266,7 @@ function VesselFlooding({
           id="flood-bay"
           className="select"
           style={{ width: 'auto' }}
-          value={bay}
+          value={String(selected)}
           onChange={(e) => setBay(e.target.value)}
         >
           {f.fill.map((_, i) => (
@@ -1273,7 +1275,7 @@ function VesselFlooding({
             </option>
           ))}
         </select>
-        <button type="button" className="btn" onClick={() => onFlood(Number(bay))}>
+        <button type="button" className="btn" disabled={n === 0} onClick={() => onFlood(selected)}>
           <Icon name="warning" size={16} /> Flood compartment
         </button>
         <button
