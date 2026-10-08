@@ -126,6 +126,7 @@ export class GpuOcean {
       uRegularCount: { value: 0 },
       uRegA: { value: regA },
       uRegB: { value: regB },
+      uSunHdr: { value: 1 },
       uSunDir: { value: new THREE.Vector3(0.3, 0.6, 0.2).normalize() },
       uWind: { value: 8 },
       uHs: { value: 1 },

@@ -399,4 +399,40 @@ test.describe('Wave Laboratory app', () => {
     await expect(page.getByRole('textbox', { name: 'Crest height' })).toHaveValue('12.0');
     expect(errors).toEqual([]);
   });
+
+  test('post-processing: bloom, grain and vignette persist and render cleanly', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Settings' });
+    await expect(dialog).toBeVisible();
+    const results = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
+      .analyze();
+    expect(results.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+    await dialog.getByLabel('Bloom').selectOption('on');
+    await dialog.getByRole('switch', { name: 'Film grain' }).click();
+    await dialog.getByRole('switch', { name: 'Vignette' }).click();
+    await expect(dialog.getByRole('switch', { name: 'Film grain' })).toBeChecked();
+    await expect(dialog.getByRole('switch', { name: 'Vignette' })).toBeChecked();
+
+    await page.keyboard.press('Escape');
+    const time = page.locator('.transport__time');
+    const t0 = await simulationSeconds(time);
+    await expect.poll(() => simulationSeconds(time), { timeout: 30_000 }).toBeGreaterThan(t0);
+    await page.screenshot({ path: 'test-results/post-stack.png' });
+    expect(errors).toEqual([]);
+
+    await page.reload();
+    await waitForSimulation(page);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    const again = page.getByRole('dialog', { name: 'Settings' });
+    await expect(again.getByLabel('Bloom')).toHaveValue('on');
+    await expect(again.getByRole('switch', { name: 'Film grain' })).toBeChecked();
+    await expect(again.getByRole('switch', { name: 'Vignette' })).toBeChecked();
+    expect(errors).toEqual([]);
+  });
 });

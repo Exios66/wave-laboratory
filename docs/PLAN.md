@@ -22,6 +22,7 @@ commits the static build into `docs/` on `main`. There is no GitHub Actions work
 | Damage and flooding: watertight compartments, orifice flooding, floodwater weight with free-surface GM loss, foundering  | ✅                     |
 | Instruments: wave gauges, motion recorders, Welch PSD, statistics, MSI, CSV export                                       | ✅                     |
 | Sandbox UI: presets, save/open/share, undo/redo, phone layout, accessibility checks                                      | ✅                     |
+| HDR post stack: bloom on sun glint, ACES applied once, optional grain and vignette (display preferences)                 | ✅                     |
 | Stokes/cnoidal/focused waves, grid (SWE/Boussinesq) solvers, scripting API, L1/L2 radiation                              | ⏳ Later phases        |
 
 **Deviation from §2:** the renderer uses **WebGL 2 through Three.js**, not raw WebGPU. Every

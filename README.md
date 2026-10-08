@@ -34,7 +34,10 @@ oceanographic wave spectra, drop ships into it, and measure how they handle the 
   the CPU physics uses. On each new sea it compares a texel with the CPU transform and logs an
   error if they disagree; the browser tests fail when that error appears.
 - **View:** orbit, top, follow and bridge cameras. Drag to orbit and scroll or pinch to zoom.
-  Overlays colour the surface by elevation, slope, or breaking and foam.
+  Overlays colour the surface by elevation, slope, or breaking and foam. Settings → Post-processing
+  switches on bloom (sun, sun glint on the water, lightning), film grain and a vignette. They draw
+  through an HDR target with ACES tone mapping applied once at the end; bloom is automatic on
+  medium quality and above, but off on phones and software rendering.
 - **Phones:** the 3D view fills the top half in portrait (side by side in landscape). A Scene /
   Inspector / Data switcher shows one panel at a time. The header keeps Presets and a More menu
   for the rest. Touch targets are at least 44 px, except the camera controls drawn on top of the

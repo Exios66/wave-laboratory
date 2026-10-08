@@ -181,6 +181,8 @@ const SKY = /* glsl */ `
 uniform vec3 uSunDir;
 uniform float uCloud;
 uniform float uFlash;
+// HDR boost of the sun disc, the sharp sun glint and lightning (1 = off, no bloom pass).
+uniform float uSunHdr;
 uniform float uSkyTime;
 uniform vec2 uCloudDrift;
 uniform float uCloudOctaves;
@@ -264,13 +266,13 @@ vec3 skyColor(vec3 dir, vec3 sun) {
   float sunDisc = pow(max(dot(normalize(dir), sun), 0.0), 1400.0) * (1.0 - d) * clearSun * sunGate;
   float glow = pow(max(dot(normalize(dir), sun), 0.0), 8.0) * (1.0 - 0.7 * uCloud);
   vec3 glowCol = mix(srgbToLinear(vec3(1.0, 0.85, 0.65)), srgbToLinear(vec3(1.0, 0.55, 0.25)), uDusk);
-  col += srgbToLinear(vec3(1.0, 0.96, 0.88)) * sunDisc * 1.6;
+  col += srgbToLinear(vec3(1.0, 0.96, 0.88)) * sunDisc * 1.6 * uSunHdr;
   col += glowCol * glow * (0.28 + 0.35 * uDusk) * daylight() * (1.0 - uNight * (1.0 - smoothstep(-0.2, 0.0, sun.y)));
   // Cloud: bright tops toward the sun, dark bases when the deck is thick.
   float lit = 0.55 + 0.45 * max(dot(normalize(dir), sun), 0.0);
   vec3 cloudCol = mix(srgbToLinear(vec3(0.95, 0.96, 0.97)), srgbToLinear(vec3(0.30, 0.32, 0.36)), smoothstep(0.35, 1.0, uCloud));
   cloudCol *= lit * daylight();
-  cloudCol += vec3(0.8, 0.85, 1.0) * uFlash * (0.6 + 0.8 * d);
+  cloudCol += vec3(0.8, 0.85, 1.0) * uFlash * (0.6 + 0.8 * d) * (1.0 + 0.5 * (uSunHdr - 1.0));
   col = mix(col, cloudCol, d * 0.92);
   col += vec3(0.6, 0.65, 0.85) * uFlash * 0.25;
   return col;
@@ -638,7 +640,7 @@ void main() {
   float sharp = mix(1400.0, 90.0, clamp(foot / 2.0, 0.0, 1.0));
   float sun = max(dot(normalize(R), uSunDir), 0.0);
   float sunVis = (1.0 - smoothstep(0.5, 0.95, uCloud)) * step(0.0, uSunDir.y);
-  float spec = (pow(sun, 90.0) * 0.3 + pow(sun, sharp) * (sharp / 1400.0 + 0.15)) * sunVis;
+  float spec = (pow(sun, 90.0) * 0.3 + pow(sun, sharp) * (sharp / 1400.0 + 0.15) * uSunHdr) * sunVis;
   vec3 glint = mix(srgbToLinear(vec3(1.0, 0.97, 0.90)), srgbToLinear(vec3(1.0, 0.68, 0.40)), uDusk);
   col += glint * spec * (0.4 + 0.6 * fresnel);
   // Moon glitter path at night.
