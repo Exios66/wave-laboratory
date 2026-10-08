@@ -203,3 +203,38 @@ Wind acts on every vessel at the air velocity relative to the ship, V_a, in the 
   The crew braces the yards between a minimum angle and square to maximise drive, which
   reproduces a square-rigger's inability to point higher than about 60° off the wind. With the
   autopilot on, the crew reefs above 13 m/s apparent wind (about Beaufort 6).
+
+## Damage and flooding (`src/vessel/damage.ts`, `src/vessel/flooding.ts`)
+
+A breach lets sea water into one of 4–7 transverse watertight compartments (one per ~20 m of
+hull; each is the box of the bay's length and height with the breadth that matches the hull's
+mean section area, so a barge is exact). Triggers: a collision costing at least 2 % health
+breaches the compartment nearest the contact point (area 0.1·B·D·damage), a heavy slam (3 % of
+health lost in one slam) the forefoot (0.04·B·D·damage), and the inspector's "Flood compartment"
+order opens a hole of 0.02·B·D. Only collision and slam breaches need the experiment's `damage`
+switch.
+
+- **Flow:** orifice law `Q = C_d A √(2 g |Δh|)`, C_d = 0.6, `Δh = max(η, z_b) − max(ζ, z_b)`,
+  with η the local wave elevation at the breach, ζ the inside free surface and z_b the breach
+  height. Water enters while the sea is higher and drains while it is lower. The volume moved in
+  a step is capped at the volume that equalises the levels, so the inside level rises
+  monotonically to the outside level without overshoot at any time step (tested to Δt = 1/30 s
+  against the analytic Torricelli decay `Δh(t) = (√Δh₀ − k t / 2)²`). Pumps empty a bay in
+  240 s after the crew plugs the holes (`pump` / `repair` commands).
+- **Loads:** the floodwater in each bay is quasi-static with a world-horizontal free surface
+  clipped by the box walls. Its weight `m_f g` acts at the centroid of that clipped volume in the
+  six-degree-of-freedom equations, so end bays trim the ship and the added weight sinks it by
+  `m_f / (ρ A_wp)` (verified against a box barge).
+- **Free surface:** because the centroid is that of the tilted water body, it moves to the low
+  side when the ship heels. For a wall-sided part-filled bay the heeling arm is `(i/V) tan φ` with
+  `i = l b³ / 12`, which is the classical `GM_eff = GM − ρ i / Δ` (Biran & López Pulido 2014,
+  ch. 8), reproduced here to large angles with no correction to GM. The telemetry reports
+  `GM_eff = KB′ + BM′ − KG′ − ρ Σ i / Δ′` with `KB′ = (∇ KB + δ A_wp (T + δ/2)) / ∇′`,
+  `BM′ = BM ∇/∇′`, `KG′ = (Δ KG + Σ m z) / Δ′` and `δ = m_f/(ρ A_wp)`. The simulated roll period
+  of a flooded barge matches `2π √((I + A₄₄) / (Δ′ g GM_eff))` within 1 %.
+- **Foundering:** when the hull is 98 % submerged with water aboard, health goes to 0 (cause
+  "flooding"); the wreck falls at a bluff-body terminal speed and rests on the seabed. Capsize
+  keeps using the existing path.
+- **Simplifications:** full-width bays flood level, so a one-sided hole does not list the ship
+  directly (list appears through lost GM); no sloshing dynamics, no cross-flooding time, 100 %
+  permeability, floodwater adds weight but not inertia, one lumped breach per bay.
