@@ -21,14 +21,15 @@
  *    second.
  *  - Collision: D = E / (½ m V_ref²), E the share of the dissipated impact energy (see
  *    {@link collisionDamage}).
- *  - Capsize ends with health 0.
+ *  - Capsize and foundering (see flooding.ts) end with health 0.
  *
  * Effects: available propulsion (engine power or the canvas the rigging can carry) scales with
  * {@link thrustFactor}; below 25 % health the steering gear weakens ({@link steeringFactor}); at
  * 0 the vessel is disabled — engine and rudder dead, drifting.
  */
 
-export type DamageCause = 'slamming' | 'green-water' | 'weather' | 'heel' | 'collision' | 'capsize';
+export type DamageCause =
+  'slamming' | 'green-water' | 'weather' | 'heel' | 'collision' | 'capsize' | 'flooding';
 
 /** Reference length of the size factor [m]. */
 export const REFERENCE_LENGTH = 100;

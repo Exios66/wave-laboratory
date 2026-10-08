@@ -23,7 +23,8 @@ oceanographic wave spectra, drop ships into it, and measure how they handle the 
   Wind acts on every hull through its frontal and side areas, and the square-rigged pirate ship
   sails on the wind alone, bracing and reefing as the wind changes. The fleet runs from a
   lifeboat to a VLCC oil tanker and a Nimitz-class aircraft carrier. Slamming, green water and
-  capsize are detected. The hull you see is lofted more finely than the physics mesh, with
+  capsize are detected, and a collision or heavy slam can breach a watertight compartment that
+  floods through the hole, costing stability (free surface) and eventually sinking the ship. The hull you see is lofted more finely than the physics mesh, with
   antifouling below the waterline, deck cargo and a foam wake that does not feed back into
   the forces. A loading setting (light ballast to overloaded) sets the displacement, and the
   ship floats at the matching draft.

@@ -45,6 +45,18 @@ function stubVessel(id: string): SimVessel & { steps: number } {
         health: 1,
         disabled: false,
         damageCause: null,
+        flooding: {
+          fill: [],
+          volume: [],
+          breachArea: [],
+          totalVolume: 0,
+          totalFraction: 0,
+          gmIntact: 1,
+          gmEffective: 1,
+          freeSurfaceLoss: 0,
+          pumping: false,
+          foundered: false,
+        },
       };
     },
   };

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { beaufortFromWind, wmoSeaState } from '../../core/units';
 import { wavelengthForPeriod, dispersionFor } from '../../ocean/systems';
 import type {
@@ -962,6 +963,11 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
             )}
           </p>
           <VesselHealth tel={tel} onRepair={() => live({ repair: true })} />
+          <VesselFlooding
+            tel={tel}
+            onFlood={(compartment) => live({ flood: { compartment } })}
+            onPump={(on) => live({ pump: on })}
+          />
         </>
       )}
 
@@ -1171,6 +1177,117 @@ function VesselHealth({ tel, onRepair }: { tel: VesselTelemetry; onRepair: () =>
       <button type="button" className="btn" onClick={onRepair} disabled={tel.health >= 1}>
         <Icon name="wrench" size={16} /> Repair
       </button>
+    </section>
+  );
+}
+
+/** Compartment label from the bow: Bow, 2, 3 … Stern. */
+function bayName(i: number, n: number): string {
+  return i === 0 ? 'Bow' : i === n - 1 ? 'Stern' : `Bay ${i + 1}`;
+}
+
+/** Floodwater in the watertight compartments, the effective GM, and the damage-control orders. */
+function VesselFlooding({
+  tel,
+  onFlood,
+  onPump,
+}: {
+  tel: VesselTelemetry;
+  onFlood: (compartment: number) => void;
+  onPump: (on: boolean) => void;
+}) {
+  const [bay, setBay] = useState('0');
+  const f = tel.flooding;
+  const n = f.fill.length;
+  // Clamp a selection left over from a vessel with more compartments.
+  const selected = Math.min(Math.max(0, Number(bay) || 0), Math.max(0, n - 1));
+  const pct = Math.round(100 * f.totalFraction * 10) / 10;
+  const lostGm = f.gmIntact - f.gmEffective;
+  let status = 'Dry.';
+  if (f.foundered) status = 'Foundered: the ship has sunk.';
+  else if (f.pumping) status = 'Pumps running, holes plugged.';
+  else if (f.totalVolume > 0 || f.breachArea.some((a) => a > 0))
+    status = `${f.breachArea.filter((a) => a > 0).length} breach(es) open.`;
+  return (
+    <section className="health flooding" aria-labelledby="flood-h">
+      <div className="health__head">
+        <h3 id="flood-h" className="health__title">
+          Flooding
+        </h3>
+        <span
+          className={`health__value health__value--${f.totalFraction > 0.25 ? 'danger' : f.totalFraction > 0 ? 'warning' : 'ok'}`}
+          aria-label={`Flooded ${pct} percent`}
+        >
+          {pct} %
+        </span>
+      </div>
+      <ol className="flooding__bays" aria-label="Compartments, bow first">
+        {f.fill.map((fill, i) => (
+          <li
+            key={i}
+            className="flooding__bay"
+            title={`${bayName(i, n)}: ${(100 * fill).toFixed(0)} % flooded, ${f.volume[i]!.toFixed(1)} m³`}
+          >
+            <span className="flooding__water" style={{ height: `${Math.round(100 * fill)}%` }} />
+            <span className="visually-hidden">
+              {bayName(i, n)} {Math.round(100 * fill)} % flooded
+            </span>
+          </li>
+        ))}
+      </ol>
+      <Readout
+        items={[
+          { label: 'Floodwater', value: fmt(f.totalVolume, 0, 'm³') },
+          {
+            label: 'GM now',
+            value: fmt(f.gmEffective, 2, 'm'),
+            title:
+              'Effective metacentric height with the floodwater (added weight and free surface)',
+          },
+          {
+            label: 'GM lost',
+            value: fmt(lostGm, 2, 'm'),
+            title: `Free-surface loss ${f.freeSurfaceLoss.toFixed(2)} m, the rest from the added weight`,
+          },
+        ]}
+      />
+      <p className="health__status" aria-live="polite">
+        {f.foundered && <span className="badge badge--danger">Foundered</span>}
+        {f.gmEffective <= 0 && !f.foundered && (
+          <span className="badge badge--danger">Negative GM</span>
+        )}
+        <span>{status}</span>
+      </p>
+      <div className="toolbar" style={{ flexWrap: 'wrap' }}>
+        <label className="visually-hidden" htmlFor="flood-bay">
+          Compartment to flood
+        </label>
+        <select
+          id="flood-bay"
+          className="select"
+          style={{ width: 'auto' }}
+          value={String(selected)}
+          onChange={(e) => setBay(e.target.value)}
+        >
+          {f.fill.map((_, i) => (
+            <option key={i} value={String(i)}>
+              {bayName(i, n)}
+            </option>
+          ))}
+        </select>
+        <button type="button" className="btn" disabled={n === 0} onClick={() => onFlood(selected)}>
+          <Icon name="warning" size={16} /> Flood compartment
+        </button>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => onPump(!f.pumping)}
+          disabled={f.totalVolume <= 0 && !f.pumping && !f.breachArea.some((a) => a > 0)}
+          aria-pressed={f.pumping}
+        >
+          <Icon name="wrench" size={16} /> Pump out / repair
+        </button>
+      </div>
     </section>
   );
 }

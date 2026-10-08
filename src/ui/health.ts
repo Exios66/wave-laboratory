@@ -10,6 +10,7 @@ export const DAMAGE_CAUSE_LABELS: Record<DamageCause, string> = {
   heel: 'Heavy rolling and heel',
   collision: 'Collision with another vessel',
   capsize: 'Capsized',
+  flooding: 'Foundered after flooding',
 };
 
 /** Health in whole percent (never shows 0 % for a ship that still has some left). */

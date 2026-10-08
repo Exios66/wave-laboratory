@@ -196,8 +196,12 @@ export interface VesselCommand {
   rudderDeg?: number;
   /** Manual throttle −1…1 (used when autopilot is off). */
   throttle?: number;
-  /** Restore health to 1 and bring a disabled vessel back into service. */
+  /** Restore health to 1 and bring a disabled vessel back into service (plugs and pumps out). */
   repair?: boolean;
+  /** Open a breach in a compartment (0 = bow); `area` [m²] defaults to a sizeable hole. */
+  flood?: { compartment: number; area?: number };
+  /** Plug the holes and run the pumps (true), or stop the pumps (false). */
+  pump?: boolean;
 }
 
 export type { DamageCause };
@@ -228,6 +232,28 @@ export interface VesselKinematics {
   velocity: Vec3;
   /** Body-frame angular velocity [rad/s]. */
   angularVelocity: Vec3;
+}
+
+/** State of the watertight compartments (bow first). */
+export interface FloodingTelemetry {
+  /** Water in each compartment as a fraction of its capacity (0–1). */
+  fill: number[];
+  /** Water in each compartment [m³] and the open breach area [m²]. */
+  volume: number[];
+  breachArea: number[];
+  /** Total floodwater [m³] and as a fraction of the total compartment capacity (0–1). */
+  totalVolume: number;
+  totalFraction: number;
+  /** Intact metacentric height at the loaded draft and with the floodwater (free surface and
+   * added weight) [m]. */
+  gmIntact: number;
+  gmEffective: number;
+  /** Free-surface loss of GM, ρ Σ i / Δ [m]. */
+  freeSurfaceLoss: number;
+  /** Pumps are running. */
+  pumping: boolean;
+  /** Fully submerged with water aboard: the ship has sunk. */
+  foundered: boolean;
 }
 
 export interface VesselTelemetry extends VesselKinematics {
@@ -270,4 +296,6 @@ export interface VesselTelemetry extends VesselKinematics {
   disabled: boolean;
   /** Most recent significant cause of damage, cleared ~5 s after it stops; null = none. */
   damageCause: DamageCause | null;
+  /** Flooding of the watertight compartments. */
+  flooding: FloodingTelemetry;
 }

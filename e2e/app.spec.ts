@@ -357,6 +357,29 @@ test.describe('Wave Laboratory app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('floods a compartment from the inspector and pumps it out again', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    await page
+      .getByRole('navigation', { name: 'Scene' })
+      .getByRole('button', { name: /\d+ kn/ })
+      .first()
+      .click();
+    await expect(page.getByRole('heading', { name: 'Flooding' })).toBeVisible();
+    const flooded = page.getByLabel(/^Flooded [\d.]+ percent$/);
+    const percent = async () =>
+      Number(/([\d.]+)/.exec((await flooded.getAttribute('aria-label'))!)![1]);
+    expect(await percent()).toBe(0);
+    await page.getByRole('button', { name: 'Flood compartment' }).click();
+    await expect.poll(percent, { timeout: 20_000 }).toBeGreaterThan(0);
+    // The effective GM drops below the intact value as the water comes aboard.
+    await expect(page.getByText('GM lost')).toBeVisible();
+    await page.getByRole('button', { name: 'Pump out / repair' }).click();
+    await expect(page.getByText('Pumps running, holes plugged.')).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
   test('rogue-wave preset loads without a model-validity error', async ({ page }) => {
     const errors = trackErrors(page);
     await page.goto('/');

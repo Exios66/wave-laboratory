@@ -26,6 +26,7 @@ import type {
   HullFootprint,
   VesselCommand,
   VesselDefinition,
+  FloodingTelemetry,
   VesselKinematics,
   VesselTelemetry,
 } from './api';
@@ -37,10 +38,23 @@ import {
 } from './coefficients';
 import { Autopilot, rateLimit } from './control';
 import { DamageModel, steeringFactor, thrustFactor, type DamageCause } from './damage';
+import {
+  buildCompartments,
+  COLLISION_BREACH_MIN,
+  COLLISION_BREACH_PER_DAMAGE,
+  effectiveGm,
+  FloodingState,
+  FOUNDER_FRACTION,
+  MANUAL_BREACH_FRACTION,
+  SLAM_BREACH_MIN,
+  SLAM_BREACH_PER_DAMAGE,
+  type FloodingStepInputs,
+  type FloodLoads,
+} from './flooding';
 import { HullForces, type RigidState } from './hullForces';
 import { buildHydroModel, CROSS_FLOW_CD, type HydroModel } from './hydroModel';
 import { quatToMat3, solveFloating } from './hydrostatics';
-import { meshBounds } from './mesh';
+import { meshBounds, meshVolume } from './mesh';
 import { LocalWater, type Footprint } from './waterPatch';
 import { emptyLoad, reefedSet, sailLoad, windageLoad } from './windLoads';
 
@@ -57,6 +71,8 @@ const FLOW_STRAIGHTENING = 0.5;
 /** Rudder section zero-lift drag and span efficiency. */
 const RUDDER_CD0 = 0.013;
 const RUDDER_SPAN_EFFICIENCY = 0.9;
+/** Drag coefficient of a sinking hull falling flat on its waterplane area. */
+const SINK_DRAG_CD = 1.1;
 
 export interface VesselOptions {
   /** Max columns of the local water patch. */
@@ -65,6 +81,8 @@ export interface VesselOptions {
   wind?: WindProvider;
   /** Accumulate structural damage (default true). Off: health stays 1. */
   damage?: boolean;
+  /** Number of watertight compartments (default: one per ~20 m of length, 4–7). */
+  compartments?: number;
 }
 
 export interface VesselDiagnostics {
@@ -106,6 +124,16 @@ export class Vessel {
   private readonly autopilot = new Autopilot();
   /** Structural health (see `damage.ts`). */
   readonly damage: DamageModel;
+  /** Watertight compartments and the water in them (see `flooding.ts`). */
+  readonly flooding: FloodingState;
+  private readonly floodLoads: FloodLoads = { fx: 0, fy: 0, fz: 0, mx: 0, my: 0, mz: 0 };
+  private readonly floodInputs: FloodingStepInputs;
+  /** Closed hull volume up to the deck [m³] and the still-water depth [m]. */
+  private readonly hullVolume: number;
+  private readonly seaDepth: number;
+  /** Health lost to the slam in progress (a breach opens past a threshold). */
+  private slamAccum = 0;
+  private foundered = false;
   private readonly s: RigidState;
   private q: Quat;
   private readonly gen = new Float64Array(6);
@@ -169,6 +197,9 @@ export class Vessel {
     const g = field.env.gravity;
     const hydro = buildHydroModel(definition, rho, g);
     this.hydro = hydro;
+    this.flooding = new FloodingState(buildCompartments(definition, options.compartments), rho, g);
+    this.hullVolume = meshVolume(definition.physicsHull).volume;
+    this.seaDepth = field.env.depth;
     // Calm-water resistance parameters (the wetted area is the design value; the actual
     // instantaneous wetted area scales the force in `evaluate`).
     this.resistance = {
@@ -202,6 +233,20 @@ export class Vessel {
       options.patchColumns ?? 280,
       Math.max(0.25, 0.012 * L),
     );
+    this.floodInputs = {
+      nx: 0,
+      ny: 0,
+      nz: 1,
+      originZ: 0,
+      outsideLevel: (_i, bx, by, bz) => {
+        const st = this.s;
+        const R = st.rot;
+        return this.water.surface(
+          st.px + R[0]! * bx + R[1]! * by + R[2]! * bz,
+          st.py + R[3]! * bx + R[4]! * by + R[5]! * bz,
+        );
+      },
+    };
 
     const slamMask = new Uint8Array(def.physicsHull.indices.length / 3);
     const pos = def.physicsHull.positions;
@@ -335,7 +380,36 @@ export class Vessel {
       this.autopilotOn = cmd.autopilot;
       this.autopilot.reset();
     }
-    if (cmd.repair) this.damage.repair();
+    if (cmd.repair) {
+      this.damage.repair();
+      // Damage control: plug the holes and pump the ship out.
+      this.foundered = false;
+      this.flooding.pumping = this.flooding.hasWater;
+      this.flooding.seal();
+    }
+    if (cmd.flood) {
+      const i = Math.round(cmd.flood.compartment);
+      const d = this.definition;
+      this.breachCompartment(i, cmd.flood.area ?? MANUAL_BREACH_FRACTION * d.beam * d.depth, 1);
+      this.flooding.pumping = false;
+    }
+    if (cmd.pump !== undefined) {
+      this.flooding.pumping = cmd.pump;
+      if (cmd.pump) this.flooding.seal();
+    }
+  }
+
+  /**
+   * Open a breach of `area` m² in compartment `i` on the side `side` (±1, 0 = bottom) at the
+   * waterline (side) or just above the floor (bottom).
+   */
+  private breachCompartment(i: number, area: number, side: number): void {
+    const c = this.flooding.compartments[i];
+    if (!c) return;
+    const d = this.definition;
+    const z =
+      side === 0 ? c.zFloor + 0.1 * d.draft : Math.max(c.zFloor, d.draft - d.kg - 0.5 * d.draft);
+    this.flooding.breach(i, area, side * c.halfBeam, z);
   }
 
   /**
@@ -356,8 +430,23 @@ export class Vessel {
   }
 
   /** Remove `amount` of health (no-op when damage is off). */
-  applyDamage(amount: number, cause: DamageCause): void {
+  applyDamage(amount: number, cause: DamageCause, at?: { x: number; y: number }): void {
     this.damage.damage(amount, cause);
+    // A hard collision holes the compartment nearest the impact, on the side that was hit.
+    if (cause === 'collision' && this.damage.enabled && amount >= COLLISION_BREACH_MIN && at) {
+      const s = this.s;
+      const R = s.rot;
+      const dx = at.x - s.px;
+      const dy = at.y - s.py;
+      const bx = R[0]! * dx + R[3]! * dy;
+      const by = R[1]! * dx + R[4]! * dy;
+      const d = this.definition;
+      this.breachCompartment(
+        this.flooding.compartmentAt(bx),
+        COLLISION_BREACH_PER_DAMAGE * d.beam * d.depth * amount,
+        by >= 0 ? 1 : -1,
+      );
+    }
   }
 
   /** Horizontal hull footprint and momentum data for collision tests (world frame). */
@@ -523,6 +612,7 @@ export class Vessel {
     this.stepped = true;
 
     // ---- structural damage from this step's seaway and weather
+    const healthBefore = this.damage.health;
     this.damage.step({
       dt,
       slamming: slam,
@@ -532,6 +622,63 @@ export class Vessel {
       heelDeg: this.heelDeg,
       capsized: this.capsized,
     });
+
+    // ---- flooding: water through the breaches, slam breaches, foundering, the seabed
+    this.stepFlooding(dt, slam, healthBefore - this.damage.health);
+  }
+
+  private stepFlooding(dt: number, slam: boolean, healthLost: number): void {
+    const fl = this.flooding;
+    const R = this.s.rot;
+    const d = this.definition;
+    // A heavy slam punches a hole in the forefoot (the bow compartment's bottom).
+    if (slam && this.damage.enabled) {
+      if (this.damage.cause === 'slamming' && healthLost > 0) {
+        this.slamAccum += healthLost;
+        if (this.slamAccum >= SLAM_BREACH_MIN)
+          this.breachCompartment(0, SLAM_BREACH_PER_DAMAGE * d.beam * d.depth * healthLost, 0);
+      }
+    } else if (!slam) {
+      this.slamAccum = 0;
+    }
+    if (fl.breached || fl.pumping) {
+      const inp = this.floodInputs;
+      inp.nx = R[6]!;
+      inp.ny = R[7]!;
+      inp.nz = R[8]!;
+      inp.originZ = this.s.pz;
+      fl.step(dt, inp);
+    }
+    // Fully under with water aboard: foundered (health 0 through the usual path).
+    if (!this.foundered && fl.hasWater && this.hull.volume >= FOUNDER_FRACTION * this.hullVolume) {
+      this.foundered = true;
+      this.damage.damage(this.damage.health, 'flooding');
+    }
+    if (this.foundered) this.settleOnSeabed();
+  }
+
+  /** A sunken ship comes to rest on the bottom (bounded sinking in shallow water). */
+  private settleOnSeabed(): void {
+    const s = this.s;
+    const R = s.rot;
+    const b = this.bodyBox;
+    let low = Infinity;
+    for (let k = 0; k < 8; k++) {
+      const x = k & 1 ? b.max.x : b.min.x;
+      const y = k & 2 ? b.max.y : b.min.y;
+      const z = k & 4 ? b.max.z : b.min.z;
+      low = Math.min(low, s.pz + R[6]! * x + R[7]! * y + R[8]! * z);
+    }
+    const bottom = -this.seaDepth;
+    if (low >= bottom) return;
+    s.pz += bottom - low;
+    // Remove the downward velocity into the bottom and spin down.
+    const vz = R[6]! * s.u + R[7]! * s.v + R[8]! * s.w;
+    if (vz < 0) {
+      s.u -= vz * R[6]!;
+      s.v -= vz * R[7]!;
+      s.w -= vz * R[8]!;
+    }
   }
 
   /** Heel beyond the angle of vanishing stability or inverted. */
@@ -726,6 +873,22 @@ export class Vessel {
     fy -= mg * R[7]!;
     fz -= mg * R[8]!;
 
+    // 9b. Weight of the floodwater, acting at the centroid of the (levelled) water in each
+    // compartment.
+    if (this.flooding.hasWater) {
+      const fw = this.flooding.loads(R[6]!, R[7]!, R[8]!, this.floodLoads);
+      fx += fw.fx;
+      fy += fw.fy;
+      fz += fw.fz;
+      mx += fw.mx;
+      my += fw.my;
+      mz += fw.mz;
+    }
+
+    // 9c. A sunken hull falls at a terminal speed set by its plan area (bluff-body drag).
+    if (this.foundered)
+      fz -= 0.5 * rho * SINK_DRAG_CD * def.hydrostatics.waterplaneArea * s.w * Math.abs(s.w);
+
     // 10. Coriolis/centripetal (translational, rigid + added mass) and gyroscopic terms.
     const A = hy.addedMass;
     const ax = (hy.mass + A[0]!) * s.u;
@@ -801,6 +964,40 @@ export class Vessel {
       health: this.damage.health,
       disabled: this.damage.disabled,
       damageCause: this.damage.cause,
+      flooding: this.floodingTelemetry(),
+    };
+  }
+
+  private floodingTelemetry(): FloodingTelemetry {
+    const fl = this.flooding;
+    const d = this.definition;
+    const h = d.hydrostatics;
+    const total = fl.totalVolume;
+    const gm = effectiveGm(
+      {
+        mass: d.mass,
+        rho: this.hydro.rho,
+        draft: d.draft,
+        waterplaneArea: h.waterplaneArea,
+        kb: h.kb,
+        bm: h.bm,
+        kg: d.kg,
+      },
+      fl.totalMass,
+      fl.weightMoment(d.kg),
+      fl.freeSurfaceMoment(),
+    );
+    return {
+      fill: Array.from(fl.volume, (v, i) => v / fl.compartments[i]!.capacity),
+      volume: Array.from(fl.volume),
+      breachArea: Array.from(fl.breachArea),
+      totalVolume: total,
+      totalFraction: total / fl.capacity,
+      gmIntact: d.gm,
+      gmEffective: gm.gm,
+      freeSurfaceLoss: gm.freeSurface,
+      pumping: fl.pumping,
+      foundered: this.foundered,
     };
   }
 
