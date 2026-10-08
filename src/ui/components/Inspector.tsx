@@ -1201,16 +1201,19 @@ function VesselFlooding({
   onFlood: (compartment: number) => void;
   onPump: (on: boolean) => void;
 }) {
-  const [bay, setBay] = useState('0');
+  const [bay, setBay] = useState(0);
   const f = tel.flooding;
   const n = f.fill.length;
+  const selectedBay = Math.max(0, Math.min(bay, n - 1));
+  if (bay !== selectedBay) setBay(selectedBay);
   const pct = Math.round(100 * f.totalFraction * 10) / 10;
   const lostGm = f.gmIntact - f.gmEffective;
   let status = 'Dry.';
   if (f.foundered) status = 'Foundered: the ship has sunk.';
   else if (f.pumping) status = 'Pumps running, holes plugged.';
-  else if (f.totalVolume > 0 || f.breachArea.some((a) => a > 0))
+  else if (f.breachArea.some((a) => a > 0))
     status = `${f.breachArea.filter((a) => a > 0).length} breach(es) open.`;
+  else if (f.totalVolume > 0) status = 'Holes plugged, water remains aboard.';
   return (
     <section className="health flooding" aria-labelledby="flood-h">
       <div className="health__head">
@@ -1269,8 +1272,8 @@ function VesselFlooding({
           id="flood-bay"
           className="select"
           style={{ width: 'auto' }}
-          value={bay}
-          onChange={(e) => setBay(e.target.value)}
+          value={selectedBay}
+          onChange={(e) => setBay(Number(e.target.value))}
         >
           {f.fill.map((_, i) => (
             <option key={i} value={String(i)}>
@@ -1278,7 +1281,7 @@ function VesselFlooding({
             </option>
           ))}
         </select>
-        <button type="button" className="btn" onClick={() => onFlood(Number(bay))}>
+        <button type="button" className="btn" onClick={() => onFlood(selectedBay)}>
           <Icon name="warning" size={16} /> Flood compartment
         </button>
         <button

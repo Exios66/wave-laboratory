@@ -705,7 +705,8 @@ export class Vessel {
       fl.step(dt, inp);
     }
     // Fully under with water aboard: foundered (health 0 through the usual path).
-    if (!this.foundered && fl.hasWater && this.hull.volume >= FOUNDER_FRACTION * this.hullVolume) {
+    if (!fl.hasWater) this.foundered = false;
+    else if (!this.foundered && this.hull.volume >= FOUNDER_FRACTION * this.hullVolume) {
       this.foundered = true;
       this.damage.damage(this.damage.health, 'flooding');
     }

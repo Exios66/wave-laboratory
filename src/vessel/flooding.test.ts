@@ -343,6 +343,14 @@ describe('foundering', () => {
     expect(t.health).toBe(0);
     expect(t.damageCause === 'flooding' || t.disabled).toBe(true);
     expect(maxSpeed).toBeLessThan(30);
+
+    v.command({ pump: true });
+    run(v, 1, undefined, 240);
+    expect(v.flooding.hasWater).toBe(true);
+    expect(v.telemetry().flooding.foundered).toBe(true);
+    run(v, 240, undefined, 241);
+    expect(v.flooding.hasWater).toBe(false);
+    expect(v.telemetry().flooding.foundered).toBe(false);
   });
 });
 

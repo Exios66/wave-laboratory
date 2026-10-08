@@ -374,9 +374,55 @@ test.describe('Wave Laboratory app', () => {
     await page.getByRole('button', { name: 'Flood compartment' }).click();
     await expect.poll(percent, { timeout: 20_000 }).toBeGreaterThan(0);
     // The effective GM drops below the intact value as the water comes aboard.
-    await expect(page.getByText('GM lost')).toBeVisible();
+    const gmLost = page.locator('.flooding dt', { hasText: 'GM lost' }).locator('xpath=../dd');
+    await expect
+      .poll(async () => Number.parseFloat((await gmLost.textContent())!))
+      .toBeGreaterThan(0);
+    await page.getByRole('button', { name: 'Pause', exact: true }).click();
     await page.getByRole('button', { name: 'Pump out / repair' }).click();
+    await page.getByRole('button', { name: 'Step 0.1 seconds' }).click();
     await expect(page.getByText('Pumps running, holes plugged.')).toBeVisible();
+    await page.getByRole('button', { name: 'Pump out / repair' }).click();
+    await page.getByRole('button', { name: 'Step 0.1 seconds' }).click();
+    await expect(page.getByText('Holes plugged, water remains aboard.')).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test('keeps the flooding compartment valid across hull changes', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    await page
+      .getByRole('navigation', { name: 'Scene' })
+      .getByRole('button', { name: /\d+ kn/ })
+      .first()
+      .click();
+    const hull = page.getByRole('combobox', { name: 'Hull type' });
+    const bay = page.getByRole('combobox', { name: 'Compartment to flood' });
+    await hull.selectOption('cargo-ship');
+    await expect(bay.locator('option')).toHaveCount(6);
+    await bay.selectOption('5');
+    await hull.selectOption('patrol-boat');
+    await expect(bay.locator('option')).toHaveCount(4);
+    await expect(bay).toHaveValue('3');
+    await page.getByRole('button', { name: 'Flood compartment' }).click();
+    await expect(page.getByText('1 breach(es) open.', { exact: true })).toBeVisible();
+    await expect
+      .poll(
+        async () => {
+          const title = (await page.locator('.flooding__bay').last().getAttribute('title'))!;
+          return Number(/(\d+) % flooded/.exec(title)![1]);
+        },
+        { timeout: 20_000 },
+      )
+      .toBeGreaterThan(0);
+    await hull.selectOption('cargo-ship');
+    await expect(bay.locator('option')).toHaveCount(6);
+    await expect(bay).toHaveValue('3');
+    await bay.selectOption('1');
+    await hull.selectOption('patrol-boat');
+    await expect(bay.locator('option')).toHaveCount(4);
+    await expect(bay).toHaveValue('1');
     expect(errors).toEqual([]);
   });
 

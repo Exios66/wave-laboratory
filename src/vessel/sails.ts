@@ -44,6 +44,7 @@ export interface SailAero {
 
 /** Aerodynamic constants of a sail of the given kind and aspect ratio. */
 export function sailAero(kind: ForeAftSail['kind'], aspect: number): SailAero {
+  if (!(aspect > 0)) throw new RangeError('Sail aspect ratio must be positive');
   return kind === 'main'
     ? { slope: helmboldSlope(aspect), alpha0: 3 * DEG, stall: 17 * DEG, cd0: 0.035, aspect }
     : { slope: helmboldSlope(aspect), alpha0: 2.5 * DEG, stall: 19 * DEG, cd0: 0.03, aspect };
