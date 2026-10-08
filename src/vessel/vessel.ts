@@ -187,6 +187,12 @@ export class Vessel {
   private time = 0;
   private stepped = false;
 
+  /**
+   * Initialize at the configured position, heading, and speed, with calm-water floating trim.
+   * Starts dry and deploys the configured mooring only when available at the field's depth.
+   * Errors from the wind provider propagate when initializing sails under autopilot.
+   * @throws {RangeError} If the effective mass matrix is singular during hydrodynamic setup.
+   */
   constructor(
     id: string,
     definition: VesselDefinition,
@@ -387,6 +393,12 @@ export class Vessel {
 
   // ------------------------------------------------------------------ commands
 
+  /**
+   * Apply control orders. Repair restores health, seals breaches, clears foundering, and starts
+   * pumping existing water; flooding orders stop pumps, while starting pumps seals breaches.
+   * If combined, repair, flood, and pump orders take effect in that order. Dropping an already
+   * deployed anchor adjusts its line length when a length or scope is supplied.
+   */
   command(cmd: VesselCommand): void {
     if (cmd.headingDeg !== undefined) this.headingCmdDeg = cmd.headingDeg;
     if (cmd.speedKn !== undefined) this.speedCmdKn = cmd.speedKn;
@@ -438,6 +450,7 @@ export class Vessel {
     };
   }
 
+  /** Requested line length [m], or scope times depth, raised to 1.05 depths then capped by gear. */
   private lineLength(scope: number, length?: number): number {
     const m = this.mooring;
     return length === undefined
@@ -452,8 +465,10 @@ export class Vessel {
   }
 
   /**
-   * Open a breach of `area` m² in compartment `i` on the side `side` (±1, 0 = bottom) at the
-   * waterline (side) or just above the floor (bottom).
+   * Open a breach of `area` m² in compartment `i`: `side` is +1 for port, −1 for starboard,
+   * or 0 for the bottom. Side breaches sit half a design draft below the design waterline;
+   * bottom breaches sit 0.1 draft above the floor. Positions are clamped to the compartment.
+   * Missing compartments are ignored.
    */
   private breachCompartment(i: number, area: number, side: number): void {
     const c = this.flooding.compartments[i];
@@ -481,7 +496,11 @@ export class Vessel {
     s.py += push.y;
   }
 
-  /** Remove `amount` of health (no-op when damage is off). */
+  /**
+   * Remove `amount` of health (no-op when damage is off). Collisions of at least
+   * `COLLISION_BREACH_MIN` also breach the compartment and side nearest `at`, when supplied.
+   * `at` is the horizontal contact position in world coordinates [m].
+   */
   applyDamage(amount: number, cause: DamageCause, at?: { x: number; y: number }): void {
     this.damage.damage(amount, cause);
     // A hard collision holes the compartment nearest the impact, on the side that was hit.
@@ -534,7 +553,12 @@ export class Vessel {
 
   // ------------------------------------------------------------------ stepping
 
-  /** Advance the vessel from time t to t + dt. */
+  /**
+   * Advance motion, controls, damage, flooding, and mooring from `t` to `t + dt` [s].
+   * Does nothing unless `dt` is positive.
+   * Errors from the wind provider propagate.
+   * @throws {RangeError} If water-patch sampling detects non-finite vessel bounds.
+   */
   step(dt: number, t: number): void {
     if (!(dt > 0)) return;
     const def = this.definition;
@@ -682,6 +706,10 @@ export class Vessel {
     this.stepFlooding(dt, slam, healthBefore - this.damage.health);
   }
 
+  /**
+   * Advance flooding and foundering over `dt` [s]; `healthLost` is this step's health decrease.
+   * Accumulates slamming damage for bow breaches and constrains foundered hulls to the seabed.
+   */
   private stepFlooding(dt: number, slam: boolean, healthLost: number): void {
     const fl = this.flooding;
     const R = this.s.rot;
@@ -712,7 +740,7 @@ export class Vessel {
     if (this.foundered) this.settleOnSeabed();
   }
 
-  /** A sunken ship comes to rest on the bottom (bounded sinking in shallow water). */
+  /** Lift a hull penetrating the seabed until its bounds clear it and remove downward velocity. */
   private settleOnSeabed(): void {
     const s = this.s;
     const R = s.rot;
@@ -1013,6 +1041,7 @@ export class Vessel {
     return Math.acos(Math.max(-1, Math.min(1, this.s.rot[8]!))) / DEG;
   }
 
+  /** Snapshot motion, control, damage, flooding, and mooring readings for the UI and recorder. */
   telemetry(): VesselTelemetry {
     const k = this.kinematics;
     const e = quatToEuler(this.q);
@@ -1047,6 +1076,7 @@ export class Vessel {
     };
   }
 
+  /** Snapshot line readings and profile; unlimited holding is reported as zero limit and load. */
   private mooringTelemetry(): MooringTelemetry {
     const m = this.mooring;
     const sol = m.solution;
@@ -1075,6 +1105,7 @@ export class Vessel {
     };
   }
 
+  /** Copy compartment readings and estimate upright effective GM including free-surface loss. */
   private floodingTelemetry(): FloodingTelemetry {
     const fl = this.flooding;
     const d = this.definition;

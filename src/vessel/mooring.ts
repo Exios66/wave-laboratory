@@ -57,6 +57,8 @@ export interface MooringGear {
 /**
  * Ground tackle scaled with the ship: chain diameter ≈ 5.5 (Δ/t)^¼ mm (30 mm at 1000 t, 130 mm
  * for a VLCC), as in the classification societies' equipment tables to within their spread.
+ * `rho` is water density [kg/m³] and `g` is gravity [m/s²]. With `buoy`, the line weighs a
+ * quarter as much and has unlimited holding capacity.
  */
 export function mooringGear(
   displacementKg: number,
@@ -96,6 +98,7 @@ export interface CatenarySolution {
   iterations: number;
 }
 
+/** Create a slack solution with zero tensions, lengths, and iteration count. */
 export function emptySolution(): CatenarySolution {
   return {
     regime: 'slack',
@@ -148,6 +151,7 @@ function reach(H: number, V: number, L: number, w: number, ea: number): number {
   return (H / w) * (Math.asinh(V / H) - Math.asinh((V - wL) / H)) + (H * L) / ea;
 }
 
+/** Overwrite line geometry and tensions with a straight elastic bar; retain the iteration count. */
 function setTaut(out: CatenarySolution, X: number, h: number, L: number, ea: number): void {
   const D = Math.hypot(X, h);
   const T = (ea * Math.max(0, D - L)) / L;
@@ -161,8 +165,12 @@ function setTaut(out: CatenarySolution, X: number, h: number, L: number, ea: num
 }
 
 /**
- * Solve the elastic catenary for fairlead offset (X, h), line length L, weight w and stiffness
- * EA. Always returns finite numbers; zero horizontal tension for a slack line.
+ * Solve the elastic catenary for horizontal offset `X`, height `h` above the anchor, and
+ * unstretched length `L` [m], submerged weight `w` [N/m], and axial stiffness `ea` [N].
+ * Inputs are lower-bounded at 0, 0.001, 0.001, 1e-9, and 1 respectively.
+ * Overwrites and returns `out` (new by default); slack lines have zero horizontal tension.
+ * Uses a straight elastic bar for short lines or numerical fallback. Non-finite inputs
+ * are not validated and may produce non-finite results.
  */
 export function solveCatenary(
   X: number,
@@ -254,7 +262,8 @@ export function solveCatenary(
 /**
  * Sample the line from the anchor to the fairlead as flat [d₀, z₀, d₁, z₁, …]: d the horizontal
  * distance from the anchor and z the height above the anchor level, `n` points on the hanging
- * part (the bottom part is a straight segment).
+ * part (the bottom part is a straight segment). Distances and heights are in meters.
+ * Taut and slack lines use two and three points respectively, regardless of `n`.
  */
 export function catenaryProfile(
   sol: CatenarySolution,
@@ -325,6 +334,7 @@ export class Mooring {
   private readonly depth: number;
   private readonly probe = emptySolution();
 
+  /** Create a stowed line for water depth [m], anchored on the seabed or tied to a surface buoy. */
   constructor(gear: MooringGear, depth: number, kind: 'anchor' | 'buoy' = 'anchor') {
     this.gear = gear;
     this.depth = depth;
@@ -336,11 +346,15 @@ export class Mooring {
     return Math.min(this.gear.capacity, Math.max(1.05 * this.depth, scope * this.depth));
   }
 
-  /** The water is shallow enough that the chain reaches the bottom. */
+  /** Buoys are always available; anchors need capacity of at least 1.1 times the water depth. */
   get available(): boolean {
     return this.kind === 'buoy' || this.gear.capacity >= 1.1 * this.depth;
   }
 
+  /**
+   * Deploy at world (x, y) [m] with the given unstretched length [m], clearing tension and drag.
+   * The caller must check availability and limit the length to the gear's capacity.
+   */
   deploy(x: number, y: number, length: number): void {
     this.anchorX = x;
     this.anchorY = y;
@@ -354,6 +368,7 @@ export class Mooring {
     this.solution.T = 0;
   }
 
+  /** Stow the line and clear tension and dragging; retain its length and anchor position. */
   weigh(): void {
     this.deployed = false;
     this.dragging = false;
@@ -363,7 +378,12 @@ export class Mooring {
     s.T = 0;
   }
 
-  /** Solve the line for a fairlead at (x, y, z) and write the force on the vessel to `out`. */
+  /**
+   * Solve for a fairlead at world (x, y, z) [m] and overwrite and return `out` with force [N].
+   * World horizontal velocity (vx, vy) [m/s] supplies line damping when `mass` is positive.
+   * Stores the fairlead geometry and static solution for `step` and `profile`.
+   * A stowed line returns zero force without updating that stored state.
+   */
   force(x: number, y: number, z: number, out: MooringForce, vx = 0, vy = 0): MooringForce {
     out.fx = 0;
     out.fy = 0;
@@ -398,7 +418,10 @@ export class Mooring {
     return out;
   }
 
-  /** Let the anchor drag toward the vessel while the horizontal pull exceeds its holding. */
+  /**
+   * Advance anchor drag by `dt` [s] using the last force solution when pull exceeds holding.
+   * Stops at the stored fairlead position; stowed lines are unchanged.
+   */
   step(dt: number): void {
     if (!this.deployed) return;
     const over = this.solution.H / this.gear.holding - 1;

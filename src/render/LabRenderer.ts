@@ -856,6 +856,7 @@ export class LabRenderer implements LabRendererApi {
     if (seen.size > 256) seen.clear();
   }
 
+  /** Replace vessel and chain views, dispose their resources, clear wakes, and refresh selection. */
   setVessels(vessels: readonly { id: string; definition: VesselDefinition }[]): void {
     for (const layer of this.layers) layer.setVessels?.([]);
     for (const view of this.vessels.values()) this.disposeVessel(view);
@@ -957,6 +958,11 @@ export class LabRenderer implements LabRendererApi {
     }
   }
 
+  /**
+   * Interpolate the hull from `before` to `state` using `blend` (0–1), or use `state` directly
+   * without a previous frame. Update sails and align the chain with the drawn bow.
+   * Unknown vessel IDs are ignored.
+   */
   private applyVessel(
     state: SimFrame['vessels'][number],
     before: SimFrame['vessels'][number] | undefined,
@@ -1296,6 +1302,7 @@ export class LabRenderer implements LabRendererApi {
     this.renderer.dispose();
   }
 
+  /** Build a vessel view and separate chain view, with resources owned until `disposeVessel`. */
   private buildVessel(id: string, definition: VesselDefinition): VesselView {
     const group = new THREE.Group();
     group.userData.pickKind = 'vessel';
@@ -1503,6 +1510,7 @@ export class LabRenderer implements LabRendererApi {
     });
   }
 
+  /** Remove hull and chain groups from the scene and release their geometry, materials, and textures. */
   private disposeVessel(view: VesselView): void {
     this.scene.remove(view.group, view.chain.group);
     view.chain.dispose();

@@ -37,6 +37,7 @@ export interface SimVessel {
   /** Collision support (vessels without it pass through each other). */
   hullFootprint?(): HullFootprint;
   applyCollision?(impulse: { x: number; y: number }, push: { x: number; y: number }): void;
+  /** Receive health loss and its cause, optionally at a world horizontal contact position [m]. */
   applyDamage?(amount: number, cause: DamageCause, at?: { x: number; y: number }): void;
 }
 

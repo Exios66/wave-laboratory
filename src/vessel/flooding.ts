@@ -221,7 +221,10 @@ function planeRange(c: Compartment, nx: number, ny: number, nz: number): [number
   return [mid - sx - sy - sz, mid + sx + sy + sz];
 }
 
-/** Volume of compartment `c` below the horizontal plane at body-frame constant `cc` [m³]. */
+/**
+ * Volume [m³] below n·p = cc in the body frame; n = (nx, ny, nz) is the world up unit vector.
+ * For this unit normal, `cc` is the water surface height relative to the body origin [m].
+ */
 export function volumeBelowPlane(
   c: Compartment,
   nx: number,
@@ -232,7 +235,11 @@ export function volumeBelowPlane(
   return cutBelowPlane(c, nx, ny, nz, cc).volume;
 }
 
-/** Plane constant c at which exactly `volume` lies below the plane n·p = c (bisection). */
+/**
+ * Approximate plane constant [m] enclosing `volume` [m³] below n·p = c, with the world up unit
+ * vector n = (nx, ny, nz) in the body frame. Volumes outside [0, capacity] approach the
+ * compartment's lowest or highest plane constant.
+ */
 export function planeForVolume(
   c: Compartment,
   nx: number,
@@ -288,6 +295,7 @@ export class FloodingState {
   readonly g: number;
   readonly capacity: number;
 
+  /** Start with dry, sealed compartments, water density `rho` [kg/m³], and gravity `g` [m/s²]. */
   constructor(compartments: readonly Compartment[], rho: number, g: number) {
     this.compartments = compartments;
     this.rho = rho;
@@ -300,21 +308,25 @@ export class FloodingState {
     this.capacity = compartments.reduce((s, c) => s + c.capacity, 0);
   }
 
+  /** Total floodwater volume [m³]. */
   get totalVolume(): number {
     let s = 0;
     for (const v of this.volume) s += v;
     return s;
   }
 
+  /** Total floodwater mass [kg]. */
   get totalMass(): number {
     return this.rho * this.totalVolume;
   }
 
+  /** Whether any compartment contains a positive water volume. */
   get hasWater(): boolean {
     for (const v of this.volume) if (v > 0) return true;
     return false;
   }
 
+  /** Whether any compartment has an open breach of positive area. */
   get breached(): boolean {
     for (const a of this.breachArea) if (a > 0) return true;
     return false;
@@ -330,7 +342,8 @@ export class FloodingState {
   /**
    * Open (or enlarge) a breach of `area` m² in compartment `i`, at body-frame height `z` and
    * lateral position `y` (clamped to the compartment). Several breaches merge into one orifice
-   * of the summed area at their area-weighted position.
+   * of the summed area at their area-weighted position, capped at the compartment's side area.
+   * Missing compartments and areas that are not positive are ignored.
    */
   breach(i: number, area: number, y: number, z: number): void {
     const c = this.compartments[i];
@@ -357,13 +370,20 @@ export class FloodingState {
     this.pumping = false;
   }
 
-  /** Set the water in compartment `i` directly (tests, scripted starts). */
+  /**
+   * Set water volume [m³] for tests or scripted starts, clamped to [0, capacity].
+   * Missing compartments are ignored.
+   */
   fill(i: number, volume: number): void {
     const c = this.compartments[i];
     if (c) this.volume[i] = Math.max(0, Math.min(c.capacity, volume));
   }
 
-  /** Advance the water volumes by `dt` seconds (see the module header). */
+  /**
+   * Advance water volumes by a nonnegative `dt` [s] using the outside levels (see module header).
+   * Pumping seals all breaches, drains the compartments, and switches off once they are dry.
+   * Errors from `inp.outsideLevel` propagate; earlier compartments may already be updated.
+   */
   step(dt: number, inp: FloodingStepInputs): void {
     const { nx, ny, nz, originZ } = inp;
     const cs = this.compartments;
@@ -402,7 +422,8 @@ export class FloodingState {
 
   /**
    * Weight of the floodwater as a force and moment about the body origin (body frame), for the
-   * world up vector n = (nx, ny, nz) in the body frame. Returns the shared `out`.
+   * world up unit vector n = (nx, ny, nz) in the body frame. Overwrites and returns `out`
+   * with forces [N] and moments [N·m].
    */
   loads(nx: number, ny: number, nz: number, out: FloodLoads): FloodLoads {
     out.fx = out.fy = out.fz = out.mx = out.my = out.mz = 0;
@@ -437,7 +458,10 @@ export class FloodingState {
     return out;
   }
 
-  /** Centroid (body frame) of the water in compartment `i` with the ship upright. */
+  /**
+   * Upright floodwater centroid in body coordinates [m]; an empty bay returns its floor center.
+   * @throws {TypeError} If compartment `i` does not exist.
+   */
   uprightCentroid(i: number): { x: number; y: number; z: number } {
     const c = this.compartments[i]!;
     const filled = this.volume[i]! / c.capacity;

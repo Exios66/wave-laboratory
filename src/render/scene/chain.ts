@@ -126,6 +126,7 @@ export class ChainView {
     this.buoy.position.set(ax, 0.3 * this.radius + 0.5, -ay);
   }
 
+  /** Update tube geometry and normals around the current resampled line points. */
   private writeTube(): void {
     const pos = this.positions;
     const up = this.frameA;
@@ -158,6 +159,7 @@ export class ChainView {
     this.tube.geometry.computeVertexNormals();
   }
 
+  /** Release owned geometries and materials; the caller removes the group from its scene. */
   dispose(): void {
     for (const g of this.geometries) g.dispose();
     for (const m of this.materials) m.dispose();
