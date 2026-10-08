@@ -3,6 +3,7 @@ export type * from './api';
 export { createVesselDefinition, PITCH_YAW_GYRADIUS, ROLL_GYRADIUS } from './definition';
 export { Vessel, type VesselOffset, type VesselOptions } from './vessel';
 export * as damage from './damage';
+export * as flooding from './flooding';
 export { hullDesign, type HullDesign } from './hulls';
 export {
   checkWatertight,

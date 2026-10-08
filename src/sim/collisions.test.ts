@@ -155,6 +155,27 @@ describe('vessel collisions in the simulation', () => {
     expect(cvn!.health).toBeGreaterThan(0.999);
   });
 
+  it('a head-on collision holes the bow compartments; with damage off nothing floods', () => {
+    const collide = (damage: boolean) => {
+      const sim = calmSim(
+        [
+          vessel('a', 'patrol-boat', { y: -40, headingDeg: 0, speedKn: 12 }),
+          vessel('b', 'patrol-boat', { y: 40, headingDeg: 180, speedKn: 12 }),
+        ],
+        damage,
+      );
+      for (let i = 0; i < 120 * 20; i++) sim.stepOnce();
+      return sim.frame().vessels.map((v) => v.flooding);
+    };
+    for (const f of collide(true)) {
+      expect(f.breachArea[0]!).toBeGreaterThan(0);
+      expect(f.fill[0]!).toBeGreaterThan(0);
+      expect(f.totalVolume).toBeGreaterThan(0);
+      expect(f.gmEffective).toBeLessThan(f.gmIntact);
+    }
+    for (const f of collide(false)) expect(f.totalVolume).toBe(0);
+  });
+
   it('with damage off, hulls still separate but keep full health', () => {
     const sim = calmSim(
       [

@@ -37,7 +37,7 @@ export interface SimVessel {
   /** Collision support (vessels without it pass through each other). */
   hullFootprint?(): HullFootprint;
   applyCollision?(impulse: { x: number; y: number }, push: { x: number; y: number }): void;
-  applyDamage?(amount: number, cause: DamageCause): void;
+  applyDamage?(amount: number, cause: DamageCause, at?: { x: number; y: number }): void;
 }
 
 export type VesselFactory = (
@@ -187,8 +187,8 @@ export class Simulation {
         const da = collisionDamage(0.5 * r.energy, A.f.mass);
         const db = collisionDamage(0.5 * r.energy, B.f.mass);
         if (this.experiment.damage) {
-          A.v.applyDamage?.(da, 'collision');
-          B.v.applyDamage?.(db, 'collision');
+          A.v.applyDamage?.(da, 'collision', c);
+          B.v.applyDamage?.(db, 'collision', c);
         }
         const severity = Math.min(1, Math.max(da, db));
         const key = `${A.v.id}|${B.v.id}`;
