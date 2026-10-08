@@ -69,7 +69,7 @@ function handle(msg: ToWorker): void {
       if (!sim) return noSimulation();
       const dt = Math.max(msg.dt, 0);
       sim.advance(Math.min(dt, MAX_ADVANCE));
-      const frame = sim.frame();
+      const frame = sim.frame(msg.cameraProbe);
       // Time beyond the cap is dropped: the run is slower than requested, so say so.
       if (dt > MAX_ADVANCE) frame.lagging = true;
       post({ type: 'frame', frame });
@@ -78,7 +78,7 @@ function handle(msg: ToWorker): void {
     case 'step': {
       if (!sim) return noSimulation();
       sim.step(Math.max(0, Math.min(msg.count, 10_000)));
-      post({ type: 'frame', frame: sim.frame() });
+      post({ type: 'frame', frame: sim.frame(msg.cameraProbe) });
       return;
     }
     case 'command': {

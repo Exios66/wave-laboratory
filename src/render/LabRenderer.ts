@@ -14,7 +14,7 @@ import {
   type ProbeConfig,
   type Weather,
 } from '../schema/experiment';
-import type { SimFrame } from '../sim/types';
+import type { CameraSurface, SimFrame } from '../sim/types';
 import type { VesselDefinition, VisualMaterial } from '../vessel/api';
 import {
   GUST_MODES,
@@ -56,6 +56,12 @@ import { RainField, SMOKE_STYLE, SprayPool } from './scene/particles';
 import { ChainView } from './scene/chain';
 import { RigView } from './scene/rig';
 import { WakeField, type WakeSource } from './scene/wakes';
+import {
+  clampBelowSurface,
+  fallbackFogDensity,
+  nextUnderwaterState,
+  underwaterInscatter,
+} from './underwater/optics';
 import { flightDeckTexture, jollyRogerTexture } from './scene/textures';
 
 export interface LabRendererOptions {
@@ -200,6 +206,21 @@ function oceanTextureType(gl: WebGL2RenderingContext): THREE.TextureDataType {
   throw new Error('This browser cannot render the ocean (missing floating-point colour buffers).');
 }
 
+/** Underwater camera: eye depth [m] and limits, how far it floats from the vessel, gaze. */
+const UNDERWATER_VIEW = {
+  depth: 4,
+  minDepth: 1.5,
+  maxDepth: 30,
+  /** Eye stays this far below the local wave surface [m] (the auto-switch band is narrower). */
+  margin: 0.5,
+  /** Gaze above level [rad] at the default view: the hull and the surface overhead. */
+  pitch: 0.35,
+  /** The sun and sky are scattered below the surface, so direct light is much weaker. */
+  sunScale: 0.4,
+  /** Diffuse fill on the hemisphere light. */
+  fill: 1.4,
+} as const;
+
 /** Plane camera: default and limits of the seat behind the ridden aircraft. */
 const PLANE_LOOK = {
   /** Gaze below level [rad]: about 22° down, the fleet a little above mid-frame from the circuit. */
@@ -216,7 +237,14 @@ const PLANE_LOOK = {
 } as const;
 
 export class LabRenderer implements LabRendererApi {
-  readonly stats: RendererStats = { fps: 0, frameMs: 0, drawCalls: 0, triangles: 0 };
+  readonly stats: RendererStats = {
+    fps: 0,
+    frameMs: 0,
+    drawCalls: 0,
+    triangles: 0,
+    underwater: false,
+    cameraDepth: 0,
+  };
 
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
@@ -255,6 +283,14 @@ export class LabRenderer implements LabRendererApi {
   private readonly fogColor = new THREE.Color();
   private sunBase = 2.4;
   private lastRenderT = Number.NaN;
+  /** Camera is under the sea (any mode), with hysteresis. */
+  private underwater = false;
+  /** Commanded eye depth of the Underwater camera [m]. */
+  private uwDepth: number = UNDERWATER_VIEW.depth;
+  /** Sea surface under the camera as last reported by the worker, and the time it is valid for. */
+  private surface = { eta: 0, etaT: 0, t: 0 };
+  private surfaceNow = 0;
+  private lightLevel = 1;
   private daylight = 1;
   /** Vessels that slammed or shipped green water since the last drawn frame. */
   private readonly sprayBursts = new Set<string>();
@@ -679,6 +715,7 @@ export class LabRenderer implements LabRendererApi {
     u.uFogDensity!.value = density;
     this.fog.density = density;
     const light = this.daylight * (1 - 0.55 * cloud);
+    this.lightLevel = light;
     this.localWind = wind;
     this.weatherStorm = Math.max(
       smooth(0.55, 1, cloud),
@@ -1022,6 +1059,19 @@ export class LabRenderer implements LabRendererApi {
     if (targetId !== undefined) this.cameraTarget = targetId ?? null;
   }
 
+  cameraProbePoint(): { x: number; y: number } | null {
+    const p = this.camera.position;
+    // Far above the waves nothing here depends on the surface height: do not ask for it.
+    if (this.mode !== 'underwater' && !this.underwater && p.y > 4 * Math.max(1, this.hs) + 6) {
+      return null;
+    }
+    return { x: p.x, y: -p.z };
+  }
+
+  setCameraSurface(surface: CameraSurface | null, t: number): void {
+    if (surface) this.surface = { eta: surface.eta, etaT: surface.etaT, t };
+  }
+
   planeRide(): string | null {
     return this.mode === 'plane' ? this.planes.rideLabel : null;
   }
@@ -1062,6 +1112,7 @@ export class LabRenderer implements LabRendererApi {
     this.renderer.info.reset();
     this.tickWall(t0);
     this.updateCamera();
+    this.constrainToSurface(t);
     this.fitNearPlane();
     this.updateScenery(t);
     this.sky.position.copy(this.camera.position);
@@ -1075,6 +1126,7 @@ export class LabRenderer implements LabRendererApi {
     const dt = t - this.lastRenderT;
     this.lastRenderT = t;
     this.updateWeather(t, dt);
+    this.applyUnderwater();
     if (this.post.active) this.post.render();
     else this.renderer.render(this.scene, this.camera);
     const now = performance.now();
@@ -1241,6 +1293,7 @@ export class LabRenderer implements LabRendererApi {
       this.yaw = 0.65;
       this.polar = 0.95;
       this.radius = 180;
+      this.uwDepth = UNDERWATER_VIEW.depth;
       this.userMoved = false;
       return;
     }
@@ -1277,6 +1330,16 @@ export class LabRenderer implements LabRendererApi {
         this.planeChase * factor,
         PLANE_LOOK.minChase,
         PLANE_LOOK.maxChase,
+      );
+      return;
+    }
+    if (this.mode === 'underwater') {
+      // Scrolling out sinks the eye deeper; in brings it up toward the surface.
+      const seabed = (this.env?.depth ?? 4000) - 1;
+      this.uwDepth = THREE.MathUtils.clamp(
+        this.uwDepth * factor,
+        UNDERWATER_VIEW.minDepth,
+        Math.max(UNDERWATER_VIEW.minDepth, Math.min(UNDERWATER_VIEW.maxDepth, seabed)),
       );
       return;
     }
@@ -1567,6 +1630,10 @@ export class LabRenderer implements LabRendererApi {
   private updateCamera(): void {
     if (this.updateRide()) return;
     const focus = this.focusVessel();
+    if (this.mode === 'underwater') {
+      this.placeUnderwaterCamera(focus);
+      return;
+    }
     const target = this.tmp;
     if (this.explore && (this.mode === 'orbit' || this.mode === 'top')) {
       this.exploreGlide = Math.min(1, this.exploreGlide + 0.035);
@@ -1679,6 +1746,90 @@ export class LabRenderer implements LabRendererApi {
     if (Math.abs(near - this.camera.near) > 0.02 * near) {
       this.camera.near = near;
       this.camera.updateProjectionMatrix();
+    }
+  }
+
+  /**
+   * Eye at the commanded depth, floating off the vessel (or the origin) and looking back at it.
+   * Dragging up and down tilts the gaze from slightly down to straight up into Snell's window.
+   */
+  private placeUnderwaterCamera(focus: VesselView | undefined): void {
+    const state = focus && this.frame?.vessels.find((v) => v.id === focus.id);
+    const tx = state ? state.position.x : 0;
+    const tz = state ? -state.position.y : 0;
+    // Close enough to see the hull through the haze: a few boat-lengths of visibility at most.
+    const reach = focus ? THREE.MathUtils.clamp(focus.definition.beam * 0.5 + 14, 12, 60) : 30;
+    const pitch = THREE.MathUtils.clamp(
+      UNDERWATER_VIEW.pitch + (0.95 - this.polar) * 1.5,
+      -0.6,
+      1.5,
+    );
+    const sy = Math.sin(this.yaw);
+    const cy = Math.cos(this.yaw);
+    const y = -this.uwDepth;
+    this.orbitCentre.set(tx, 0, tz);
+    this.camera.up.set(0, 1, 0);
+    this.camera.position.set(tx + reach * sy, y, tz + reach * cy);
+    this.camera.lookAt(
+      tx + reach * sy - sy * Math.cos(pitch) * 10,
+      y + Math.sin(pitch) * 10,
+      tz + reach * cy - cy * Math.cos(pitch) * 10,
+    );
+  }
+
+  /**
+   * Hold the Underwater camera beneath the wave under it, then decide (for every camera) whether
+   * the eye is in the sea. The worker's surface height is a frame old, so it is carried forward
+   * by its vertical speed.
+   */
+  private constrainToSurface(t: number): void {
+    const s = this.surface;
+    const ahead = THREE.MathUtils.clamp(t - s.t, -0.5, 0.5);
+    this.surfaceNow = s.eta + s.etaT * ahead;
+    const cam = this.camera.position;
+    if (this.mode === 'underwater') {
+      cam.y = clampBelowSurface(cam.y, this.surfaceNow, UNDERWATER_VIEW.margin);
+    }
+    this.underwater = nextUnderwaterState(cam.y, this.surfaceNow, this.underwater);
+    this.stats.underwater = this.underwater;
+    this.stats.cameraDepth = this.underwater ? Math.max(0, this.surfaceNow - cam.y) : 0;
+  }
+
+  /**
+   * Turn on the underwater look for this frame (after updateWeather, which resets fog, clear
+   * colour and lights every frame): water in-scatter, the absorption pass, no rain or sky fog.
+   */
+  private applyUnderwater(): void {
+    const u = this.ocean.uniforms;
+    u.uUnderwater!.value = this.underwater ? 1 : 0;
+    if (!this.underwater || !this.env) {
+      this.post.setUnderwater(null);
+      return;
+    }
+    const optics = waterOptics(this.env.waterType);
+    const ins = underwaterInscatter(
+      optics.scatter,
+      optics.attenuation,
+      this.stats.cameraDepth,
+      this.lightLevel,
+      this.lightState?.night ?? 0,
+    );
+    this.fog.color.setRGB(ins[0], ins[1], ins[2]);
+    this.renderer.setClearColor(this.fog.color, 1);
+    (u.uUwScatter!.value as THREE.Vector3).fromArray(ins);
+    u.uFogDensity!.value = 0;
+    this.rain.object.visible = false;
+    this.sun.intensity *= UNDERWATER_VIEW.sunScale;
+    // Light below the surface is diffuse from every side: undersides catch it as well as decks.
+    this.hemi.groundColor.copy(this.hemi.color);
+    this.hemi.intensity *= UNDERWATER_VIEW.fill;
+    if (this.post.available) {
+      this.fog.density = 0;
+      this.post.setUnderwater({ kd: optics.attenuation, inscatter: ins });
+    } else {
+      // No half-float target for the absorption pass: a scalar fog in the water's colour.
+      this.fog.density = fallbackFogDensity(optics.attenuation);
+      this.post.setUnderwater(null);
     }
   }
 

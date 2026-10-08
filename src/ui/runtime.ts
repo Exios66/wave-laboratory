@@ -41,6 +41,8 @@ export class LabRuntime {
   /** Day:night clock [h]. Advances with simulated time, so pausing stops the sun too. */
   private clockHours = useLab.getState().timeOfDay;
   private clockStamp = 0;
+  /** Where the sea surface was last asked for (to re-ask while paused when the camera moves). */
+  private surfaceProbe: { x: number; y: number } | null = null;
 
   constructor() {
     this.client = new SimClient();
@@ -59,6 +61,7 @@ export class LabRuntime {
       this.simT = frame.t;
       if (frame.t + 1e-4 < this.displayT) this.displayT = frame.t;
       this.renderer?.setFrame(frame);
+      this.renderer?.setCameraSurface(frame.cameraSurface ?? null, frame.t);
       const now = performance.now();
       this.announceHealth(frame, now);
       const playing = useLab.getState().playing;
@@ -249,7 +252,9 @@ export class LabRuntime {
     const wall = Math.min(0.1, Math.max(0, (now - this.lastTime) / 1000));
     this.lastTime = now;
     const s = useLab.getState();
-    if (s.playing && s.status === 'ready') this.client.advance(wall * s.timeScale);
+    const probe = this.renderer?.cameraProbePoint() ?? undefined;
+    if (s.playing && s.status === 'ready') this.client.advance(wall * s.timeScale, probe);
+    else if (probe && s.status === 'ready') this.probeWhilePaused(probe);
     this.advanceDisplayClock(wall, s.playing && s.status === 'ready', s.timeScale);
     this.renderer?.setVisualTime(this.displayT);
     this.advanceClock(now, wall, s);
@@ -259,6 +264,13 @@ export class LabRuntime {
       s.setRenderScale(this.governor.scale);
     }
     this.renderer?.render();
+  }
+
+  /** Paused: the waves stand still but the camera can still move below them. */
+  private probeWhilePaused(probe: { x: number; y: number }): void {
+    const last = this.surfaceProbe;
+    if (last && Math.hypot(probe.x - last.x, probe.y - last.y) < 0.5) return;
+    if (this.client.probe(probe)) this.surfaceProbe = probe;
   }
 
   private advanceClock(now: number, wall: number, s: ReturnType<typeof useLab.getState>): void {
@@ -284,7 +296,10 @@ export class LabRuntime {
 
   stepOnce(): void {
     const s = useLab.getState();
-    this.client.step(Math.max(1, Math.round(0.1 / s.experiment.timestep)));
+    this.client.step(
+      Math.max(1, Math.round(0.1 / s.experiment.timestep)),
+      this.renderer?.cameraProbePoint() ?? undefined,
+    );
   }
 
   command(vesselId: string, cmd: VesselCommand): void {

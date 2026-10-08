@@ -295,8 +295,14 @@ export const useLab = create<LabState>()((set, get) => ({
       selection: null,
       cameraTarget: null,
       camera:
-        s.camera === 'orbit' || s.camera === 'top' || s.camera === 'plane' ? s.camera : 'orbit',
-      groundCamera: s.groundCamera === 'top' ? 'top' : 'orbit',
+        s.camera === 'orbit' ||
+        s.camera === 'top' ||
+        s.camera === 'underwater' ||
+        s.camera === 'plane'
+          ? s.camera
+          : 'orbit',
+      groundCamera:
+        s.groundCamera === 'top' || s.groundCamera === 'underwater' ? s.groundCamera : 'orbit',
     }));
     if (message) get().notify('success', message);
   },

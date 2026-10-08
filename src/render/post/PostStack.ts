@@ -7,8 +7,9 @@
  * With every effect off (or half-float colour buffers missing) the stack is inactive and the
  * renderer draws straight to the canvas, exactly as before.
  *
- * Passes are an ordered list, so later stages (for example a depth-based underwater fog that
- * reads the target's depth texture) can slot in before the grade pass.
+ * Passes are an ordered list. The underwater absorption fog sits right after the scene pass
+ * (it reads the target's depth texture) and forces the chain on while the camera is submerged,
+ * even with every user effect off; on the 'light' tier that is the only time the cost is paid.
  *
  * Antialiasing: the canvas MSAA does not carry into off-screen targets, so on the 'full' tier
  * the HDR target is itself multisampled (up to 4x). The 'light' tier (phones, software GPUs)
@@ -22,6 +23,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import type { PostSettings } from '../api';
+import { UnderwaterPass, type UnderwaterParams } from '../underwater/UnderwaterPass';
 
 /** Luminance (linear, before exposure) above which pixels bloom. Ordinary surfaces stay below. */
 export const BLOOM_THRESHOLD = 1.2;
@@ -79,6 +81,8 @@ export class PostStack {
   private composer: EffectComposer | null = null;
   private bloom: UnrealBloomPass | null = null;
   private grade: ShaderPass | null = null;
+  private underwaterPass: UnderwaterPass | null = null;
+  private underwater: UnderwaterParams | null = null;
   private settings: PostSettings = { bloom: false, grain: false, vignette: false };
   private width = 1;
   private height = 1;
@@ -88,7 +92,7 @@ export class PostStack {
   constructor(
     private readonly renderer: THREE.WebGLRenderer,
     private readonly scene: THREE.Scene,
-    private readonly camera: THREE.Camera,
+    private readonly camera: THREE.PerspectiveCamera,
     private readonly tier: 'light' | 'full',
   ) {
     this.supported = supportsHdrTarget(renderer.getContext() as WebGL2RenderingContext);
@@ -97,7 +101,18 @@ export class PostStack {
   /** Whether the HDR chain should draw this frame. */
   get active(): boolean {
     const s = this.settings;
-    return this.supported && (s.bloom || s.grain || s.vignette);
+    return this.supported && (s.bloom || s.grain || s.vignette || this.underwater !== null);
+  }
+
+  /** Whether the half-float chain exists on this device (else underwater falls back to fog). */
+  get available(): boolean {
+    return this.supported;
+  }
+
+  /** Absorption fog parameters while the camera is under the sea, or null above it. */
+  setUnderwater(params: UnderwaterParams | null): void {
+    this.underwater = params;
+    this.underwaterPass?.set(params);
   }
 
   /** Whether the sun glint and lightning should be boosted above 1.0 for the bloom pass. */
@@ -158,8 +173,11 @@ export class PostStack {
       BLOOM_THRESHOLD,
     );
     const grade = new ShaderPass(GradeShader);
+    const underwater = new UnderwaterPass(this.camera);
+    underwater.set(this.underwater);
     const passes: Pass[] = [
       new RenderPass(this.scene, this.camera),
+      underwater,
       bloom,
       grade,
       new OutputPass(),
@@ -167,6 +185,7 @@ export class PostStack {
     for (const pass of passes) composer.addPass(pass);
     this.bloom = bloom;
     this.grade = grade;
+    this.underwaterPass = underwater;
     this.composer = composer;
     this.applySettings();
     return composer;
@@ -188,5 +207,6 @@ export class PostStack {
     this.composer = null;
     this.bloom = null;
     this.grade = null;
+    this.underwaterPass = null;
   }
 }

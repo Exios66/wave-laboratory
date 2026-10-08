@@ -20,6 +20,8 @@ import { seaDiagnostics } from './diagnostics';
 import { Recorder } from './recorder';
 import { WeatherField } from '../weather/weather';
 import type {
+  CameraProbe,
+  CameraSurface,
   CollisionEvent,
   ProbeReading,
   SeaDiagnostics,
@@ -144,8 +146,15 @@ export class Simulation {
     }));
   }
 
-  frame(): SimFrame {
-    return {
+  /** Sea surface height and vertical speed at a world point (for the underwater camera). */
+  cameraSurface(x: number, y: number, t = this.clock.time): CameraSurface {
+    const s = this.field.surface(x, y, t);
+    return { eta: s.eta, etaT: s.etaT };
+  }
+
+  /** The current state; `cameraProbe` adds the sea surface under the camera. */
+  frame(cameraProbe?: CameraProbe): SimFrame {
+    const frame: SimFrame = {
       t: this.clock.time,
       vessels: this.vessels.map((v) => v.telemetry()),
       probes: this.probeReadings(),
@@ -155,6 +164,10 @@ export class Simulation {
       weather: this.weatherAt(0, 0, this.clock.time),
       collisions: this.flushCollisions(),
     };
+    if (cameraProbe && Number.isFinite(cameraProbe.x) && Number.isFinite(cameraProbe.y)) {
+      frame.cameraSurface = this.cameraSurface(cameraProbe.x, cameraProbe.y);
+    }
+    return frame;
   }
 
   /** Collision events since the last call. */

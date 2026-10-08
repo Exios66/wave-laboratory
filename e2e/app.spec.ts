@@ -311,6 +311,24 @@ test.describe('Wave Laboratory app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('underwater camera shows a live depth badge and returns to orbit', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    const underwater = page.getByRole('radio', { name: 'Underwater' });
+    await underwater.click();
+    await expect(underwater).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByText(/^Underwater · \d+\.\d m$/)).toBeVisible({ timeout: 10_000 });
+    await page.screenshot({ path: 'test-results/underwater-view.png' });
+    await page.getByRole('radio', { name: 'Orbit' }).click();
+    await expect(page.getByRole('radio', { name: 'Orbit' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await expect(page.getByText(/^Underwater · /)).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
   test('enlarges the 3D view by hiding the side panels and chart dock', async ({ page }) => {
     const errors = trackErrors(page);
     await page.goto('/');

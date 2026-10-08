@@ -110,6 +110,18 @@ describe('Simulation', () => {
     expect(sim.frame().samples).toBeNull();
   });
 
+  it('reports the sea surface under the camera probe, matching the ocean field', () => {
+    const sim = new Simulation(exp, { createVessel: (c) => stubVessel(c.id) });
+    expect(sim.frame().cameraSurface).toBeUndefined();
+    sim.advance(1.5);
+    const probe = { x: 37.5, y: -12.25 };
+    const f = sim.frame(probe);
+    const s = sim.field.surface(probe.x, probe.y, sim.time);
+    expect(f.cameraSurface).toEqual({ eta: s.eta, etaT: s.etaT });
+    expect(Math.abs(f.cameraSurface!.eta)).toBeGreaterThan(0);
+    expect(sim.frame({ x: Number.NaN, y: 0 }).cameraSurface).toBeUndefined();
+  });
+
   it('reports diagnostics with the represented Hs', () => {
     const sim = new Simulation(exp, { createVessel: (c) => stubVessel(c.id) });
     const d = sim.diagnostics();

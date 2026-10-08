@@ -4,7 +4,7 @@
  */
 import type { GpuOceanData } from '../ocean/gpuData';
 import type { Environment, OceanQuality, ProbeConfig, Weather } from '../schema/experiment';
-import type { SimFrame } from '../sim/types';
+import type { CameraSurface, SimFrame } from '../sim/types';
 import type { VesselDefinition } from '../vessel/api';
 import type { AmbienceSettings } from './scenery/types';
 
@@ -25,7 +25,8 @@ export const DEFAULT_POST: PostSettings = { bloom: false, grain: false, vignette
 
 export type OverlayMode = 'none' | 'height' | 'steepness' | 'foam';
 /** `plane` rides one of the lost flights, circling high over the fleet. */
-export type CameraMode = 'orbit' | 'follow' | 'bridge' | 'top' | 'plane';
+/** `underwater` hangs the eye a few metres below the surface (any camera dipping below the sea also draws underwater). */
+export type CameraMode = 'orbit' | 'follow' | 'bridge' | 'top' | 'plane' | 'underwater';
 
 export interface PickResult {
   kind: 'vessel' | 'probe' | 'water';
@@ -64,6 +65,10 @@ export interface RendererStats {
   frameMs: number;
   drawCalls: number;
   triangles: number;
+  /** True while the camera is under the sea surface (any camera mode). */
+  underwater: boolean;
+  /** Depth of the camera below the local wave surface [m]; 0 above water. */
+  cameraDepth: number;
 }
 
 export interface LabRendererApi {
@@ -97,6 +102,13 @@ export interface LabRendererApi {
   setOverlay(mode: OverlayMode): void;
   setCamera(mode: CameraMode, targetId?: string | null): void;
   setSelection(id: string | null): void;
+  /**
+   * Where the sea surface should be sampled for the camera, as a world point (x east, y north)
+   * [m], or null while the camera is too high to matter.
+   */
+  cameraProbePoint(): { x: number; y: number } | null;
+  /** Sea surface under the camera from the worker, at simulation time `t`. */
+  setCameraSurface(surface: CameraSurface | null, t: number): void;
   /** Name of the flight the Plane camera is riding, or null (not riding, or not yet aboard). */
   planeRide(): string | null;
   /** Render one frame (call from requestAnimationFrame). */

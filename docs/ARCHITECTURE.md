@@ -53,6 +53,18 @@
   the light tier (phones, software GPUs) has no MSAA either way. The settings are display
   preferences (`wave-lab:display`), resolved against the device and quality in
   `resolvePostSettings`, not part of the experiment.
+- **Underwater view.** The renderer has no CPU ocean height, so the main thread sends the camera
+  position with each `advance`/`step` message (`cameraProbe`, only while the camera is low enough
+  to matter) and the worker answers with `SimFrame.cameraSurface` (`OceanField.surface`: η and
+  its rate), which the renderer carries forward by `etaT · dt`. `render/underwater/optics.ts`
+  holds the pure helpers (Snell angle, per-channel attenuation, in-scatter colour, hysteresis,
+  clamp, depth linearisation). After the camera update `LabRenderer` decides `underwater` for
+  every camera mode, then (after `updateWeather`, which resets fog each frame) applies it: the
+  ocean shader shades the underside (`uUnderwater`: refraction into Snell's window, total
+  internal reflection outside it, dark foam), `UnderwaterPass` in `PostStack` applies
+  `c·e^(−K_d·d) + inscatter·(1 − e^(−K_d·d))` from the depth texture and forces the chain on even
+  with every effect off, and the scene fog and rain are switched off. Without half-float targets
+  it falls back to a scalar `FogExp2` from the green-channel K_d.
 
 ## Performance budget (defaults)
 
