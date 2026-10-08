@@ -27,6 +27,7 @@ import type {
   VesselCommand,
   VesselDefinition,
   FloodingTelemetry,
+  MooringTelemetry,
   VesselKinematics,
   VesselTelemetry,
 } from './api';
@@ -55,6 +56,7 @@ import { HullForces, type RigidState } from './hullForces';
 import { buildHydroModel, CROSS_FLOW_CD, type HydroModel } from './hydroModel';
 import { quatToMat3, solveFloating } from './hydrostatics';
 import { meshBounds, meshVolume } from './mesh';
+import { Mooring, mooringGear, type MooringForce } from './mooring';
 import { LocalWater, type Footprint } from './waterPatch';
 import { emptyLoad, reefedSet, sailLoad, windageLoad } from './windLoads';
 
@@ -134,6 +136,9 @@ export class Vessel {
   /** Health lost to the slam in progress (a breach opens past a threshold). */
   private slamAccum = 0;
   private foundered = false;
+  /** Anchor line at the hawse pipe (see `mooring.ts`). */
+  readonly mooring: Mooring;
+  private readonly mooringForce: MooringForce = { fx: 0, fy: 0, fz: 0 };
   private readonly s: RigidState;
   private q: Quat;
   private readonly gen = new Float64Array(6);
@@ -185,7 +190,7 @@ export class Vessel {
   constructor(
     id: string,
     definition: VesselDefinition,
-    config: Pick<VesselConfig, 'x' | 'y' | 'headingDeg' | 'speedKn' | 'autopilot'>,
+    config: Pick<VesselConfig, 'x' | 'y' | 'headingDeg' | 'speedKn' | 'autopilot' | 'mooring'>,
     field: OceanField,
     options: VesselOptions = {},
   ) {
@@ -292,6 +297,17 @@ export class Vessel {
       q: 0,
       r: 0,
     };
+    this.mooring = new Mooring(
+      mooringGear(definition.mass, definition.length, rho, g, config.mooring?.kind === 'buoy'),
+      field.env.depth,
+      config.mooring?.kind ?? 'anchor',
+    );
+    this.mooring.mass = hydro.mass + hydro.addedMass[0]!;
+    if (config.mooring) {
+      const m = config.mooring;
+      const hawse = this.hawse();
+      this.dropAnchor(m.x ?? hawse.x, m.y ?? hawse.y, m.scope, m.length);
+    }
     this.autopilotOn = config.autopilot;
     this.headingCmdDeg = config.headingDeg;
     this.speedCmdKn = config.speedKn;
@@ -397,6 +413,42 @@ export class Vessel {
       this.flooding.pumping = cmd.pump;
       if (cmd.pump) this.flooding.seal();
     }
+    if (cmd.anchor === 'weigh') this.mooring.weigh();
+    else if (cmd.anchor === 'drop') {
+      if (this.mooring.deployed) {
+        // Already down: pay out or heave in to the new length.
+        if (cmd.anchorLength !== undefined || cmd.anchorScope !== undefined)
+          this.mooring.length = this.lineLength(cmd.anchorScope ?? 5, cmd.anchorLength);
+      } else {
+        const hawse = this.hawse();
+        this.dropAnchor(hawse.x, hawse.y, cmd.anchorScope ?? 5, cmd.anchorLength);
+      }
+    }
+  }
+
+  /** Hawse pipe at the bow (world) [m]. */
+  private hawse(): { x: number; y: number; z: number } {
+    const s = this.s;
+    const R = s.rot;
+    const b = this.definition.points.bow;
+    return {
+      x: s.px + R[0]! * b.x + R[2]! * b.z,
+      y: s.py + R[3]! * b.x + R[5]! * b.z,
+      z: s.pz + R[6]! * b.x + R[8]! * b.z,
+    };
+  }
+
+  private lineLength(scope: number, length?: number): number {
+    const m = this.mooring;
+    return length === undefined
+      ? m.lengthForScope(scope)
+      : Math.min(m.gear.capacity, Math.max(1.05 * this.seaDepth, length));
+  }
+
+  /** Put the anchor (or buoy) down at (x, y) with the chain paid out; refused in water too deep. */
+  private dropAnchor(x: number, y: number, scope: number, length?: number): void {
+    if (!this.mooring.available) return;
+    this.mooring.deploy(x, y, this.lineLength(scope, length));
   }
 
   /**
@@ -610,6 +662,9 @@ export class Vessel {
     this.bowVz = bowVz;
     this.bridgeVz = bridgeVz;
     this.stepped = true;
+
+    // ---- the anchor drags when the pull is beyond its holding
+    this.mooring.step(dt);
 
     // ---- structural damage from this step's seaway and weather
     const healthBefore = this.damage.health;
@@ -885,6 +940,29 @@ export class Vessel {
       mz += fw.mz;
     }
 
+    // 9a. Anchor line pulling at the hawse pipe: the catenary force (world) taken to the body
+    // frame, with its moment about the CoG.
+    if (this.mooring.deployed) {
+      const b = def.points.bow;
+      const fm = this.mooring.force(
+        s.px + R[0]! * b.x + R[2]! * b.z,
+        s.py + R[3]! * b.x + R[5]! * b.z,
+        s.pz + R[6]! * b.x + R[8]! * b.z,
+        this.mooringForce,
+        R[0]! * s.u + R[1]! * s.v + R[2]! * s.w,
+        R[3]! * s.u + R[4]! * s.v + R[5]! * s.w,
+      );
+      const lx = R[0]! * fm.fx + R[3]! * fm.fy + R[6]! * fm.fz;
+      const ly = R[1]! * fm.fx + R[4]! * fm.fy + R[7]! * fm.fz;
+      const lz = R[2]! * fm.fx + R[5]! * fm.fy + R[8]! * fm.fz;
+      fx += lx;
+      fy += ly;
+      fz += lz;
+      mx += -b.z * ly;
+      my += b.z * lx - b.x * lz;
+      mz += b.x * ly;
+    }
+
     // 9c. A sunken hull falls at a terminal speed set by its plan area (bluff-body drag).
     if (this.foundered)
       fz -= 0.5 * rho * SINK_DRAG_CD * def.hydrostatics.waterplaneArea * s.w * Math.abs(s.w);
@@ -965,6 +1043,35 @@ export class Vessel {
       disabled: this.damage.disabled,
       damageCause: this.damage.cause,
       flooding: this.floodingTelemetry(),
+      mooring: this.mooringTelemetry(),
+    };
+  }
+
+  private mooringTelemetry(): MooringTelemetry {
+    const m = this.mooring;
+    const sol = m.solution;
+    const on = m.deployed;
+    return {
+      deployed: on,
+      kind: m.kind,
+      available: m.available,
+      chainCapacity: m.gear.capacity,
+      lineLength: on ? m.length : 0,
+      scope: on ? m.length / this.seaDepth : 0,
+      tension: on ? sol.T : 0,
+      horizontalTension: on ? sol.H : 0,
+      fairleadAngleDeg: on ? Math.atan2(sol.V, sol.H) / DEG : 0,
+      suspendedLength: on ? sol.suspended : 0,
+      groundedLength: on ? sol.grounded : 0,
+      touchdownDistance: on ? sol.touchdown : 0,
+      holdingLimit: Number.isFinite(m.gear.holding) ? m.gear.holding : 0,
+      loadFraction: on && Number.isFinite(m.gear.holding) ? sol.H / m.gear.holding : 0,
+      anchor: { x: m.anchorX, y: m.anchorY, z: m.anchorZ },
+      fairlead: { x: m.fairX, y: m.fairY, z: m.fairZ },
+      distance: on ? m.offset : 0,
+      dragging: m.dragging,
+      regime: sol.regime,
+      profile: m.profile(),
     };
   }
 
