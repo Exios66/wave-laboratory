@@ -24,7 +24,9 @@ oceanographic wave spectra, drop ships into it, and measure how they handle the 
   sails on the wind alone, bracing and reefing as the wind changes. The fleet runs from a
   lifeboat to a VLCC oil tanker and a Nimitz-class aircraft carrier. Slamming, green water and
   capsize are detected, and a collision or heavy slam can breach a watertight compartment that
-  floods through the hole, costing stability (free surface) and eventually sinking the ship. The hull you see is lofted more finely than the physics mesh, with
+  floods through the hole, costing stability (free surface) and eventually sinking the ship. A ship can drop anchor (or start moored to a buoy): an elastic
+  catenary chain pulls at the bow, she weathervanes into the wind, and the anchor drags if the load
+  beats its holding. The hull you see is lofted more finely than the physics mesh, with
   antifouling below the waterline, deck cargo and a foam wake that does not feed back into
   the forces. A loading setting (light ballast to overloaded) sets the displacement, and the
   ship floats at the matching draft.

@@ -380,6 +380,33 @@ test.describe('Wave Laboratory app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('drops and weighs the anchor from the inspector and reads the chain tension', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    await page.getByRole('button', { name: 'Presets' }).click();
+    await page.getByRole('button', { name: /At anchor in a swell/ }).click();
+    await waitForSimulation(page);
+    await page
+      .getByRole('navigation', { name: 'Scene' })
+      .getByRole('button', { name: /\d+ kn/ })
+      .first()
+      .click();
+    await expect(page.getByRole('heading', { name: 'Anchor', exact: true })).toBeVisible();
+    const tension = page.locator('.mooring dt', { hasText: 'Tension' }).locator('xpath=../dd');
+    // The preset starts at anchor: the chain carries a pull.
+    await expect(tension).toHaveText(/\d+ kN/, { timeout: 20_000 });
+    await page.getByRole('button', { name: 'Weigh anchor' }).click();
+    await expect(page.getByText('Anchor stowed.')).toBeVisible();
+    await expect(tension).toHaveText('—');
+    await page.getByRole('button', { name: 'Drop anchor' }).click();
+    await expect(tension).toHaveText(/\d+ kN/, { timeout: 20_000 });
+    await expect(page.getByText(/Anchor holding\.|Chain slack\./)).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
   test('rogue-wave preset loads without a model-validity error', async ({ page }) => {
     const errors = trackErrors(page);
     await page.goto('/');

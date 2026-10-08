@@ -20,6 +20,7 @@ commits the static build into `docs/` on `main`. There is no GitHub Actions work
 | Regular (Airy) waves                                                                                                     | ✅                     |
 | Vessel dynamics: pressure integration with waterline clipping, L0 radiation, viscous drag, propulsion, rudder, autopilot | ✅                     |
 | Damage and flooding: watertight compartments, orifice flooding, floodwater weight with free-surface GM loss, foundering  | ✅                     |
+| Anchors and moorings: elastic catenary chain, holding limit and dragging, buoy mooring, drawn chain                      | ✅                     |
 | Instruments: wave gauges, motion recorders, Welch PSD, statistics, MSI, CSV export                                       | ✅                     |
 | Sandbox UI: presets, save/open/share, undo/redo, phone layout, accessibility checks                                      | ✅                     |
 | Stokes/cnoidal/focused waves, grid (SWE/Boussinesq) solvers, scripting API, L1/L2 radiation                              | ⏳ Later phases        |
