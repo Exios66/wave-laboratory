@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { quatIdentity } from '../core/vec';
 import { presetExperiment } from '../schema/presets';
 import type { VesselDefinition, VesselTelemetry } from '../vessel/api';
@@ -133,4 +133,56 @@ describe('Recorder', () => {
     expect(b.channels.b![0]).toBeNaN();
     expect(b.channels.b![1]).toBe(5);
   });
+});
+
+describe('collision damage contact propagation', () => {
+  it.each([true, false])(
+    'passes the shared world contact only when damage is enabled (%s)',
+    (damage) => {
+      const exp = presetExperiment();
+      exp.damage = damage;
+      exp.waves = [];
+      exp.probes = [];
+      exp.environment.windSpeed = 0;
+      exp.vessels = ['a', 'b'].map((id) => ({ ...exp.vessels[0]!, id }));
+      const bodies = ['a', 'b'].map((id, i) => ({
+        ...stubVessel(id),
+        hullFootprint: () => ({
+          x: 100,
+          y: -50 + 39 * i,
+          fx: 0,
+          fy: 1,
+          halfLength: 20,
+          halfBeam: 4,
+          mass: 1e6,
+          vx: 0,
+          vy: i === 0 ? 3 : -3,
+        }),
+        applyCollision: vi.fn(),
+        applyDamage: vi.fn(),
+      }));
+      const sim = new Simulation(exp, { createVessel: (c) => bodies.find((v) => v.id === c.id)! });
+      sim.stepOnce();
+      const events = sim.flushCollisions();
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ a: 'a', b: 'b', x: 100, y: -30.5 });
+      for (const body of bodies) {
+        expect(body.applyCollision).toHaveBeenCalledTimes(1);
+        if (damage) {
+          expect(body.applyDamage).toHaveBeenCalledExactlyOnceWith(
+            expect.any(Number),
+            'collision',
+            expect.objectContaining({ x: 100, y: -30.5 }),
+          );
+          expect(body.applyDamage.mock.calls[0]![0]).toBeGreaterThan(0);
+        } else {
+          expect(body.applyDamage).not.toHaveBeenCalled();
+        }
+      }
+      if (damage)
+        expect(bodies[0]!.applyDamage.mock.calls[0]![2]).toBe(
+          bodies[1]!.applyDamage.mock.calls[0]![2],
+        );
+    },
+  );
 });
