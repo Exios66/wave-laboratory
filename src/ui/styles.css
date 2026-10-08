@@ -985,6 +985,11 @@ input[type='range'] {
   font-weight: 650;
 }
 
+.hud__depth {
+  font-variant-numeric: tabular-nums;
+  color: #7dd3fc;
+}
+
 .hud__ride {
   display: flex;
   flex-direction: column;

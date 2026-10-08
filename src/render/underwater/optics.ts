@@ -36,7 +36,9 @@ export function attenuate(rgb: Rgb, kd: Rgb, d: number): [number, number, number
 /** Share of the surface light still present at depth, so the deep never goes pure black. */
 const DEPTH_FLOOR = 0.03;
 /** The veil is lit from above, so it is brighter than the body colour seen from the air. */
-const VEIL_GAIN = 3;
+const VEIL_GAIN = 3.5;
+/** Fraction of the K_d depth decay applied to the veil: it is lit all along the ray, not only at the surface. */
+const VEIL_DEPTH = 0.5;
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
@@ -55,7 +57,7 @@ export function underwaterInscatter(
   const lit = clamp01(sunLevel) * (1 - 0.8 * clamp01(night));
   const d = Math.max(0, depth);
   const at = (i: 0 | 1 | 2) =>
-    scatter[i] * VEIL_GAIN * lit * Math.max(DEPTH_FLOOR, Math.exp(-kd[i] * d));
+    scatter[i] * VEIL_GAIN * lit * Math.max(DEPTH_FLOOR, Math.exp(-VEIL_DEPTH * kd[i] * d));
   return [at(0), at(1), at(2)];
 }
 

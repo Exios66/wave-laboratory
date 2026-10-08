@@ -133,6 +133,8 @@ export class GpuOcean {
       uScatter: { value: new THREE.Vector3(0.006, 0.04, 0.09) },
       uAtten: { value: new THREE.Vector3(0.255, 0.066, 0.034) },
       uWaterDepth: { value: 4000 },
+      uUnderwater: { value: 0 },
+      uUwScatter: { value: new THREE.Vector3(0.01, 0.05, 0.1) },
       uOverlay: { value: 0 },
       uFogDensity: { value: 1e-4 },
       uWakeCount: { value: 0 },
