@@ -81,6 +81,54 @@ export interface SailPlan {
   bowsprit: Vec3;
 }
 
+/** One fore-and-aft sail (body frame relative to CoG): a triangle on a luff line. */
+export interface ForeAftSail {
+  kind: 'main' | 'jib';
+  /** Sail area [m²] and geometric aspect ratio (luff² / area). */
+  area: number;
+  aspect: number;
+  /** Tack (luff foot) and head; the sail trails aft from the luff. */
+  tack: Vec3;
+  head: Vec3;
+  /** Foot length from tack to clew [m]. */
+  foot: number;
+}
+
+/**
+ * Bermuda (fore-and-aft) rig: a mast with a boom-footed main and a headsail on the forestay.
+ * `rigDragArea` is the drag area of mast, boom and rigging [m²]. Reusable by any hull: only the
+ * positions and areas are hull specific.
+ */
+export interface ForeAftRig {
+  mast: { x: number; zFoot: number; zTop: number };
+  sails: ForeAftSail[];
+  rigDragArea: number;
+}
+
+/**
+ * A lateral-plane foil below the hull (fin keel, daggerboard, skeg): a trapezoid in the x–z
+ * plane that lifts against sideways flow. Body frame relative to CoG.
+ */
+export interface LateralFoil {
+  /** Leading-edge x at the root and at the tip, root/tip chord [m]. */
+  xLeRoot: number;
+  xLeTip: number;
+  chordRoot: number;
+  chordTip: number;
+  /** Root (hull side) and tip heights z [m]. */
+  zRoot: number;
+  zTip: number;
+  /** Planform area [m²], span [m] and geometric aspect ratio span² / area. */
+  area: number;
+  span: number;
+  aspect: number;
+  /** Centre of effort (area centroid) x and z [m]. */
+  xCe: number;
+  zCe: number;
+  /** Ballast bulb on the tip (body frame centre, length and radius [m]), if any. */
+  bulb: { x: number; z: number; length: number; radius: number } | null;
+}
+
 export interface VesselDefinition {
   type: VesselType;
   displayName: string;
@@ -121,6 +169,9 @@ export interface VesselDefinition {
   windage: WindageSpec;
   /** Sail plan (sailing ships; they have no engine). */
   sails: SailPlan | null;
+  /** Fore-and-aft rig (yachts; no engine) and the lateral foils that resist its side force. */
+  foreAft: ForeAftRig | null;
+  foils: LateralFoil[];
   paint: HullPaint;
   /**
    * Keel/deadwood fin aft of a traditional sailing hull (lateral area [m²] and its centre x,
@@ -332,9 +383,19 @@ export interface VesselTelemetry extends VesselKinematics {
   apparentWindAngleDeg: number;
   /** Wind force on the vessel (above-water windage + sails), magnitude [N]. */
   windForce: number;
-  /** Sails (sailing ships): fraction of canvas set 0–1 and yard brace angle [deg]. */
+  /**
+   * Sails (sailing ships): fraction of canvas set 0–1 and yard brace angle [deg] (yachts: boom
+   * angle off the centre line; + = sail on the starboard side, wind from port).
+   */
   sailSet: number;
   braceDeg: number;
+  /** Fore-and-aft rig: jib sheet angle [deg] (same sign), main angle of attack [deg], leeway
+   * angle of the track through the water [deg] (+ = drifting to port) and velocity made good
+   * to windward [kn] (negative = downwind). Zero for other vessels. */
+  jibDeg: number;
+  sailAlphaDeg: number;
+  leewayDeg: number;
+  vmgKn: number;
   /** Structural health 0–1 (1 = intact, 0 = disabled). Stays 1 when damage is off. */
   health: number;
   /** Health 0: engine and steering dead, the vessel drifts until repaired. */

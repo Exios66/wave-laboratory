@@ -705,7 +705,8 @@ export class Vessel {
       fl.step(dt, inp);
     }
     // Fully under with water aboard: foundered (health 0 through the usual path).
-    if (!this.foundered && fl.hasWater && this.hull.volume >= FOUNDER_FRACTION * this.hullVolume) {
+    if (!fl.hasWater) this.foundered = false;
+    else if (!this.foundered && this.hull.volume >= FOUNDER_FRACTION * this.hullVolume) {
       this.foundered = true;
       this.damage.damage(this.damage.health, 'flooding');
     }
@@ -1039,6 +1040,10 @@ export class Vessel {
       windForce: this.windForce,
       sailSet: this.definition.sails ? this.sailSet : 0,
       braceDeg: this.sailOut.braceDeg,
+      jibDeg: 0,
+      sailAlphaDeg: 0,
+      leewayDeg: 0,
+      vmgKn: 0,
       health: this.damage.health,
       disabled: this.damage.disabled,
       damageCause: this.damage.cause,
