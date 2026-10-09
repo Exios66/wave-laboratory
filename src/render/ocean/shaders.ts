@@ -181,6 +181,8 @@ const SKY = /* glsl */ `
 uniform vec3 uSunDir;
 uniform float uCloud;
 uniform float uFlash;
+// HDR boost of the sun disc, the sharp sun glint and lightning (1 = off, no bloom pass).
+uniform float uSunHdr;
 uniform float uSkyTime;
 uniform vec2 uCloudDrift;
 uniform float uCloudOctaves;
@@ -264,13 +266,13 @@ vec3 skyColor(vec3 dir, vec3 sun) {
   float sunDisc = pow(max(dot(normalize(dir), sun), 0.0), 1400.0) * (1.0 - d) * clearSun * sunGate;
   float glow = pow(max(dot(normalize(dir), sun), 0.0), 8.0) * (1.0 - 0.7 * uCloud);
   vec3 glowCol = mix(srgbToLinear(vec3(1.0, 0.85, 0.65)), srgbToLinear(vec3(1.0, 0.55, 0.25)), uDusk);
-  col += srgbToLinear(vec3(1.0, 0.96, 0.88)) * sunDisc * 1.6;
+  col += srgbToLinear(vec3(1.0, 0.96, 0.88)) * sunDisc * 1.6 * uSunHdr;
   col += glowCol * glow * (0.28 + 0.35 * uDusk) * daylight() * (1.0 - uNight * (1.0 - smoothstep(-0.2, 0.0, sun.y)));
   // Cloud: bright tops toward the sun, dark bases when the deck is thick.
   float lit = 0.55 + 0.45 * max(dot(normalize(dir), sun), 0.0);
   vec3 cloudCol = mix(srgbToLinear(vec3(0.95, 0.96, 0.97)), srgbToLinear(vec3(0.30, 0.32, 0.36)), smoothstep(0.35, 1.0, uCloud));
   cloudCol *= lit * daylight();
-  cloudCol += vec3(0.8, 0.85, 1.0) * uFlash * (0.6 + 0.8 * d);
+  cloudCol += vec3(0.8, 0.85, 1.0) * uFlash * (0.6 + 0.8 * d) * (1.0 + 0.5 * (uSunHdr - 1.0));
   col = mix(col, cloudCol, d * 0.92);
   col += vec3(0.6, 0.65, 0.85) * uFlash * 0.25;
   return col;
@@ -374,6 +376,9 @@ uniform float uHs;
 uniform vec3 uScatter;
 uniform vec3 uAtten;
 uniform float uWaterDepth;
+// Camera under the sea (renderer sets both): 1 = seen from below, and the water's in-scatter.
+uniform float uUnderwater;
+uniform vec3 uUwScatter;
 uniform float uOverlay;
 uniform float uFogDensity;
 uniform float uWakeCount;
@@ -578,6 +583,24 @@ vec2 rainRipples(vec2 p, float rate) {
   return n;
 }
 
+// The surface seen from below (UNDERWATER_INDEX mirrors WATER_INDEX in underwater/optics.ts).
+// Inside Snell's window the ray refracts out and sees the sky, scaled by the Fresnel
+// transmittance, so the window is rippled by the waves; beyond it the ray is totally internally
+// reflected and shows the water's own colour. Foam occludes the sky, so it reads dark.
+vec3 underwaterSurface(vec3 V, vec3 N, float foam) {
+  const float UNDERWATER_INDEX = 1.333;
+  vec3 T = refract(-V, N, UNDERWATER_INDEX);
+  vec3 col = uUwScatter;
+  if (dot(T, T) > 1.0e-4) {
+    float cosT = clamp(dot(T, -N), 0.0, 1.0);
+    // Schlick on the transmitted side: reflectance climbs to 1 at the edge of the window.
+    float r0 = pow((UNDERWATER_INDEX - 1.0) / (UNDERWATER_INDEX + 1.0), 2.0);
+    float refl = r0 + (1.0 - r0) * pow(1.0 - cosT, 5.0);
+    col = mix(skyColor(normalize(T), uSunDir), uUwScatter, refl);
+  }
+  return mix(col, uUwScatter * 0.35, foam * 0.85);
+}
+
 void main() {
   vec2 label = vLabel;
   // Total slopes of the surface (spectral cascades + analytic waves) at this particle label.
@@ -638,7 +661,7 @@ void main() {
   float sharp = mix(1400.0, 90.0, clamp(foot / 2.0, 0.0, 1.0));
   float sun = max(dot(normalize(R), uSunDir), 0.0);
   float sunVis = (1.0 - smoothstep(0.5, 0.95, uCloud)) * step(0.0, uSunDir.y);
-  float spec = (pow(sun, 90.0) * 0.3 + pow(sun, sharp) * (sharp / 1400.0 + 0.15)) * sunVis;
+  float spec = (pow(sun, 90.0) * 0.3 + pow(sun, sharp) * (sharp / 1400.0 + 0.15) * uSunHdr) * sunVis;
   vec3 glint = mix(srgbToLinear(vec3(1.0, 0.97, 0.90)), srgbToLinear(vec3(1.0, 0.68, 0.40)), uDusk);
   col += glint * spec * (0.4 + 0.6 * fresnel);
   // Moon glitter path at night.
@@ -709,8 +732,14 @@ void main() {
     col = mix(srgbToLinear(vec3(0.031, 0.188, 0.420)), srgbToLinear(vec3(0.969, 0.984, 1.0)), u);
   }
 
-  float fogAmount = 1.0 - exp(-pow(dist * uFogDensity, 2.0));
-  col = mix(col, horizonColor(), clamp(fogAmount, 0.0, 1.0));
+  // From below the sea is its own medium: shade the underside and leave the fog to the
+  // absorption pass (or the scene fog on the fallback path).
+  if (uUnderwater > 0.5) {
+    col = underwaterSurface(V, dot(N, V) < 0.0 ? -N : N, foam);
+  } else {
+    float fogAmount = 1.0 - exp(-pow(dist * uFogDensity, 2.0));
+    col = mix(col, horizonColor(), clamp(fogAmount, 0.0, 1.0));
+  }
   gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>

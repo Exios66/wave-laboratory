@@ -13,6 +13,7 @@ import type { VesselCommand } from '../vessel/api';
 import {
   detectDeviceProfile,
   effectiveQuality,
+  resolvePostSettings,
   graphicsBudget,
   ResolutionGovernor,
 } from './deviceProfile';
@@ -40,6 +41,8 @@ export class LabRuntime {
   /** Day:night clock [h]. Advances with simulated time, so pausing stops the sun too. */
   private clockHours = useLab.getState().timeOfDay;
   private clockStamp = 0;
+  /** Where the sea surface was last asked for (to re-ask while paused when the camera moves). */
+  private surfaceProbe: { x: number; y: number } | null = null;
 
   constructor() {
     this.client = new SimClient();
@@ -58,6 +61,7 @@ export class LabRuntime {
       this.simT = frame.t;
       if (frame.t + 1e-4 < this.displayT) this.displayT = frame.t;
       this.renderer?.setFrame(frame);
+      this.renderer?.setCameraSurface(frame.cameraSurface ?? null, frame.t);
       const now = performance.now();
       this.announceHealth(frame, now);
       const playing = useLab.getState().playing;
@@ -76,6 +80,7 @@ export class LabRuntime {
         if (s.revision !== this.loadedRevision) this.load();
         else {
           if (s.performance !== prev.performance) this.applyPerformanceMode();
+          else if (s.experiment.quality !== prev.experiment.quality) this.pushPost();
           // Visual-only weather edits do not reload; the worker still needs them for its readouts.
           if (s.experiment.weather !== prev.experiment.weather) {
             this.client.setWeather(s.experiment.weather);
@@ -97,6 +102,7 @@ export class LabRuntime {
           this.renderer.setEnvironment(s.experiment.environment);
         }
         if (s.ambience !== prev.ambience) this.renderer.setAmbience(s.ambience);
+        if (s.display !== prev.display) this.pushPost();
         if (s.timeOfDay !== prev.timeOfDay && Math.abs(s.timeOfDay - this.clockHours) > 1e-6) {
           // Someone set the clock (settings or reset): jump to it.
           this.clockHours = s.timeOfDay;
@@ -116,6 +122,13 @@ export class LabRuntime {
     }
   }
 
+  /** Resolve the display preferences against this device and quality, and hand them over. */
+  private pushPost(): void {
+    this.renderer?.setPost(
+      resolvePostSettings(useLab.getState().display, this.targetQuality(), detectDeviceProfile()),
+    );
+  }
+
   private targetQuality() {
     const s = useLab.getState();
     return effectiveQuality(s.experiment.quality, s.performance, detectDeviceProfile());
@@ -129,6 +142,7 @@ export class LabRuntime {
     const quality = this.targetQuality();
     this.visualQuality = quality;
     this.renderer?.setQuality(quality);
+    this.pushPost();
     this.client.load(s.experiment, quality);
   }
 
@@ -140,6 +154,7 @@ export class LabRuntime {
       this.client.setVisualQuality(quality);
     }
     this.renderer?.setQuality(quality);
+    this.pushPost();
     this.configureGovernor();
     if (this.canvas) this.resize(this.canvas);
   }
@@ -174,6 +189,7 @@ export class LabRuntime {
     this.renderer.setCamera(s.camera, s.cameraTarget);
     this.renderer.setSelection(selectionId(s.selection));
     this.renderer.setAmbience(s.ambience);
+    this.pushPost();
     this.renderer.setTimeOfDay(this.clockHours);
     this.pushSceneToRenderer();
     this.canvas = canvas;
@@ -236,7 +252,9 @@ export class LabRuntime {
     const wall = Math.min(0.1, Math.max(0, (now - this.lastTime) / 1000));
     this.lastTime = now;
     const s = useLab.getState();
-    if (s.playing && s.status === 'ready') this.client.advance(wall * s.timeScale);
+    const probe = this.renderer?.cameraProbePoint() ?? undefined;
+    if (s.playing && s.status === 'ready') this.client.advance(wall * s.timeScale, probe);
+    else if (probe && s.status === 'ready') this.probeWhilePaused(probe);
     this.advanceDisplayClock(wall, s.playing && s.status === 'ready', s.timeScale);
     this.renderer?.setVisualTime(this.displayT);
     this.advanceClock(now, wall, s);
@@ -246,6 +264,13 @@ export class LabRuntime {
       s.setRenderScale(this.governor.scale);
     }
     this.renderer?.render();
+  }
+
+  /** Paused: the waves stand still but the camera can still move below them. */
+  private probeWhilePaused(probe: { x: number; y: number }): void {
+    const last = this.surfaceProbe;
+    if (last && Math.hypot(probe.x - last.x, probe.y - last.y) < 0.5) return;
+    if (this.client.probe(probe)) this.surfaceProbe = probe;
   }
 
   private advanceClock(now: number, wall: number, s: ReturnType<typeof useLab.getState>): void {
@@ -271,7 +296,10 @@ export class LabRuntime {
 
   stepOnce(): void {
     const s = useLab.getState();
-    this.client.step(Math.max(1, Math.round(0.1 / s.experiment.timestep)));
+    this.client.step(
+      Math.max(1, Math.round(0.1 / s.experiment.timestep)),
+      this.renderer?.cameraProbePoint() ?? undefined,
+    );
   }
 
   command(vesselId: string, cmd: VesselCommand): void {

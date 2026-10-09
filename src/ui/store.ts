@@ -21,7 +21,12 @@ import {
 import { presetExperiment } from '../schema/presets';
 import type { SeaDiagnostics, SimFrame } from '../sim/types';
 import type { VesselDefinition } from '../vessel/api';
-import { parsePerformanceMode, type PerformanceMode } from './deviceProfile';
+import {
+  parsePerformanceMode,
+  sanitizeDisplay,
+  type DisplaySettings,
+  type PerformanceMode,
+} from './deviceProfile';
 import {
   clampLayout,
   defaultLayout,
@@ -81,6 +86,8 @@ export interface LabState {
   performance: PerformanceMode;
   /** Day:night cycle, islands, sea life and sailors (viewer preference, not saved in files). */
   ambience: AmbienceSettings;
+  /** Bloom, film grain and vignette (viewer preference, persisted, not saved in files). */
+  display: DisplaySettings;
   /** Clock time of the day:night cycle [h], refreshed a few times a second for display. */
   timeOfDay: number;
   /** Current dynamic render scale (1 = full resolution). */
@@ -110,6 +117,7 @@ export interface LabState {
   setTheme(theme: ThemePreference): void;
   setPerformance(mode: PerformanceMode): void;
   setAmbience(patch: Partial<AmbienceSettings>): void;
+  setDisplay(patch: Partial<DisplaySettings>): void;
   setTimeOfDay(hours: number): void;
   setRenderScale(scale: number): void;
   setDockTab(tab: DockTab): void;
@@ -188,6 +196,15 @@ function readAmbience(): AmbienceSettings {
   }
 }
 
+export function readDisplay(): DisplaySettings {
+  try {
+    const raw = localStorage.getItem('wave-lab:display');
+    return sanitizeDisplay(raw ? JSON.parse(raw) : {});
+  } catch {
+    return sanitizeDisplay({});
+  }
+}
+
 /** Fill in defaults and clamp anything out of range (old or hand-edited storage). */
 export function sanitizeAmbience(raw: Partial<AmbienceSettings>): AmbienceSettings {
   const d = DEFAULT_AMBIENCE;
@@ -230,6 +247,7 @@ export const useLab = create<LabState>()((set, get) => ({
   theme: readTheme(),
   performance: readPerformance(),
   ambience: readAmbience(),
+  display: readDisplay(),
   timeOfDay: readAmbience().startHour,
   renderScale: 1,
   dockTab: 'gauges',
@@ -277,8 +295,14 @@ export const useLab = create<LabState>()((set, get) => ({
       selection: null,
       cameraTarget: null,
       camera:
-        s.camera === 'orbit' || s.camera === 'top' || s.camera === 'plane' ? s.camera : 'orbit',
-      groundCamera: s.groundCamera === 'top' ? 'top' : 'orbit',
+        s.camera === 'orbit' ||
+        s.camera === 'top' ||
+        s.camera === 'underwater' ||
+        s.camera === 'plane'
+          ? s.camera
+          : 'orbit',
+      groundCamera:
+        s.groundCamera === 'top' || s.groundCamera === 'underwater' ? s.groundCamera : 'orbit',
     }));
     if (message) get().notify('success', message);
   },
@@ -377,6 +401,15 @@ export const useLab = create<LabState>()((set, get) => ({
       /* storage unavailable */
     }
     set(patch.startHour !== undefined ? { ambience, timeOfDay: ambience.startHour } : { ambience });
+  },
+  setDisplay(patch) {
+    const display = sanitizeDisplay({ ...get().display, ...patch });
+    try {
+      localStorage.setItem('wave-lab:display', JSON.stringify(display));
+    } catch {
+      /* storage unavailable */
+    }
+    set({ display });
   },
   setTimeOfDay(timeOfDay) {
     set({ timeOfDay: ((timeOfDay % 24) + 24) % 24 });

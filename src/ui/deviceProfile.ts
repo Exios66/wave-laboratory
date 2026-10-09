@@ -3,6 +3,7 @@
  * anything from a phone or a laptop with integrated graphics (or a software renderer) up to a
  * desktop GPU. Physics is unaffected: only visual resolution changes.
  */
+import type { PostSettings } from '../render/api';
 import type { OceanQuality } from '../schema/experiment';
 
 /** Graphics setting: automatic for this device, or an explicit level. */
@@ -41,6 +42,10 @@ export interface DeviceProfile {
   /** Human-readable reason, shown in the UI. */
   description: string;
   gpu: string;
+  /** Software renderer (SwiftShader, llvmpipe, …). */
+  software: boolean;
+  /** Phone-sized touch device. */
+  mobile: boolean;
 }
 
 const ORDER: OceanQuality[] = ['low', 'medium', 'high', 'ultra'];
@@ -81,13 +86,22 @@ export function detectDeviceProfile(): DeviceProfile {
 
   let profile: DeviceProfile;
   if (gpu === 'none') {
-    profile = { maxQuality: 'low', maxPixelRatio: 1, description: 'No WebGL 2', gpu };
+    profile = {
+      maxQuality: 'low',
+      maxPixelRatio: 1,
+      description: 'No WebGL 2',
+      gpu,
+      software: false,
+      mobile,
+    };
   } else if (software) {
     profile = {
       maxQuality: 'low',
       maxPixelRatio: 1,
       description: 'Software rendering detected — using the lightest settings',
       gpu,
+      software: true,
+      mobile,
     };
   } else if (mobile || memory <= 4 || cores <= 4) {
     profile = {
@@ -95,6 +109,8 @@ export function detectDeviceProfile(): DeviceProfile {
       maxPixelRatio: 1.5,
       description: 'Mobile or low-power device — balanced settings',
       gpu,
+      software: false,
+      mobile,
     };
   } else if (integrated) {
     profile = {
@@ -102,9 +118,18 @@ export function detectDeviceProfile(): DeviceProfile {
       maxPixelRatio: 1.5,
       description: 'Integrated graphics — high detail, moderate resolution',
       gpu,
+      software: false,
+      mobile,
     };
   } else {
-    profile = { maxQuality: 'ultra', maxPixelRatio: 2, description: 'Dedicated graphics', gpu };
+    profile = {
+      maxQuality: 'ultra',
+      maxPixelRatio: 2,
+      description: 'Dedicated graphics',
+      gpu,
+      software: false,
+      mobile,
+    };
   }
   cached = profile;
   return profile;
@@ -187,4 +212,44 @@ export class ResolutionGovernor {
     }
     return Math.abs(this.scale - before) > 1e-6;
   }
+}
+
+/** Display preferences for the post chain (viewer preference, not experiment data). */
+export type BloomPreference = 'auto' | 'on' | 'off';
+
+export interface DisplaySettings {
+  /** `auto` blooms on medium+ quality, but not on phones, software GPUs or low quality. */
+  bloom: BloomPreference;
+  grain: boolean;
+  vignette: boolean;
+}
+
+export const DEFAULT_DISPLAY: DisplaySettings = { bloom: 'auto', grain: false, vignette: false };
+
+/** Fill in defaults for missing or invalid saved values. */
+export function sanitizeDisplay(raw: unknown): DisplaySettings {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const d = DEFAULT_DISPLAY;
+  return {
+    bloom: r.bloom === 'on' || r.bloom === 'off' || r.bloom === 'auto' ? r.bloom : d.bloom,
+    grain: typeof r.grain === 'boolean' ? r.grain : d.grain,
+    vignette: typeof r.vignette === 'boolean' ? r.vignette : d.vignette,
+  };
+}
+
+/** What the renderer should draw: resolves bloom `auto` against the device and quality. */
+export function resolvePostSettings(
+  display: DisplaySettings,
+  quality: OceanQuality,
+  profile: Pick<DeviceProfile, 'software' | 'mobile'>,
+): PostSettings {
+  const autoBloom =
+    (quality === 'medium' || quality === 'high' || quality === 'ultra') &&
+    !profile.software &&
+    !profile.mobile;
+  return {
+    bloom: display.bloom === 'auto' ? autoBloom : display.bloom === 'on',
+    grain: display.grain,
+    vignette: display.vignette,
+  };
 }
