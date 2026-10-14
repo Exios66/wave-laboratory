@@ -311,6 +311,24 @@ test.describe('Wave Laboratory app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('underwater camera shows a live depth badge and returns to orbit', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    const underwater = page.getByRole('radio', { name: 'Underwater' });
+    await underwater.click();
+    await expect(underwater).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByText(/^Underwater · \d+\.\d m$/)).toBeVisible({ timeout: 10_000 });
+    await page.screenshot({ path: 'test-results/underwater-view.png' });
+    await page.getByRole('radio', { name: 'Orbit' }).click();
+    await expect(page.getByRole('radio', { name: 'Orbit' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await expect(page.getByText(/^Underwater · /)).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
   test('enlarges the 3D view by hiding the side panels and chart dock', async ({ page }) => {
     const errors = trackErrors(page);
     await page.goto('/');
@@ -374,9 +392,55 @@ test.describe('Wave Laboratory app', () => {
     await page.getByRole('button', { name: 'Flood compartment' }).click();
     await expect.poll(percent, { timeout: 20_000 }).toBeGreaterThan(0);
     // The effective GM drops below the intact value as the water comes aboard.
-    await expect(page.getByText('GM lost')).toBeVisible();
+    const gmLost = page.locator('.flooding dt', { hasText: 'GM lost' }).locator('xpath=../dd');
+    await expect
+      .poll(async () => Number.parseFloat((await gmLost.textContent())!))
+      .toBeGreaterThan(0);
+    await page.getByRole('button', { name: 'Pause', exact: true }).click();
     await page.getByRole('button', { name: 'Pump out / repair' }).click();
+    await page.getByRole('button', { name: 'Step 0.1 seconds' }).click();
     await expect(page.getByText('Pumps running, holes plugged.')).toBeVisible();
+    await page.getByRole('button', { name: 'Pump out / repair' }).click();
+    await page.getByRole('button', { name: 'Step 0.1 seconds' }).click();
+    await expect(page.getByText('Holes plugged, water remains aboard.')).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test('keeps the flooding compartment valid across hull changes', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    await page
+      .getByRole('navigation', { name: 'Scene' })
+      .getByRole('button', { name: /\d+ kn/ })
+      .first()
+      .click();
+    const hull = page.getByRole('combobox', { name: 'Hull type' });
+    const bay = page.getByRole('combobox', { name: 'Compartment to flood' });
+    await hull.selectOption('cargo-ship');
+    await expect(bay.locator('option')).toHaveCount(6);
+    await bay.selectOption('5');
+    await hull.selectOption('patrol-boat');
+    await expect(bay.locator('option')).toHaveCount(4);
+    await expect(bay).toHaveValue('3');
+    await page.getByRole('button', { name: 'Flood compartment' }).click();
+    await expect(page.getByText('1 breach(es) open.', { exact: true })).toBeVisible();
+    await expect
+      .poll(
+        async () => {
+          const title = (await page.locator('.flooding__bay').last().getAttribute('title'))!;
+          return Number(/(\d+) % flooded/.exec(title)![1]);
+        },
+        { timeout: 20_000 },
+      )
+      .toBeGreaterThan(0);
+    await hull.selectOption('cargo-ship');
+    await expect(bay.locator('option')).toHaveCount(6);
+    await expect(bay).toHaveValue('3');
+    await bay.selectOption('1');
+    await hull.selectOption('patrol-boat');
+    await expect(bay.locator('option')).toHaveCount(4);
+    await expect(bay).toHaveValue('1');
     expect(errors).toEqual([]);
   });
 
@@ -424,6 +488,42 @@ test.describe('Wave Laboratory app', () => {
       .click();
     await expect(page.getByRole('heading', { name: 'Wave system', exact: true })).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Crest height' })).toHaveValue('12.0');
+    expect(errors).toEqual([]);
+  });
+
+  test('post-processing: bloom, grain and vignette persist and render cleanly', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Settings' });
+    await expect(dialog).toBeVisible();
+    const results = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
+      .analyze();
+    expect(results.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+    await dialog.getByLabel('Bloom').selectOption('on');
+    await dialog.getByRole('switch', { name: 'Film grain' }).click();
+    await dialog.getByRole('switch', { name: 'Vignette' }).click();
+    await expect(dialog.getByRole('switch', { name: 'Film grain' })).toBeChecked();
+    await expect(dialog.getByRole('switch', { name: 'Vignette' })).toBeChecked();
+
+    await page.keyboard.press('Escape');
+    const time = page.locator('.transport__time');
+    const t0 = await simulationSeconds(time);
+    await expect.poll(() => simulationSeconds(time), { timeout: 30_000 }).toBeGreaterThan(t0);
+    await page.screenshot({ path: 'test-results/post-stack.png' });
+    expect(errors).toEqual([]);
+
+    await page.reload();
+    await waitForSimulation(page);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    const again = page.getByRole('dialog', { name: 'Settings' });
+    await expect(again.getByLabel('Bloom')).toHaveValue('on');
+    await expect(again.getByRole('switch', { name: 'Film grain' })).toBeChecked();
+    await expect(again.getByRole('switch', { name: 'Vignette' })).toBeChecked();
     expect(errors).toEqual([]);
   });
 });

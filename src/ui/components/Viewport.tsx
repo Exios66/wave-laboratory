@@ -15,6 +15,7 @@ const CAMERAS: { mode: CameraMode; label: string; needsVessel: boolean }[] = [
   { mode: 'top', label: 'Top', needsVessel: false },
   { mode: 'follow', label: 'Follow', needsVessel: true },
   { mode: 'bridge', label: 'Bridge', needsVessel: true },
+  { mode: 'underwater', label: 'Underwater', needsVessel: false },
 ];
 
 const OVERLAYS: { mode: OverlayMode; label: string }[] = [
@@ -236,12 +237,39 @@ function Hud() {
           {status === 'ready' && 'Simulation running'}
         </div>
         {camera === 'plane' && <RideCaption />}
+        <DepthBadge />
         <div className="hud__corner">
           {overlay !== 'none' && <Legend mode={overlay} />}
           <Minimap />
         </div>
       </div>
       <RevealButtons />
+    </div>
+  );
+}
+
+/** Live "Underwater · 4.2 m" badge while the camera is under the sea, whichever view is active. */
+function DepthBadge() {
+  const [depth, setDepth] = useState<number | null>(null);
+  useEffect(() => {
+    const read = () => {
+      const stats = getRuntime().rendererApi?.stats;
+      setDepth(stats?.underwater ? stats.cameraDepth : null);
+    };
+    read();
+    const id = window.setInterval(read, 250);
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <div className={depth === null ? 'visually-hidden' : 'hud__card hud__depth'}>
+      <span
+        aria-live="polite"
+        role="status"
+        className={depth === null ? undefined : 'visually-hidden'}
+      >
+        {depth === null ? '' : 'Underwater'}
+      </span>
+      {depth !== null && <span aria-hidden="true">Underwater · {depth.toFixed(1)} m</span>}
     </div>
   );
 }

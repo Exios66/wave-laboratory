@@ -1,6 +1,7 @@
 import { PRESETS, presetExperiment } from '../../schema/presets';
 import {
   detectDeviceProfile,
+  type BloomPreference,
   PERFORMANCE_LABELS,
   PERFORMANCE_MODES,
   type PerformanceMode,
@@ -169,6 +170,7 @@ function SettingsContent() {
       </fieldset>
       <DayNightSettings />
       <ScenerySettings />
+      <PostSettings />
     </>
   );
 }
@@ -211,6 +213,39 @@ function DayNightSettings() {
         disabled={!ambience.dayNight}
         onChange={(v) => set({ startHour: Number(v) })}
         hint={`Now ${formatClock(timeOfDay)}. Choosing an hour jumps the clock there and is remembered as the start time.`}
+      />
+    </fieldset>
+  );
+}
+
+function PostSettings() {
+  const display = useLab((s) => s.display);
+  const set = useLab.getState().setDisplay;
+  return (
+    <fieldset className="fieldset">
+      <legend>Post-processing</legend>
+      <SelectField<BloomPreference>
+        label="Bloom"
+        value={display.bloom}
+        options={[
+          { value: 'auto', label: 'Auto (this device)' },
+          { value: 'on', label: 'On' },
+          { value: 'off', label: 'Off' },
+        ]}
+        onChange={(v) => set({ bloom: v })}
+        hint="A soft glow around the sun, its glint on the water and lightning. Auto turns it on for medium quality and above, but not on phones or software rendering."
+      />
+      <Switch
+        label="Film grain"
+        checked={display.grain}
+        onChange={(v) => set({ grain: v })}
+        hint="Fine moving noise over the picture."
+      />
+      <Switch
+        label="Vignette"
+        checked={display.vignette}
+        onChange={(v) => set({ vignette: v })}
+        hint="Gently darkens the corners of the view."
       />
     </fieldset>
   );

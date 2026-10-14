@@ -34,6 +34,7 @@ export interface FoilAero {
   aspectEff: number;
 }
 
+/** Apply the hull end-plate factor to obtain effective aspect ratio and lift slope [1/rad]. */
 export function foilAero(foil: LateralFoil): FoilAero {
   const aspectEff = foil.aspect * END_PLATE;
   return { slope: helmboldSlope(aspectEff), aspectEff };
@@ -65,8 +66,9 @@ export interface FoilForce {
 }
 
 /**
- * Force of a foil in the flow of water velocity (relative to the foil, body frame) given by the
- * foil's own velocity (u, v) through the water [m/s]. Handles astern flow by symmetry.
+ * Force for the foil's body-frame velocity (u, v) through water [m/s], with planform `area`
+ * [m²] and water density `rho` [kg/m³]. Handles astern flow by symmetry. Overwrites and
+ * returns `out` with force [N], zero below a speed of 1e-6 m/s.
  */
 export function foilForce(
   u: number,
