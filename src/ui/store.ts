@@ -428,7 +428,7 @@ export const useLab = create<LabState>()((set, get) => ({
   },
   notify(tone, message) {
     const id = ++noticeId;
-    set((s) => ({ notices: [...s.notices.slice(-3), { id, tone, message }] }));
+    set((s) => ({ notices: [...s.notices.slice(-2), { id, tone, message }] }));
   },
   setDuckMode(on) {
     set({ duckMode: on });
