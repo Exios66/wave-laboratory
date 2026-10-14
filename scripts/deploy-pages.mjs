@@ -6,7 +6,8 @@
  *   pnpm deploy:pages --dry-run  build the site into a temporary folder; touch nothing here
  *
  * GitHub Pages is "Deploy from a branch" → main → /docs. The site (index.html, 404.html,
- * assets/ and .nojekyll) is written into docs/ next to the markdown notes, which are kept.
+ * assets/ and .nojekyll) is written into docs/ next to the markdown notes: only those four
+ * site entries are ever replaced, everything else already in docs/ is left untouched.
  * Asset paths are relative, so the site works at any URL prefix.
  */
 import { execFileSync } from 'node:child_process';
@@ -18,7 +19,6 @@ const dryRun = process.argv.includes('--dry-run');
 const root = resolve(import.meta.dirname, '..');
 const dist = join(root, 'dist');
 const docs = join(root, 'docs');
-const KEEP = new Set(['PLAN.md', 'ARCHITECTURE.md', 'PHYSICS.md']);
 
 function builtIndex() {
   const named = join(dist, 'index.html');
@@ -47,7 +47,7 @@ const indexHtml = builtIndex();
  * Replace the site in `dir`. The new files are staged next to it first, so a failed copy never
  * leaves a half-deleted site behind.
  */
-const copySite = (dir, { preserve }) => {
+const copySite = (dir) => {
   const staged = mkdtempSync(join(tmpdir(), 'wave-lab-site-'));
   cpSync(join(dist, 'assets'), join(staged, 'assets'), {
     recursive: true,
@@ -55,7 +55,6 @@ const copySite = (dir, { preserve }) => {
   });
   if (existsSync(dir)) {
     for (const entry of readdirSync(dir)) {
-      if (preserve?.has(entry)) continue;
       if (
         entry === 'assets' ||
         entry === 'index.html' ||
@@ -76,12 +75,12 @@ const copySite = (dir, { preserve }) => {
 if (dryRun) {
   // Never touch the committed site on a dry run: lay it out in a scratch folder instead.
   const preview = mkdtempSync(join(tmpdir(), 'wave-lab-pages-'));
-  copySite(preview, {});
+  copySite(preview);
   console.info(`› Dry run: the site was built into ${preview}; nothing here changed.`);
   process.exit(0);
 }
 
-copySite(docs, { preserve: KEEP });
+copySite(docs);
 
 run('git', ['add', '--all', 'docs']);
 const changed = out('git', ['status', '--porcelain', '--', 'docs']);

@@ -151,9 +151,9 @@ export class WakeTrail {
 /** Keeps the trails of all vessels and packs them for the ocean shader. */
 export class WakeField {
   readonly texture: THREE.DataTexture;
-  /** Per wake: (length, beam, current speed, head odometer). */
+  /** Per wake: (length, beam, unused, head odometer) — the shader reads only x/y/w. */
   readonly ship = Array.from({ length: WAKE_VESSELS }, () => new THREE.Vector4());
-  /** Per wake: (point count, Froude number, foam decay [s], lifetime [s]). */
+  /** Per wake: (point count, unused, foam decay [s], lifetime [s]) — only x/z/w read. */
   readonly info = Array.from({ length: WAKE_VESSELS }, () => new THREE.Vector4());
   /** Per wake: water-frame bounding box (min x, min y, max x, max y) of everything it can draw. */
   readonly box = Array.from({ length: WAKE_VESSELS }, () => new THREE.Vector4());
@@ -180,11 +180,9 @@ export class WakeField {
    * @param drift current × t: the offset between world and water frames [m]
    */
   update(t: number, sources: readonly WakeSource[], drift: { x: number; y: number }): void {
-    const live = new Set<string>();
     let n = 0;
     for (const src of sources) {
       if (n >= WAKE_VESSELS) break;
-      live.add(src.id);
       let trail = this.trails.get(src.id);
       if (!trail) this.trails.set(src.id, (trail = new WakeTrail()));
       const sx = src.stern.x - drift.x;
@@ -196,7 +194,8 @@ export class WakeField {
       this.pack(n, t, src, trail, drift);
       n++;
     }
-    for (const id of [...this.trails.keys()]) if (!live.has(id)) this.trails.delete(id);
+    for (const id of this.trails.keys())
+      if (!sources.some((s) => s.id === id)) this.trails.delete(id);
     this.count = n;
     this.texture.needsUpdate = true;
   }
@@ -249,9 +248,8 @@ export class WakeField {
       if (j === 2 && Math.hypot(p.x - d[base + 4]!, p.y - d[base + 5]!) < 1e-3) continue;
       put(j++, p.x, p.y, p.t, p.odo, p.speed);
     }
-    const froude = src.speed / Math.sqrt(9.81 * Math.max(L, 1));
-    this.ship[row]!.set(L, src.beam, src.speed, head);
-    this.info[row]!.set(j, froude, foamDecay(L), wakeLifetime(L));
+    this.ship[row]!.set(L, src.beam, 0, head);
+    this.info[row]!.set(j, 0, foamDecay(L), wakeLifetime(L));
     this.box[row]!.set(minX, minY, maxX, maxY);
   }
 

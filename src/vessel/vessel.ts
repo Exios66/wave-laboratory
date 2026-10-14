@@ -18,6 +18,7 @@
  * vessel's fastest natural frequency and damping rate, so any step up to ~1/30 s is stable.
  */
 import { KNOT, wrapAngle } from '../core/units';
+import { compassFrom } from '../core/mathUtil';
 import { integrateQuat, quatFromEuler, quatToEuler, type Quat, type Vec3 } from '../core/vec';
 import { headingFromYaw, yawFromHeading } from '../ocean/systems';
 import type { OceanField } from '../ocean/oceanField';
@@ -214,6 +215,12 @@ export class Vessel {
   private time = 0;
   private stepped = false;
 
+  /**
+   * Initialize at the configured position, heading, and speed, with calm-water floating trim.
+   * Starts dry and deploys the configured mooring only when available at the field's depth.
+   * Errors from the wind provider propagate when initializing sails under autopilot.
+   * @throws {RangeError} If the effective mass matrix is singular during hydrodynamic setup.
+   */
   constructor(
     id: string,
     definition: VesselDefinition,
@@ -246,7 +253,9 @@ export class Vessel {
     const def = definition;
     this.sailBalanceX =
       Math.abs(hydro.clarke.yv) > 1e-9 ? (hydro.clarke.nv / hydro.clarke.yv) * L - 0.03 * L : 0;
-    this.foreAftAeros = def.foreAft ? def.foreAft.sails.map((sl) => sailAero(sl.kind, sl.aspect)) : [];
+    this.foreAftAeros = def.foreAft
+      ? def.foreAft.sails.map((sl) => sailAero(sl.kind, sl.aspect))
+      : [];
     this.foreAftOut = def.foreAft ? emptyForeAftLoad(def.foreAft) : null;
     this.sheets = new Float64Array(def.foreAft?.sails.length ?? 0);
     this.jibIndex = def.foreAft ? def.foreAft.sails.findIndex((sl) => sl.kind === 'jib') : -1;
@@ -259,7 +268,8 @@ export class Vessel {
     // negative, but its righting arm at 25° is +0.3 m).
     const hz = def.hydrostatics;
     const k = Math.min(hz.gz.length - 1.01, HEEL_LIMIT_DEG / 5);
-    const gzLimit = hz.gz[Math.floor(k)]! + (k - Math.floor(k)) * (hz.gz[Math.ceil(k)]! - hz.gz[Math.floor(k)]!);
+    const gzLimit =
+      hz.gz[Math.floor(k)]! + (k - Math.floor(k)) * (hz.gz[Math.ceil(k)]! - hz.gz[Math.floor(k)]!);
     this.heelAllowance = hydro.mass * g * Math.max(0, gzLimit);
 
     // Equilibrium in this environment (water density may differ from the design density).
@@ -429,6 +439,12 @@ export class Vessel {
 
   // ------------------------------------------------------------------ commands
 
+  /**
+   * Apply control orders. Repair restores health, seals breaches, clears foundering, and starts
+   * pumping existing water; flooding orders stop pumps, while starting pumps seals breaches.
+   * If combined, repair, flood, and pump orders take effect in that order. Dropping an already
+   * deployed anchor adjusts its line length when a length or scope is supplied.
+   */
   command(cmd: VesselCommand): void {
     if (cmd.headingDeg !== undefined) this.headingCmdDeg = cmd.headingDeg;
     if (cmd.speedKn !== undefined) this.speedCmdKn = cmd.speedKn;
@@ -480,6 +496,7 @@ export class Vessel {
     };
   }
 
+  /** Requested line length [m], or scope times depth, raised to 1.05 depths then capped by gear. */
   private lineLength(scope: number, length?: number): number {
     const m = this.mooring;
     return length === undefined
@@ -494,8 +511,10 @@ export class Vessel {
   }
 
   /**
-   * Open a breach of `area` m² in compartment `i` on the side `side` (±1, 0 = bottom) at the
-   * waterline (side) or just above the floor (bottom).
+   * Open a breach of `area` m² in compartment `i`: `side` is +1 for port, −1 for starboard,
+   * or 0 for the bottom. Side breaches sit half a design draft below the design waterline;
+   * bottom breaches sit 0.1 draft above the floor. Positions are clamped to the compartment.
+   * Missing compartments are ignored.
    */
   private breachCompartment(i: number, area: number, side: number): void {
     const c = this.flooding.compartments[i];
@@ -523,7 +542,11 @@ export class Vessel {
     s.py += push.y;
   }
 
-  /** Remove `amount` of health (no-op when damage is off). */
+  /**
+   * Remove `amount` of health (no-op when damage is off). Collisions of at least
+   * `COLLISION_BREACH_MIN` also breach the compartment and side nearest `at`, when supplied.
+   * `at` is the horizontal contact position in world coordinates [m].
+   */
   applyDamage(amount: number, cause: DamageCause, at?: { x: number; y: number }): void {
     this.damage.damage(amount, cause);
     // A hard collision holes the compartment nearest the impact, on the side that was hit.
@@ -576,7 +599,12 @@ export class Vessel {
 
   // ------------------------------------------------------------------ stepping
 
-  /** Advance the vessel from time t to t + dt. */
+  /**
+   * Advance motion, controls, damage, flooding, and mooring from `t` to `t + dt` [s].
+   * Does nothing unless `dt` is positive.
+   * Errors from the wind provider propagate.
+   * @throws {RangeError} If water-patch sampling detects non-finite vessel bounds.
+   */
   step(dt: number, t: number): void {
     if (!(dt > 0)) return;
     const def = this.definition;
@@ -724,6 +752,10 @@ export class Vessel {
     this.stepFlooding(dt, slam, healthBefore - this.damage.health);
   }
 
+  /**
+   * Advance flooding and foundering over `dt` [s]; `healthLost` is this step's health decrease.
+   * Accumulates slamming damage for bow breaches and constrains foundered hulls to the seabed.
+   */
   private stepFlooding(dt: number, slam: boolean, healthLost: number): void {
     const fl = this.flooding;
     const R = this.s.rot;
@@ -755,7 +787,7 @@ export class Vessel {
     if (this.foundered) this.settleOnSeabed();
   }
 
-  /** A sunken ship comes to rest on the bottom (bounded sinking in shallow water). */
+  /** Lift a hull penetrating the seabed until its bounds clear it and remove downward velocity. */
   private settleOnSeabed(): void {
     const s = this.s;
     const R = s.rot;
@@ -985,7 +1017,15 @@ export class Vessel {
         // Apparent wind in the heading frame (x along the heading, y to port), auto-trimmed
         // sheets once per substep, then the heading-frame forces at the sails' body-frame
         // application points — the same slots the square-rig load fills above.
-        const aw = apparentWind(this.windU, this.windV, shipX, shipY, R[0]!, R[3]!, this.apparentOut);
+        const aw = apparentWind(
+          this.windU,
+          this.windV,
+          shipX,
+          shipY,
+          R[0]!,
+          R[3]!,
+          this.apparentOut,
+        );
         autoTrim(
           def.foreAft,
           this.foreAftAeros,
@@ -1116,6 +1156,7 @@ export class Vessel {
     return Math.acos(Math.max(-1, Math.min(1, this.s.rot[8]!))) / DEG;
   }
 
+  /** Snapshot motion, control, damage, flooding, and mooring readings for the UI and recorder. */
   telemetry(): VesselTelemetry {
     const k = this.kinematics;
     const e = quatToEuler(this.q);
@@ -1165,6 +1206,7 @@ export class Vessel {
     };
   }
 
+  /** Snapshot line readings and profile; unlimited holding is reported as zero limit and load. */
   private mooringTelemetry(): MooringTelemetry {
     const m = this.mooring;
     const sol = m.solution;
@@ -1193,6 +1235,7 @@ export class Vessel {
     };
   }
 
+  /** Copy compartment readings and estimate upright effective GM including free-surface loss. */
   private floodingTelemetry(): FloodingTelemetry {
     const fl = this.flooding;
     const d = this.definition;
@@ -1241,14 +1284,6 @@ export class Vessel {
       waterColumnCalls: this.water.columnCalls,
     };
   }
-}
-
-/** Compass bearing [deg] a wind with world velocity (u, v) comes FROM. */
-function compassFrom(u: number, v: number): number {
-  if (Math.hypot(u, v) < 1e-9) return 0;
-  // Air moving toward bearing b comes from b + 180; bearing of a vector = atan2(east, north).
-  const toward = Math.atan2(u, v) / DEG;
-  return (((toward + 180) % 360) + 360) % 360;
 }
 
 /** Row-major rotation matrix of q written into `out` (allocation-free `quatToMat3`). */

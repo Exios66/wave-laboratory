@@ -3,6 +3,7 @@
  * World space is z-up; the Three.js scene is y-up via (x, y, z) → (x, z, −y).
  */
 import * as THREE from 'three';
+import { smoothstep } from '../core/mathUtil';
 import { rotate, type Quat, type Vec3 } from '../core/vec';
 import type { GpuOceanData } from '../ocean/gpuData';
 import { currentVelocity } from '../ocean/oceanField';
@@ -146,11 +147,6 @@ function srgbToLinear(c: number): number {
   return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 }
 
-const smooth = (e0: number, e1: number, x: number): number => {
-  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
-  return t * t * (3 - 2 * t);
-};
-
 const HORIZON_CLEAR = [0.78, 0.84, 0.9].map(srgbToLinear);
 const HORIZON_DUSK = [0.95, 0.66, 0.46].map(srgbToLinear);
 const HORIZON_NIGHT = [0.15, 0.2, 0.3].map(srgbToLinear);
@@ -171,8 +167,8 @@ function horizonColor(
   dusk = 0,
 ) {
   const mix = (a: number, b: number, t: number) => a + (b - a) * t;
-  const overcast = smooth(0.2, 0.85, cloud);
-  const storm = smooth(0.75, 1, cloud);
+  const overcast = smoothstep(0.2, 0.85, cloud);
+  const storm = smoothstep(0.75, 1, cloud);
   const ch = (i: number) => {
     const base = mix(OVERCAST_GREY[i]!, OVERCAST_STORM[i]!, storm);
     const clear = mix(HORIZON_CLEAR[i]!, HORIZON_DUSK[i]!, dusk * 0.45);
@@ -718,7 +714,7 @@ export class LabRenderer implements LabRendererApi {
     this.lightLevel = light;
     this.localWind = wind;
     this.weatherStorm = Math.max(
-      smooth(0.55, 1, cloud),
+      smoothstep(0.55, 1, cloud),
       Math.min(1, rain / 6),
       this.windSample.squall,
     );
@@ -726,7 +722,7 @@ export class LabRenderer implements LabRendererApi {
     horizonColor(cloud, this.daylight, flash, this.fogColor, ls?.night ?? 0, ls?.dusk ?? 0);
     this.fog.color.copy(this.fogColor);
     this.renderer.setClearColor(this.fogColor, 1);
-    this.sun.intensity = this.sunBase * (1 - 0.85 * smooth(0.3, 1, cloud));
+    this.sun.intensity = this.sunBase * (1 - 0.85 * smoothstep(0.3, 1, cloud));
     this.hemi.intensity = 0.9 * (0.45 + 0.55 * light) + flash * 2.5;
     this.renderer.toneMappingExposure = 1.05 * (1 + 0.35 * cloud) * (ls?.exposureScale ?? 1);
     if (ls) {
@@ -908,6 +904,7 @@ export class LabRenderer implements LabRendererApi {
     if (seen.size > 256) seen.clear();
   }
 
+  /** Replace vessel and chain views, dispose their resources, clear wakes, and refresh selection. */
   setVessels(vessels: readonly { id: string; definition: VesselDefinition }[]): void {
     for (const layer of this.layers) layer.setVessels?.([]);
     for (const view of this.vessels.values()) this.disposeVessel(view);
@@ -1009,6 +1006,11 @@ export class LabRenderer implements LabRendererApi {
     }
   }
 
+  /**
+   * Interpolate the hull from `before` to `state` using `blend` (0–1), or use `state` directly
+   * without a previous frame. Update sails and align the chain with the drawn bow.
+   * Unknown vessel IDs are ignored.
+   */
   private applyVessel(
     state: SimFrame['vessels'][number],
     before: SimFrame['vessels'][number] | undefined,
@@ -1377,6 +1379,7 @@ export class LabRenderer implements LabRendererApi {
     this.renderer.dispose();
   }
 
+  /** Build a vessel view and separate chain view, with resources owned until `disposeVessel`. */
   private buildVessel(id: string, definition: VesselDefinition): VesselView {
     const group = new THREE.Group();
     group.userData.pickKind = 'vessel';
@@ -1584,6 +1587,7 @@ export class LabRenderer implements LabRendererApi {
     });
   }
 
+  /** Remove hull and chain groups from the scene and release their geometry, materials, and textures. */
   private disposeVessel(view: VesselView): void {
     this.scene.remove(view.group, view.chain.group);
     view.chain.dispose();

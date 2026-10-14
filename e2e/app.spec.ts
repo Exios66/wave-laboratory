@@ -33,9 +33,8 @@ test.describe('Wave Laboratory app', () => {
     await waitForSimulation(page);
     // Simulation time advances while playing.
     const time = page.locator('.transport__time');
-    const t0 = await time.textContent();
-    await page.waitForTimeout(1500);
-    expect(await time.textContent()).not.toBe(t0);
+    const t0 = await simulationSeconds(time);
+    await expect.poll(() => simulationSeconds(time), { timeout: 30_000 }).toBeGreaterThan(t0);
     await page.screenshot({ path: 'test-results/app-default.png' });
     expect(errors).toEqual([]);
   });
@@ -143,11 +142,24 @@ test.describe('Wave Laboratory app', () => {
     await page.goto('/');
     await waitForSimulation(page);
     await page.getByRole('combobox', { name: 'Simulation speed' }).selectOption('4');
-    await page.waitForTimeout(4000);
+    // At 4× speed the simulation outruns the wall clock: poll until it has.
+    // Compare elapsed intervals so setup progress before the timer starts can't satisfy it.
+    const time = page.locator('.transport__time');
+    const startTime = await simulationSeconds(time);
+    const started = Date.now();
+    await expect
+      .poll(
+        async () => (await simulationSeconds(time)) - startTime - (Date.now() - started) / 1000,
+        { timeout: 30_000 },
+      )
+      .toBeGreaterThan(0);
     await page.getByRole('tab', { name: 'Statistics' }).click();
     const table = page.getByRole('table', { name: 'Wave gauges' });
     await expect(table).toBeVisible();
     await expect(table.getByRole('row')).toHaveCount(2);
+    // Hm0 cell of the first gauge row: 'x.xx m' once the recorder has real data,
+    // '—' before it — unlike the wave count, which shows digits even at 0.
+    await expect(table.getByRole('row').nth(1).locator('td').nth(0)).toContainText(/\d\.\d/);
     await page.getByRole('tab', { name: 'Vessel motions' }).click();
     await expect(page.getByRole('figure').first()).toBeVisible();
   });
@@ -200,7 +212,8 @@ test.describe('Wave Laboratory app', () => {
     expect(errors).toEqual([]);
   });
 
-  test('round-trips an experiment through a share link', async ({ page, context }) => {
+  test('round-trips an experiment through a share link', async ({ page, context }, testInfo) => {
+    test.skip(testInfo.project.name.includes('webkit'), 'clipboard permissions are Chromium-only');
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await page.goto('/');
     await waitForSimulation(page);
@@ -249,7 +262,9 @@ test.describe('Wave Laboratory app', () => {
       .click();
     await waitForSimulation(page);
     await expect(wind).not.toHaveValue('42.3');
-    await page.waitForTimeout(1500);
+    const time = page.locator('.transport__time');
+    const t0 = await simulationSeconds(time);
+    await expect.poll(() => simulationSeconds(time), { timeout: 30_000 }).toBeGreaterThan(t0);
     expect(errors).toEqual([]);
   });
 
@@ -273,7 +288,9 @@ test.describe('Wave Laboratory app', () => {
       await page.keyboard.press(key);
     }
     await expect(page.getByText(/Rubber duck mode/)).toBeVisible();
-    await page.waitForTimeout(800);
+    const time = page.locator('.transport__time');
+    const t0 = await simulationSeconds(time);
+    await expect.poll(() => simulationSeconds(time), { timeout: 30_000 }).toBeGreaterThan(t0);
     await page.screenshot({ path: 'test-results/easter-duck.png' });
     await page.keyboard.type('draupner');
     await expect(page.getByRole('textbox', { name: 'Experiment name' })).toHaveValue(

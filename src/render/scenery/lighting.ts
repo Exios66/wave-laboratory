@@ -16,6 +16,7 @@
  *   uGalPole, uGalCentre  the galactic plane's normal and core, star frame
  */
 import * as THREE from 'three';
+import { smoothstep } from '../../core/mathUtil';
 import { GALACTIC_CENTRE, GALACTIC_POLE, skyToStars } from './celestial';
 import type { Environment } from '../../schema/experiment';
 
@@ -104,11 +105,6 @@ export function directionFromAngles(
   out.set(Math.sin(az) * horiz, Math.sin(elev), -Math.cos(az) * horiz);
   if (out.lengthSq() < 1e-6) out.set(0, 1, 0);
   return out.normalize();
-}
-
-function smoothstep(a: number, b: number, x: number): number {
-  const u = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return u * u * (3 - 2 * u);
 }
 
 /** Look of the sky for a sun elevation. All outputs are 0–1. */

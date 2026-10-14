@@ -91,7 +91,7 @@ describe('ship wake trails', () => {
     expect([d[4], d[5]]).toEqual([40, 5]);
     expect(d[3]! - d[7]!).toBeCloseTo(100, 9);
     expect(field.ship[0]!.x).toBe(100);
-    expect(field.info[0]!.y).toBeCloseTo(6 / Math.sqrt(9.81 * 100), 9);
+    expect(field.info[0]!.y).toBe(0);
     // The box covers the hull and the history behind it.
     const box = field.box[0]!;
     expect(box.x).toBeLessThan(40);

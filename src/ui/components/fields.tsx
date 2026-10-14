@@ -67,9 +67,11 @@ export function NumberField({
   const commitText = () => {
     const v = Number(text.replace(',', '.'));
     if (text.trim() === '' || !Number.isFinite(v)) {
-      // Keep the message but stop editing, so a new value from the store is shown again.
       editing.current = false;
       setError(`Enter a number between ${min} and ${max}.`);
+      // Resync the box to the store value at once; the invalid text is gone.
+      setDraft(value);
+      setText(value.toFixed(decimals));
       return;
     }
     if (v < min || v > max) {

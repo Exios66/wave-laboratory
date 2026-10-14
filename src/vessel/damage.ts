@@ -27,6 +27,7 @@
  * {@link thrustFactor}; below 25 % health the steering gear weakens ({@link steeringFactor}); at
  * 0 the vessel is disabled — engine and rudder dead, drifting.
  */
+import { STANDARD_GRAVITY as G } from '../core/constants';
 
 export type DamageCause =
   'slamming' | 'green-water' | 'weather' | 'heel' | 'collision' | 'capsize' | 'flooding';
@@ -56,8 +57,6 @@ export const STEERING_DAMAGE_HEALTH = 0.25;
 const CAUSE_MIN = 1e-6;
 /** How long the latest cause is reported after its last damage [s]. */
 export const CAUSE_HOLD = 5;
-
-const G = 9.80665;
 
 /** Size factor (L_ref / L)^½, limited to 0.4–2.5: small craft suffer more. */
 export function sizeFactor(length: number): number {

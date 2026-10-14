@@ -680,9 +680,23 @@ function sloopYacht(): HullDesign {
       mast: { x: 0.15, zFoot: D, zTop: D + 12.4 },
       sails: [
         // Main: 10.6 m luff, 6.4 m foot (triangular area ≈ 34 m², aspect ≈ 3.3).
-        { kind: 'main', area: 34, aspect: 3.3, tack: { x: 0.15, y: 0, z: D + 0.8 }, head: { x: 0.15, y: 0, z: D + 11.4 }, foot: 6.4 },
+        {
+          kind: 'main',
+          area: 34,
+          aspect: 3.3,
+          tack: { x: 0.15, y: 0, z: D + 0.8 },
+          head: { x: 0.15, y: 0, z: D + 11.4 },
+          foot: 6.4,
+        },
         // Jib on the forestay: 10.7 m luff, 2.6 m foot (area ≈ 14 m²).
-        { kind: 'jib', area: 14, aspect: 8.2, tack: { x: 4.35, y: 0, z: D + 0.65 }, head: { x: 0.35, y: 0, z: D + 10.6 }, foot: 2.6 },
+        {
+          kind: 'jib',
+          area: 14,
+          aspect: 8.2,
+          tack: { x: 4.35, y: 0, z: D + 0.65 },
+          head: { x: 0.35, y: 0, z: D + 10.6 },
+          foot: 2.6,
+        },
       ],
       rigDragArea: 1.2,
     },

@@ -100,3 +100,52 @@ describe('hostile input', () => {
     expect(decodeExperiment(encodeExperiment(presetExperiment('moderate-sea'))).ok).toBe(true);
   });
 });
+
+describe('mooring schema boundaries', () => {
+  it.each([
+    { kind: 'buoy', scope: 1, length: 1, x: -20000, y: 20000 },
+    { kind: 'anchor', scope: 10, length: 3000, x: 20000, y: -20000 },
+  ])('preserves explicit mooring settings in a share link: $kind', (mooring) => {
+    const exp = presetExperiment('at-anchor');
+    const parsed = parseExperiment({ ...exp, vessels: [{ ...exp.vessels[0], mooring }] });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error(parsed.errors.join('; '));
+    const decoded = decodeExperiment(encodeExperiment(parsed.experiment));
+    expect(decoded.ok && decoded.experiment.vessels[0]!.mooring).toEqual(mooring);
+  });
+
+  it.each([
+    ['scope', 0.999],
+    ['scope', 10.001],
+    ['scope', Infinity],
+    ['scope', NaN],
+    ['length', 0.999],
+    ['length', 3000.001],
+    ['length', -Infinity],
+    ['x', -20000.001],
+    ['y', 20000.001],
+    ['x', NaN],
+    ['y', Infinity],
+    ['kind', 'dock'],
+    ['scope', '5'],
+    ['length', null],
+  ])('rejects mooring %s=%s with the field path', (key, value) => {
+    const exp = presetExperiment('at-anchor');
+    const parsed = parseExperiment({
+      ...exp,
+      vessels: [{ ...exp.vessels[0], mooring: { [key as string]: value } }],
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) throw new Error('Invalid mooring accepted');
+    expect(parsed.errors.join('; ')).toContain(`vessels.0.mooring.${key}`);
+  });
+
+  it('accepts the newly added sloop yacht vessel type', () => {
+    const exp = presetExperiment();
+    const parsed = parseExperiment({
+      ...exp,
+      vessels: [{ ...exp.vessels[0], type: 'sloop-yacht' }],
+    });
+    expect(parsed.ok && parsed.experiment.vessels[0]!.type).toBe('sloop-yacht');
+  });
+});

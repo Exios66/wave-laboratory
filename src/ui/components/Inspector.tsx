@@ -566,11 +566,14 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
   const lab = useLab.getState;
   const env = useLab((s) => s.experiment.environment);
   const diag = useLab((s) => s.diagnostics?.systems.find((x) => x.id === wave.id));
-  const update = (recipe: (w: WaveSystem) => void) =>
-    lab().updateExperiment((d) => {
-      const w = d.waves.find((x) => x.id === wave.id);
-      if (w) recipe(w);
-    });
+  const update = (recipe: (w: WaveSystem) => void, reload = true) =>
+    lab().updateExperiment(
+      (d) => {
+        const w = d.waves.find((x) => x.id === wave.id);
+        if (w) recipe(w);
+      },
+      { reload },
+    );
 
   const disp = dispersionFor(env);
   return (
@@ -578,7 +581,7 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
       <TextField
         label="Name"
         value={wave.name}
-        onCommit={(v) => update((w) => void (w.name = v))}
+        onCommit={(v) => update((w) => void (w.name = v), false)}
       />
       <Switch
         label="Enabled"
@@ -878,6 +881,7 @@ function SpreadingFields({
 
 // ------------------------------------------------------------------ vessels
 
+/** Edit vessel setup and issue live control, damage-control, and mooring orders. */
 function VesselInspector({ vessel }: { vessel: VesselConfig }) {
   const lab = useLab.getState;
   const tel = useLab((s) => s.frame?.vessels.find((v) => v.id === vessel.id));
@@ -1186,7 +1190,7 @@ function VesselHealth({ tel, onRepair }: { tel: VesselTelemetry; onRepair: () =>
   );
 }
 
-/** Compartment label from the bow: Bow, 2, 3 … Stern. */
+/** Label a zero-based compartment from the bow: Bow, Bay 2, Bay 3, …, Stern. */
 function bayName(i: number, n: number): string {
   return i === 0 ? 'Bow' : i === n - 1 ? 'Stern' : `Bay ${i + 1}`;
 }
@@ -1281,7 +1285,12 @@ function VesselFlooding({
             </option>
           ))}
         </select>
-        <button type="button" className="btn" disabled={n === 0} onClick={() => onFlood(selectedBay)}>
+        <button
+          type="button"
+          className="btn"
+          disabled={n === 0}
+          onClick={() => onFlood(selectedBay)}
+        >
           <Icon name="warning" size={16} /> Flood compartment
         </button>
         <button
