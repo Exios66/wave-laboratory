@@ -10,6 +10,7 @@ import {
   memberOpacity,
   meanCrossingInterval,
   planCrossing,
+  planReconPass,
   planRide,
   shimmerAmount,
   type Crossing,
@@ -339,5 +340,35 @@ describe('riding a flight', () => {
       s.update(t, VIEW, 1, false);
     }
     expect(s.active).toEqual([s.ride]);
+  });
+});
+
+describe('recon passes (opt-in hostiles)', () => {
+  it('circles low over the caller and only appears when hostiles are enabled', () => {
+    const c = planReconPass(new Pcg32(8), { x: 30, z: 120 }, 0, 1);
+    expect(c.recon).toBe(true);
+    const p = pose();
+    for (let tau = 0; tau <= c.duration; tau += 2) {
+      crossingPose(c, 0, tau, p);
+      expect(Math.hypot(p.x - 30, p.z - 120)).toBeLessThan(400);
+      expect(p.y).toBeGreaterThan(60);
+      expect(p.y).toBeLessThan(200);
+    }
+
+    const off = new CrossingScheduler(4);
+    let reconWhenOff = 0;
+    for (let t = 0; t < 3600; t += 0.1) {
+      off.update(t, VIEW, 1, true, false);
+      reconWhenOff += off.active.filter((x) => x.recon).length;
+    }
+    expect(reconWhenOff).toBe(0);
+
+    const on = new CrossingScheduler(4);
+    let reconWhenOn = 0;
+    for (let t = 0; t < 3600; t += 0.1) {
+      on.update(t, VIEW, 1, true, true);
+      reconWhenOn += on.active.filter((x) => x.recon).length;
+    }
+    expect(reconWhenOn).toBeGreaterThan(0);
   });
 });

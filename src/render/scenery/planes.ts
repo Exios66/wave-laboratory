@@ -135,10 +135,12 @@ export interface Crossing {
   /** Fraction of the duration at which the laggard is gone. */
   laggardGoneAt: number;
   /**
-   * Set on a flight the camera rides: it circles this centre (Three.js x, z) instead of
-   * crossing the sky, and the centre may move to keep over the fleet.
+   * Set on a flight the camera rides (or a hostile recon pass): it circles this centre
+   * (Three.js x, z) instead of crossing the sky, and the centre may move to keep over the fleet.
    */
   orbit?: { cx: number; cz: number };
+  /** True for a low two-circle recon pass triggered when `hostiles` is enabled. */
+  recon?: boolean;
 }
 
 export interface PlanePose {
@@ -338,6 +340,46 @@ export function planRide(
   };
 }
 
+/**
+ * Plan a low recon aircraft pass (`ambience.hostiles`): an Avenger or Mariner descends to 110 m,
+ * circles the vessel twice at 260 m radius, and departs. Presence-only (no weapons).
+ */
+export function planReconPass(
+  rng: Pcg32,
+  centre: { x: number; z: number },
+  startT: number,
+  id = 0,
+): Crossing {
+  const kind: AircraftKind = rng.nextFloat() < 0.65 ? 'avenger' : 'mariner';
+  const speed = AIRCRAFT[kind].speed;
+  const radius = 260;
+  const dir = rng.nextFloat() < 0.5 ? 1 : -1;
+  const turnRate = (dir * speed) / radius;
+  const bearing = rng.nextFloat() * Math.PI * 2;
+  const heading0 = bearing + (dir * Math.PI) / 2;
+  const duration = (4 * Math.PI * radius) / speed + 14;
+  return {
+    id,
+    kind,
+    startT,
+    duration,
+    x0: centre.x + Math.cos(bearing) * radius,
+    z0: centre.z + Math.sin(bearing) * radius,
+    altitude: 115,
+    heading0,
+    turnRate,
+    speed,
+    fadeIn: 4,
+    fadeOut: 5,
+    members: [{ behind: 0, side: 0, up: 0, phase: 0 }],
+    flicker: 0,
+    laggard: -1,
+    laggardGoneAt: 1,
+    orbit: { cx: centre.x, cz: centre.z },
+    recon: true,
+  };
+}
+
 /** Distance the laggard has dropped back after `tau` seconds [m]. */
 function lagDistance(c: Crossing, member: number, tau: number): number {
   if (member !== c.laggard) return 0;
@@ -500,10 +542,10 @@ export class CrossingScheduler {
    * Advance to wall time `t`: retire finished crossings, start a new one when due. With
    * `spawn` false (the lost flights are switched off) nothing new is scheduled.
    */
-  update(t: number, view: PlaneView, calm: number, spawn = true): void {
+  update(t: number, view: PlaneView, calm: number, spawn = true, hostiles = false): void {
     for (let i = this.active.length - 1; i >= 0; i--) {
       const c = this.active[i]!;
-      if (t >= c.startT + c.duration) {
+      if (t >= c.startT + c.duration || (!hostiles && c.recon)) {
         this.active.splice(i, 1);
         if (c === this.ride) this.ride = null;
       }
@@ -516,7 +558,11 @@ export class CrossingScheduler {
       this.nextAt = t + 10;
       return;
     }
-    this.active.push(planCrossing(this.rng, view, t, calm, this.nextId++));
+    if (hostiles && this.rng.nextFloat() < 0.35) {
+      this.active.push(planReconPass(this.rng, { x: view.camX, z: view.camZ }, t, this.nextId++));
+    } else {
+      this.active.push(planCrossing(this.rng, view, t, calm, this.nextId++));
+    }
     this.nextAt = t + crossingInterval(this.rng, calm);
   }
 }
@@ -904,7 +950,7 @@ export class PlaneLayer implements SceneryLayer {
     this.view.camZ = cam.position.z;
     this.view.forwardX = this.fwd.x;
     this.view.forwardZ = this.fwd.z;
-    this.scheduler.update(t, this.view, frame.calm, this.enabled);
+    this.scheduler.update(t, this.view, frame.calm, this.enabled, Boolean(frame.hostiles));
     this.bindSlots();
 
     const fog = (this.object.parent as THREE.Scene | null)?.fog;

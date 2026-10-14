@@ -1730,7 +1730,10 @@ export class WildlifeLayer implements SceneryLayer {
   private readonly dir = new THREE.Vector3();
   private readonly color = new THREE.Color();
 
-  constructor(seed = DEFAULT_WILDLIFE_SEED) {
+  constructor(
+    seed = DEFAULT_WILDLIFE_SEED,
+    private readonly syncWildVesselsExtra?: (out: WildVessel[]) => void,
+  ) {
     this.object.name = 'wildlife';
     this.sim = new WildlifeSim(seed);
     this.input = {
@@ -1815,15 +1818,20 @@ export class WildlifeLayer implements SceneryLayer {
     const inp = this.input;
     const cam = frame.camera;
     cam.getWorldDirection(this.dir);
-    focusOnSea(
-      cam.position.x,
-      cam.position.y,
-      cam.position.z,
-      this.dir.x,
-      this.dir.y,
-      this.dir.z,
-      this.focus,
-    );
+    if (frame.underwater) {
+      this.focus.x = cam.position.x + this.dir.x * 24;
+      this.focus.z = cam.position.z + this.dir.z * 24;
+    } else {
+      focusOnSea(
+        cam.position.x,
+        cam.position.y,
+        cam.position.z,
+        this.dir.x,
+        this.dir.y,
+        this.dir.z,
+        this.focus,
+      );
+    }
     inp.dt = frame.dt;
     inp.calm = frame.calm;
     inp.daylight = frame.daylight;
@@ -1867,6 +1875,7 @@ export class WildlifeLayer implements SceneryLayer {
         w.length = view.length;
       }
     }
+    this.syncWildVesselsExtra?.(this.wildVessels);
   }
 
   private draw(frame: SceneryFrame): void {
@@ -1876,7 +1885,7 @@ export class WildlifeLayer implements SceneryLayer {
       const arr = cm.bend.array as Float32Array;
       for (const a of this.sim.animals) {
         if (!a.alive || a.species !== cm.species) continue;
-        if (animalTop(a) < -0.6) continue;
+        if (!frame.underwater && animalTop(a) < -0.6) continue;
         this.p.set(a.x, a.y, a.z);
         this.e.set(a.roll, a.yaw, a.pitch, 'YZX');
         this.q.setFromEuler(this.e);

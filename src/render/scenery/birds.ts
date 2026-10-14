@@ -796,7 +796,9 @@ export class SeabirdLayer implements SceneryLayer {
   private readonly ray = new THREE.Vector3();
   private readonly color = new THREE.Color();
 
-  constructor() {
+  constructor(
+    private readonly syncExtraShips?: (out: ShipTrack[], count: number, t: number) => number,
+  ) {
     this.object.name = 'birds';
     // Seen from below against a bright sky the birds would read as dark specks. A little
     // self-light (scaled by each vertex's own colour, so wingtips stay dark) keeps them white.
@@ -1062,6 +1064,9 @@ export class SeabirdLayer implements SceneryLayer {
       ship.vz = ship.fz * speed;
       ship.t0 = t;
       n++;
+    }
+    if (this.syncExtraShips && n < SHIP_VESSELS) {
+      n = this.syncExtraShips(this.ships, n, t);
     }
     this.shipCount = n;
   }

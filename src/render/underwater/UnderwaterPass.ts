@@ -22,6 +22,8 @@ const UnderwaterShader = {
     uTanHalf: { value: new THREE.Vector2(1, 1) },
     uKd: { value: new THREE.Vector3(0.245, 0.052, 0.02) },
     uInscatter: { value: new THREE.Vector3(0.01, 0.05, 0.1) },
+    uTime: { value: 0 },
+    uShafts: { value: 0.25 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -39,6 +41,8 @@ const UnderwaterShader = {
     uniform vec2 uTanHalf;
     uniform vec3 uKd;
     uniform vec3 uInscatter;
+    uniform float uTime;
+    uniform float uShafts;
     varying vec2 vUv;
     void main() {
       vec4 c = texture2D(tDiffuse, vUv);
@@ -50,7 +54,12 @@ const UnderwaterShader = {
       vec2 ndc = vUv * 2.0 - 1.0;
       float d = viewZ * length(vec3(ndc * uTanHalf, 1.0));
       vec3 T = exp(-uKd * d);
-      gl_FragColor = vec4(c.rgb * T + uInscatter * (1.0 - T), c.a);
+      // Screen-space god-ray shafts radiating down from Snell's window overhead.
+      float ray1 = 0.5 + 0.5 * sin(ndc.x * 11.0 + ndc.y * 4.0 + uTime * 0.7);
+      float ray2 = 0.5 + 0.5 * sin(ndc.x * 19.0 - ndc.y * 5.0 - uTime * 1.1);
+      float shaft = pow(ray1 * ray2, 2.5) * smoothstep(-0.3, 0.9, vUv.y) * uShafts;
+      vec3 veil = uInscatter * (1.0 + shaft * 0.85);
+      gl_FragColor = vec4(c.rgb * T + veil * (1.0 - T), c.a);
     }
   `,
 };
@@ -90,6 +99,7 @@ export class UnderwaterPass extends ShaderPass {
     u.uReversed!.value = renderer.state.buffers.depth.getReversed() ? 1 : 0;
     const tan = Math.tan((cam.fov * Math.PI) / 360);
     (u.uTanHalf!.value as THREE.Vector2).set(tan * cam.aspect, tan);
+    u.uTime!.value = performance.now() / 1000;
     super.render(renderer, writeBuffer, readBuffer, deltaTime, maskActive);
   }
 }

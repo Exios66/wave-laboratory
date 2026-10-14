@@ -274,6 +274,30 @@ function ScenerySettings() {
         onChange={(v) => set({ planes: v })}
         hint="The odd old aircraft droning overhead."
       />
+      <Switch
+        label="Naval traffic"
+        checked={ambience.traffic}
+        onChange={(v) => set({ traffic: v })}
+        hint="Fishing fleets, merchant convoys, patrol boats and liners in the distance."
+      />
+      <Switch
+        label="Offshore structures"
+        checked={ambience.structures}
+        onChange={(v) => set({ structures: v })}
+        hint="Distant oil rigs, wind turbines and navigation buoys."
+      />
+      <Switch
+        label="Underwater scenery"
+        checked={ambience.underwater}
+        onChange={(v) => set({ underwater: v })}
+        hint="Seabed, kelp forests, coral, shipwrecks and marine snow when submerged."
+      />
+      <Switch
+        label="Pirates & hostiles"
+        checked={ambience.hostiles}
+        onChange={(v) => set({ hostiles: v })}
+        hint="Opt-in pirate lugger encounters and low recon passes (off by default)."
+      />
     </fieldset>
   );
 }
