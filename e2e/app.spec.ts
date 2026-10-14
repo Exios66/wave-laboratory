@@ -543,4 +543,36 @@ test.describe('Wave Laboratory app', () => {
     await expect(again.getByRole('switch', { name: 'Vignette' })).toBeChecked();
     expect(errors).toEqual([]);
   });
+
+  test('scenery toggles: ambient world defaults on, hostiles opt-in and persisted', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Settings' });
+    for (const name of ['Naval traffic', 'Offshore structures', 'Underwater scenery']) {
+      await expect(dialog.getByRole('switch', { name })).toBeChecked();
+    }
+    await expect(dialog.getByRole('switch', { name: 'Pirates & hostiles' })).not.toBeChecked();
+    await dialog.getByRole('switch', { name: 'Pirates & hostiles' }).click();
+    await expect(dialog.getByRole('switch', { name: 'Pirates & hostiles' })).toBeChecked();
+    await dialog.getByRole('switch', { name: 'Naval traffic' }).click();
+    await expect(dialog.getByRole('switch', { name: 'Naval traffic' })).not.toBeChecked();
+
+    await page.keyboard.press('Escape');
+    const time = page.locator('.transport__time');
+    await expect.poll(() => simulationSeconds(time), { timeout: 30_000 }).toBeGreaterThan(0);
+    await page.screenshot({ path: 'test-results/ambient-world.png' });
+    expect(errors).toEqual([]);
+
+    await page.reload();
+    await waitForSimulation(page);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    const again = page.getByRole('dialog', { name: 'Settings' });
+    await expect(again.getByRole('switch', { name: 'Pirates & hostiles' })).toBeChecked();
+    await expect(again.getByRole('switch', { name: 'Naval traffic' })).not.toBeChecked();
+    expect(errors).toEqual([]);
+  });
 });

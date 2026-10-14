@@ -1,0 +1,32 @@
+# Ambient World & Underwater Scenery (`#43`)
+
+Wave Laboratory populates the horizon and underwater column with deterministic, seeded ambient layers that never perturb the wave field or vessel hydrostatics. Every layer is controlled by viewer preferences (`wave-lab:ambience`, edited in **Settings → Scenery**) and scaled by `SceneryTier` (`SceneryFrame.tier`), which the renderer resolves from the device-capped quality: `low` → `lite`, `medium` → `mid`, anything higher → `full`.
+
+## Layers & Toggles
+
+| Toggle (`AmbienceSettings`) | Default | Module                                                   | Contents                                                                                                                                                                                                                                                                          |
+| --------------------------- | ------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `islands`                   | `true`  | `src/render/scenery/islands.ts`                          | Procedural island & key chains on a 1.5 km grid outside `ISLAND_CLEAR_RADIUS` (450 m), with beaches, palms, huts, docks, and lighthouses.                                                                                                                                         |
+| `traffic`                   | `true`  | `src/render/scenery/traffic.ts`                          | Working fishing fleets (2–3 stern trawlers circling grounds on a 1.8 km grid, hauling nets in rough weather), merchant cargo ships, cruise liners, VLCC oil tankers, patrol boats, and rare aircraft carriers with patrol escorts. Seen inside 5.2 km.                            |
+| `structures`                | `true`  | `src/render/scenery/traffic.ts`                          | Hash-grid offshore oil platforms (derrick, helipad, persistent flare stack, flashing red beacon), wind-turbine arrays (static rotors), and cardinal sea buoys.                                                                                                                    |
+| `underwater`                | `true`  | `src/render/underwater/scenery.ts` & `UnderwaterPass.ts` | Pooled open-water seabed with analytic wave-normal caustics, swaying kelp forests, coral clusters, sunken trawlers, the sunken Flight 19 TBM Avenger easter egg (`SUNKEN_AVENGER_SITE`), marine snow, night bioluminescence, and screen-space god-ray shafts from Snell's window. |
+| `wildlife`                  | `true`  | `src/render/scenery/wildlife.ts` & `birds.ts`            | Dolphins bow-riding player and passerby ships, humpback whales, sea turtles, flying fish, and seabirds (gulls trailing working trawlers, plunge-diving terns, gliding albatrosses). Visible from below when submerged.                                                            |
+| `sailors`                   | `true`  | `src/render/scenery/sailors.ts`                          | Procedural billboard crew walking decks and bridges in fair weather.                                                                                                                                                                                                              |
+| `planes`                    | `true`  | `src/render/scenery/planes.ts`                           | Lost Bermuda Triangle flights (TBM Avengers, PBM Mariner, DC-3, C-54) with navigation lights and propeller discs.                                                                                                                                                                 |
+| `hostiles`                  | `false` | `src/render/scenery/traffic.ts` & `planes.ts`            | Opt-in encounters: a square-rigged pirate lugger (`stepHostileEncounter`: `idle → approaching → paralleling → peeling`, hard despawn at 500 m) and low two-circle recon passes (`planReconPass`).                                                                                 |
+
+## Tier Budgets
+
+| Tier   | Resolved from                 | Max Traffic Hulls (`TRAFFIC_BUDGET`) | Max Structure Cells (`STRUCTURE_BUDGET`) | Max Underwater Draw Calls (`UNDERWATER_BUDGET`) |
+| ------ | ----------------------------- | ------------------------------------ | ---------------------------------------- | ----------------------------------------------- |
+| `full` | Quality `high` / `ultra`      | 12                                   | 3                                        | 4                                               |
+| `mid`  | Quality `medium` (phones)     | 8                                    | 2                                        | 2                                               |
+| `lite` | Quality `low` or software GPU | 4                                    | 0                                        | 1                                               |
+
+Each cap lives in the module that enforces it (`render/scenery/traffic.ts`, `render/underwater/scenery.ts`).
+
+## House Rules
+
+1. **Zero physics feedback:** Scenery layers read `SceneryFrame` (`calm`, `daylight`, `hs`, `vessels`, `underwater`, `waterType`, `tier`) and export visual wake tracks (`WakeSource`) and wildlife anchors (`WildVessel`), never modifying `OceanField` or `Experiment`.
+2. **Deterministic & Node-testable:** Placement, routing, weather gating, and encounter state machines are pure functions of `(ix, iy, t, calm, seed)` covered by Vitest unit tests (`traffic.test.ts`, `scenery.test.ts`, `islands.test.ts`, `wildlife.test.ts`, `birds.test.ts`, `planes.test.ts`).
+3. **Instanced low-poly meshes:** Reuses parametric hulls (`src/vessel/hulls.ts`) and vertex-coloured procedural geometry with zero external textures or model assets. One `InstancedMesh` per hull class and per structure kind (10 draw calls, empty ones skipped), plus one shared additive point pass for night lights.

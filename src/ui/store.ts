@@ -219,6 +219,10 @@ export function sanitizeAmbience(raw: Partial<AmbienceSettings>): AmbienceSettin
     wildlife: bool(raw.wildlife, d.wildlife),
     sailors: bool(raw.sailors, d.sailors),
     planes: bool(raw.planes, d.planes),
+    traffic: bool(raw.traffic, d.traffic),
+    structures: bool(raw.structures, d.structures),
+    underwater: bool(raw.underwater, d.underwater),
+    hostiles: bool(raw.hostiles, d.hostiles),
   };
 }
 

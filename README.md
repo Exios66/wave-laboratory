@@ -50,6 +50,12 @@ oceanographic wave spectra, drop ships into it, and measure how they handle the 
   switches on bloom (sun, sun glint on the water, lightning), film grain and a vignette. They draw
   through an HDR target with ACES tone mapping applied once at the end; bloom is automatic on
   medium quality and above, but off on phones and software rendering.
+- **World:** a seeded, deterministic seascape that never disturbs the physics: island chains and
+  lighthouses, working fishing fleets (trawlers hauling nets), merchant lanes with liners, cargo
+  ships and tankers, patrol boats, offshore oil rigs burning a flare, wind farms and buoys, plus
+  seabed, kelp, coral, wrecks and marine snow when you dive. Everything is deterministic from the
+  world seed and throttled to 4–12 hulls by device tier. Opt in under Settings → Scenery to a
+  pirate lugger that shadows you and a low recon pass. See [`docs/AMBIENCE.md`](docs/AMBIENCE.md).
 - **Phones:** the 3D view fills the top half in portrait (side by side in landscape). A Scene /
   Inspector / Data switcher shows one panel at a time. The header keeps Presets and a More menu
   for the rest. Touch targets are at least 44 px, except the camera controls drawn on top of the
@@ -143,5 +149,5 @@ Unit tests sit next to the code they cover (`*.test.ts`); the longer physics val
 uses `*.validation.ts`. Tooling configuration (TypeScript, Vite, ESLint, Playwright) is in the
 usual root files, and Prettier's settings live in `package.json`.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/PHYSICS.md`](docs/PHYSICS.md) and
-[`docs/PLAN.md`](docs/PLAN.md).
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/PHYSICS.md`](docs/PHYSICS.md),
+[`docs/AMBIENCE.md`](docs/AMBIENCE.md) and [`docs/PLAN.md`](docs/PLAN.md).

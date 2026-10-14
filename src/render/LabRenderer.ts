@@ -40,18 +40,20 @@ import { PostStack } from './post/PostStack';
 import { OCEAN_FRAG, OCEAN_VERT, SKY_FRAG, SKY_VERT } from './ocean/shaders';
 import { cameraNavigation, chartIslands } from './navigation';
 import { calmFromConditions, ease } from './scenery/ambience';
-import { SeabirdLayer } from './scenery/birds';
+import { SeabirdLayer, SHIP_VESSELS } from './scenery/birds';
 import { IslandLayer } from './scenery/islands';
 import { SkyLighting, type LightingState } from './scenery/lighting';
 import { PlaneLayer, type PlanePose } from './scenery/planes';
 import { SailorLayer } from './scenery/sailors';
+import { TrafficLayer } from './scenery/traffic';
 import {
   DEFAULT_AMBIENCE,
   type AmbienceSettings,
   type SceneryFrame,
   type SceneryLayer,
 } from './scenery/types';
-import { WildlifeLayer } from './scenery/wildlife';
+import { DEFAULT_WILDLIFE_SEED, WildlifeLayer } from './scenery/wildlife';
+import { UnderwaterSceneryLayer } from './underwater/scenery';
 import { createRadialOceanGeometry, OCEAN_DENSITY, OCEAN_SLICES } from './scene/oceanMesh';
 import { RainField, SMOKE_STYLE, SprayPool } from './scene/particles';
 import { ChainView } from './scene/chain';
@@ -253,12 +255,35 @@ export class LabRenderer implements LabRendererApi {
   private readonly hemi: THREE.HemisphereLight;
   private readonly lighting: SkyLighting;
   private readonly islands = new IslandLayer();
-  private readonly wildlife = new WildlifeLayer();
-  private readonly birds = new SeabirdLayer();
+  private readonly traffic = new TrafficLayer();
+  private readonly underwaterScenery = new UnderwaterSceneryLayer();
+  private readonly wildlife = new WildlifeLayer(DEFAULT_WILDLIFE_SEED, (out) =>
+    this.traffic.appendWildVessels(out),
+  );
+  private readonly birds = new SeabirdLayer((out, count, t) => {
+    for (const s of this.traffic.ships) {
+      if (count >= SHIP_VESSELS) break;
+      if (s.kind !== 'trawler' && s.kind !== 'cargo') continue;
+      const track = out[count]!;
+      track.x = s.x;
+      track.z = -s.y;
+      track.fx = Math.cos(s.heading);
+      track.fz = -Math.sin(s.heading);
+      track.vx = track.fx * s.speed;
+      track.vz = track.fz * s.speed;
+      track.length = s.length;
+      track.height = s.height;
+      track.t0 = t;
+      count++;
+    }
+    return count;
+  });
   private readonly sailors = new SailorLayer();
   private readonly planes = new PlaneLayer();
   private readonly layers: SceneryLayer[] = [
     this.islands,
+    this.traffic,
+    this.underwaterScenery,
     this.wildlife,
     this.birds,
     this.sailors,
@@ -589,6 +614,12 @@ export class LabRenderer implements LabRendererApi {
 
   private applyAmbience(): void {
     this.islands.setEnabled(this.ambience.islands);
+    this.traffic.setFlags({
+      traffic: this.ambience.traffic,
+      structures: this.ambience.structures,
+      hostiles: this.ambience.hostiles,
+    });
+    this.underwaterScenery.setEnabled(this.ambience.underwater);
     this.wildlife.setEnabled(this.ambience.wildlife);
     this.birds.setEnabled(this.ambience.wildlife);
     // Rubber ducks have no crew.
@@ -1240,6 +1271,11 @@ export class LabRenderer implements LabRendererApi {
       hs: this.hs,
       vessels,
       vesselPositions: this.vesselPositions,
+      underwater: this.underwater,
+      cameraDepth: this.stats.cameraDepth,
+      waterType: this.env?.waterType ?? 'oceanic-ib',
+      tier: this.quality === 'low' ? 'lite' : this.quality === 'medium' ? 'mid' : 'full',
+      hostiles: this.ambience.hostiles,
     };
     for (const layer of this.layers) layer.update(frame);
   }
@@ -1271,6 +1307,7 @@ export class LabRenderer implements LabRendererApi {
         speed: Math.hypot(state.velocity.x - current.x, state.velocity.y - current.y),
       });
     }
+    this.traffic.appendWakeSources(sources, Math.max(0, 8 - sources.length));
     this.wakes.update(t, sources, { x: current.x * t, y: current.y * t });
     this.ocean.uniforms.uWakeCount!.value = this.wakes.count;
   }
