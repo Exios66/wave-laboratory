@@ -11,6 +11,8 @@
  * can be unit-tested in node without WebGL; the sprite sheet canvas is created lazily.
  */
 import * as THREE from 'three';
+import { mulberry32 } from '../../core/rng';
+import { smoothstep } from '../../core/mathUtil';
 import type { VesselDefinition, VisualBox } from '../../vessel/api';
 import type { SceneryFrame, SceneryLayer, SceneryVessel } from './types';
 
@@ -314,18 +316,6 @@ export function walkable(deck: DeckSurface, a: DeckSpot, b: DeckSpot): boolean {
   return true;
 }
 
-/** Small deterministic PRNG (mulberry32). */
-export function seededRandom(seed: number): () => number {
-  let s = seed >>> 0;
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0;
-    let t = s;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 export function hashString(s: string): number {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) {
@@ -342,7 +332,7 @@ const dist2 = (a: DeckSpot, b: DeckSpot): number => (a.x - b.x) ** 2 + (a.y - b.
  * captain (on crews of two or more) keeps near the bridge; the others spread over the deck.
  */
 export function planCrew(def: VesselDefinition, seed = 1): CrewMember[] {
-  const rand = seededRandom(seed);
+  const rand = mulberry32(seed);
   const deck = deckSurface(def);
   const wanted = crewCount(def);
   let spots = deckSpots(def, deck);
@@ -846,10 +836,6 @@ interface CrewVessel {
 }
 
 const WALK_SPEED = 1.1; // [m/s]
-const smooth = (e0: number, e1: number, x: number): number => {
-  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
-  return t * t * (3 - 2 * t);
-};
 
 export class SailorLayer implements SceneryLayer {
   readonly object = new THREE.Group();
@@ -926,16 +912,17 @@ export class SailorLayer implements SceneryLayer {
     const dt = frame.dt;
     const calm = frame.calm;
     const storm = 1 - calm;
-    const night = 1 - smooth(0.12, 0.45, frame.daylight);
+    const night = 1 - smoothstep(0.12, 0.45, frame.daylight);
 
     // Night tint: sprites are unlit, so darken and cool them with the daylight.
-    const day = smooth(0.0, 0.6, frame.daylight);
+    const day = smoothstep(0.0, 0.6, frame.daylight);
     const tint = this.tint.setRGB(0.16 + 0.8 * day, 0.19 + 0.77 * day, 0.32 + 0.64 * day);
     (this.material.uniforms.uTint!.value as THREE.Color).copy(tint);
 
     const cam = frame.camera;
     this.camRight.setFromMatrixColumn(cam.matrixWorld, 0);
     // Hide crews that would be only a few pixels tall (they would just flicker).
+    // shortcut: cull assumes a 1000 px viewport height, correctness margin scales with window; upgrade to real canvas height if crews pop visibly at small or 4K windows.
     const pxPerM = 1000 / (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2));
     const farLimit = (SAILOR_HEIGHT * SAILOR_UPSCALE * pxPerM) / 3;
 

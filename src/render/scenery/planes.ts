@@ -15,6 +15,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Pcg32 } from '../../core/rng';
+import { smoothstep } from '../../core/mathUtil';
 import type { SceneryFrame, SceneryLayer } from './types';
 
 // ---------------------------------------------------------------------------------------------
@@ -150,11 +151,6 @@ export interface PlanePose {
 
 function clamp(x: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, x));
-}
-
-function smoothstep(a: number, b: number, x: number): number {
-  const u = clamp((x - a) / (b - a), 0, 1);
-  return u * u * (3 - 2 * u);
 }
 
 function lerp(a: number, b: number, u: number): number {

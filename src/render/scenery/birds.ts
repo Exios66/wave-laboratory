@@ -13,6 +13,9 @@
  * unit-tested without WebGL. The layer itself only keeps per-bird presence (arriving/leaving).
  */
 import * as THREE from 'three';
+import { mulberry32 } from '../../core/rng';
+import { smoothstep } from '../../core/mathUtil';
+import { KN } from './wildlife';
 import type { SceneryFrame, SceneryLayer, SceneryVessel } from './types';
 
 // ---------------------------------------------------------------------------------------------
@@ -102,25 +105,8 @@ function clamp(x: number, a: number, b: number): number {
   return x < a ? a : x > b ? b : x;
 }
 
-function smoothstep(a: number, b: number, x: number): number {
-  const u = clamp((x - a) / (b - a), 0, 1);
-  return u * u * (3 - 2 * u);
-}
-
 function fract(x: number): number {
   return x - Math.floor(x);
-}
-
-/** Small deterministic PRNG (mulberry32). */
-export function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }
 
 /** Lowest height a cruising bird keeps over the sea [m] (clears the crests). */
@@ -1069,7 +1055,7 @@ export class SeabirdLayer implements SceneryLayer {
         ship.length = info.length;
         ship.height = info.height;
       }
-      const speed = Math.max(0, v.speedKn) * 0.5144;
+      const speed = Math.max(0, v.speedKn) * KN;
       ship.x = pos.x;
       ship.z = pos.z;
       ship.vx = ship.fx * speed;

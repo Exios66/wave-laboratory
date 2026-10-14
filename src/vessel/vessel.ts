@@ -18,6 +18,7 @@
  * vessel's fastest natural frequency and damping rate, so any step up to ~1/30 s is stable.
  */
 import { KNOT, wrapAngle } from '../core/units';
+import { compassFrom } from '../core/mathUtil';
 import { integrateQuat, quatFromEuler, quatToEuler, type Quat, type Vec3 } from '../core/vec';
 import { headingFromYaw, yawFromHeading } from '../ocean/systems';
 import type { OceanField } from '../ocean/oceanField';
@@ -1128,14 +1129,6 @@ export class Vessel {
       waterColumnCalls: this.water.columnCalls,
     };
   }
-}
-
-/** Compass bearing [deg] a wind with world velocity (u, v) comes FROM. */
-function compassFrom(u: number, v: number): number {
-  if (Math.hypot(u, v) < 1e-9) return 0;
-  // Air moving toward bearing b comes from b + 180; bearing of a vector = atan2(east, north).
-  const toward = Math.atan2(u, v) / DEG;
-  return (((toward + 180) % 360) + 360) % 360;
 }
 
 /** Row-major rotation matrix of q written into `out` (allocation-free `quatToMat3`). */

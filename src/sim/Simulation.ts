@@ -4,6 +4,7 @@
  * the Web Worker, in Node tests and in headless batch runs.
  */
 import { FixedStepClock } from '../core/clock';
+import { compassFrom } from '../core/mathUtil';
 import { buildGpuOceanData, type GpuOceanData } from '../ocean/gpuData';
 import { OceanField } from '../ocean/oceanField';
 import type { Experiment, OceanQuality, VesselConfig } from '../schema/experiment';
@@ -217,10 +218,9 @@ export class Simulation {
   /** Weather readout at a point (for the HUD). */
   weatherAt(x: number, y: number, t: number): WeatherReading {
     const w = this.weather.windAt(x, y, t, { u: 0, v: 0, speed: 0, squall: 0 });
-    const toward = Math.atan2(w.u, w.v) * (180 / Math.PI);
     return {
       windSpeed: w.speed,
-      windFromDeg: w.speed > 0 ? (((toward + 180) % 360) + 360) % 360 : 0,
+      windFromDeg: compassFrom(w.u, w.v),
       squall: w.squall,
       rainMmH: this.weather.rainAt(x, y, t),
     };

@@ -126,6 +126,12 @@ export const SMOKE_STYLE: ParticleStyle = {
   growth: 4,
 };
 
+const swapF = (arr: Float32Array, i: number, j: number): void => {
+  const v = arr[i]!;
+  arr[i] = arr[j]!;
+  arr[j] = v;
+};
+
 /** A pool of spray sprites integrated on the CPU (ballistic with air drag toward the wind). */
 export class SprayPool {
   private readonly style: ParticleStyle;
@@ -212,13 +218,21 @@ export class SprayPool {
     for (let i = 0; i < this.capacity; i++) {
       const a = (this.age[i]! += dt);
       const life = this.life[i]!;
-      if (a >= life) {
-        this.alpha[i] = 0;
-        this.sizeAttr[i] = 0;
-        continue;
+      if (a >= life) continue;
+      // Pack live slots to the front so the draw range covers only surviving particles; the
+      // occupant of that earlier slot (not yet aged) moves back and is aged later in the walk.
+      if (i !== alive) {
+        swapF(this.age, i, alive);
+        swapF(this.life, i, alive);
+        swapF(this.size, i, alive);
+        const pi = 3 * i;
+        const pj = 3 * alive;
+        for (let k = 0; k < 3; k++) {
+          swapF(this.pos, pi + k, pj + k);
+          swapF(this.vel, pi + k, pj + k);
+        }
       }
-      alive++;
-      const j = 3 * i;
+      const j = 3 * alive;
       this.vel[j]! += (wind.x - this.vel[j]!) * drag;
       this.vel[j + 2]! += (wind.z - this.vel[j + 2]!) * drag;
       this.vel[j + 1]! -= 9.81 * dt * st.gravity;
@@ -226,12 +240,14 @@ export class SprayPool {
       this.pos[j + 1]! += this.vel[j + 1]! * dt;
       this.pos[j + 2]! += this.vel[j + 2]! * dt;
       const u = a / life;
-      this.alpha[i] = st.alpha * Math.min(1, u * 8) * (1 - u) * (1 - u);
-      this.sizeAttr[i] = this.size[i]! * (1 + st.growth * u);
+      this.alpha[alive] = st.alpha * Math.min(1, u * 8) * (1 - u) * (1 - u);
+      this.sizeAttr[alive] = this.size[alive]! * (1 + st.growth * u);
+      alive++;
     }
     this.liveCount = alive;
     this.object.visible = alive > 0;
     const geo = this.object.geometry;
+    geo.setDrawRange(0, alive);
     geo.getAttribute('position').needsUpdate = true;
     geo.getAttribute('aAlpha').needsUpdate = true;
     geo.getAttribute('aSize').needsUpdate = true;

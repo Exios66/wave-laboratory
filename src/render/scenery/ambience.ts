@@ -1,9 +1,5 @@
 /** How fair the weather looks: drives wildlife, birds and the pleasant-sailing mood. */
-
-function smoothstep(a: number, b: number, x: number): number {
-  const u = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return u * u * (3 - 2 * u);
-}
+import { smoothstep } from '../../core/mathUtil';
 
 /**
  * Target calm from the sea state. 1 = flat calm fair weather, 0 = storm.

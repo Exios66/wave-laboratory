@@ -559,9 +559,9 @@ export const PRESETS: readonly Preset[] = [
   },
 ];
 
-export const DEFAULT_PRESET_ID = 'moderate-sea';
+const DEFAULT_PRESET_ID = 'moderate-sea';
 
-export function getPreset(id: string): Preset | undefined {
+function getPreset(id: string): Preset | undefined {
   return PRESETS.find((p) => p.id === id);
 }
 

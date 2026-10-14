@@ -19,6 +19,7 @@
  * Square-riggers balance the helm by trimming the head sails against the spanker, so the
  * vessel passes the longitudinal centre of effort it wants (see `Vessel`).
  */
+import { smoothstep } from '../core/mathUtil';
 import type { SailPlan, WindageSpec } from './api';
 
 export const AIR_DENSITY = 1.225;
@@ -74,8 +75,7 @@ const LUFF_FULL = (20 * Math.PI) / 180;
 
 export function sailCoefficients(alpha: number): { cl: number; cd: number } {
   const s = Math.sin(alpha);
-  const t = Math.min(1, Math.max(0, (Math.abs(alpha) - LUFF_START) / (LUFF_FULL - LUFF_START)));
-  const fill = t * t * (3 - 2 * t);
+  const fill = smoothstep(LUFF_START, LUFF_FULL, Math.abs(alpha));
   return { cl: 1.25 * Math.sin(2 * alpha) * fill, cd: 0.08 + 1.2 * s * s };
 }
 
