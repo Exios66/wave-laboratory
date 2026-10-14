@@ -19,7 +19,9 @@ import { quatIdentity, type Vec3 } from '../core/vec';
 import type { VesselType } from '../schema/experiment';
 import type {
   DesignHydrostatics,
+  ForeAftRig,
   HullPaint,
+  LateralFoil,
   SailPlan,
   VesselDefinition,
   VisualBox,
@@ -173,6 +175,8 @@ export function createVesselDefinition(
     deckEdgeVertices: physicsKeel.deckEdge,
     windage: scaleWindage(designWindage(d), s, toBody),
     sails: d.rig ? sailPlan(d.rig, s, toBody) : null,
+    foreAft: d.foreAft ? foreAftRig(d.foreAft, s, toBody) : null,
+    foils: (d.foils ?? []).map((f) => scaledFoil(f, s, toBody)),
     paint: d.paint ?? DEFAULT_PAINT,
     keelFin: d.keelFin
       ? {
@@ -330,6 +334,55 @@ function scaleWindage(w: WindageSpec, s: number, toBody: (p: Vec3) => Vec3): Win
   };
 }
 
+function scaledFoil(f: LateralFoil, s: number, toBody: (p: Vec3) => Vec3): LateralFoil {
+  const bx = (x: number): number => toBody({ x, y: 0, z: 0 }).x;
+  const bz = (z: number): number => toBody({ x: 0, y: 0, z }).z;
+  return {
+    ...f,
+    xLeRoot: bx(f.xLeRoot),
+    xLeTip: bx(f.xLeTip),
+    chordRoot: f.chordRoot * s,
+    chordTip: f.chordTip * s,
+    zRoot: bz(f.zRoot),
+    zTip: bz(f.zTip),
+    area: f.area * s * s,
+    span: f.span * s,
+    xCe: bx(f.xCe),
+    zCe: bz(f.zCe),
+    bulb: f.bulb && {
+      x: bx(f.bulb.x),
+      z: bz(f.bulb.z),
+      length: f.bulb.length * s,
+      radius: f.bulb.radius * s,
+    },
+  };
+}
+
+/**
+ * Bermuda rig built from the keel-frame design data to the CoG frame (same conversion the
+ * square-rig sail plan gets).
+ */
+function foreAftRig(
+  rig: NonNullable<HullDesign['foreAft']>,
+  s: number,
+  toBody: (p: Vec3) => Vec3,
+): ForeAftRig {
+  const bx = (x: number): number => toBody({ x, y: 0, z: 0 }).x;
+  const bz = (z: number): number => toBody({ x: 0, y: 0, z }).z;
+  return {
+    mast: { x: bx(rig.mast.x), zFoot: bz(rig.mast.zFoot), zTop: bz(rig.mast.zTop) },
+    sails: rig.sails.map((sl) => ({
+      ...sl,
+      area: sl.area * s * s,
+      tack: toBody(sl.tack),
+      head: toBody(sl.head),
+      foot: sl.foot * s,
+    })),
+    rigDragArea: rig.rigDragArea * s * s,
+  };
+}
+
+/** Square-rig sail plan built from the keel-frame design data. */
 function sailPlan(
   rig: NonNullable<HullDesign['rig']>,
   s: number,

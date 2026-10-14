@@ -70,6 +70,7 @@ export const VESSEL_TYPE_LABELS: Record<VesselType, string> = {
   'oil-tanker': 'Oil tanker (VLCC)',
   'aircraft-carrier': 'Aircraft carrier',
   'pirate-ship': 'Pirate ship (square-rigged)',
+  'sloop-yacht': 'Sloop yacht (Bermuda-rigged)',
 };
 
 export function newVessel(type: VesselType, count: number): VesselConfig {
