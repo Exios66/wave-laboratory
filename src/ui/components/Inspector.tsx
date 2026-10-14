@@ -1285,7 +1285,12 @@ function VesselFlooding({
             </option>
           ))}
         </select>
-        <button type="button" className="btn" disabled={n === 0} onClick={() => onFlood(selectedBay)}>
+        <button
+          type="button"
+          className="btn"
+          disabled={n === 0}
+          onClick={() => onFlood(selectedBay)}
+        >
           <Icon name="warning" size={16} /> Flood compartment
         </button>
         <button

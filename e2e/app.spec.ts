@@ -149,8 +149,7 @@ test.describe('Wave Laboratory app', () => {
     const started = Date.now();
     await expect
       .poll(
-        async () =>
-          (await simulationSeconds(time)) - startTime - (Date.now() - started) / 1000,
+        async () => (await simulationSeconds(time)) - startTime - (Date.now() - started) / 1000,
         { timeout: 30_000 },
       )
       .toBeGreaterThan(0);
