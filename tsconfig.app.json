@@ -6,7 +6,6 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
-    "types": ["vite/client"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
