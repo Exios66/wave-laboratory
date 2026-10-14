@@ -698,7 +698,7 @@ function sloopYacht(): HullDesign {
         area: 1.29,
         span: 1.39,
         aspect: 1.5,
-        xCe: 0.6,
+        xCe: 1.13,
         zCe: -0.38,
         bulb: { x: 0.95, z: -1.14, length: 1.5, radius: 0.22 },
       },

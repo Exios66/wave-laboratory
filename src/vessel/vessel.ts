@@ -58,6 +58,18 @@ import { quatToMat3, solveFloating } from './hydrostatics';
 import { meshBounds, meshVolume } from './mesh';
 import { Mooring, mooringGear, type MooringForce } from './mooring';
 import { LocalWater, type Footprint } from './waterPatch';
+import { foilAero, foilForce, type FoilAero, type FoilForce } from './foils';
+import {
+  apparentWind,
+  autoTrim,
+  emptyForeAftLoad,
+  foreAftLoad,
+  HEEL_LIMIT_DEG,
+  sailAero,
+  type ApparentWind,
+  type ForeAftLoad,
+  type SailAero,
+} from './sails';
 import { emptyLoad, reefedSet, sailLoad, windageLoad } from './windLoads';
 
 /** Source of the 10 m wind at a point (world frame, air velocity toward). */
@@ -176,6 +188,21 @@ export class Vessel {
    * aft of the hull's centre of lateral resistance x = (N_v / Y_v) L (a little weather helm).
    */
   private readonly sailBalanceX: number;
+  /** Aerodynamic constants of the fore-and-aft sail; scratch space for its loads and sheets. */
+  private readonly foreAftAeros: SailAero[];
+  private readonly foreAftOut: ForeAftLoad | null;
+  private readonly sheets: Float64Array;
+  private readonly jibIndex: number;
+  private readonly apparentOut: ApparentWind = { speed: 0, beta: 0, x: 0, y: 0 };
+  /** Heeling-moment reference: mean foil centroid z (the lateral-resistance height). */
+  private readonly lateralZ: number;
+  /** Righting moment of the vessel at the crew's heel limit [N·m] (sail-trimming allowance). */
+  private readonly heelAllowance: number;
+  /** Aerodynamic constants of the lateral foils; scratch for one foil force. */
+  private readonly foilAeros: FoilAero[];
+  private readonly foilOut: FoilForce = { fx: 0, fy: 0 };
+  private jibDeg = 0;
+  private mainAlphaDeg = 0;
 
   // ---- per-step outputs
   private slamming = false;
@@ -219,6 +246,21 @@ export class Vessel {
     const def = definition;
     this.sailBalanceX =
       Math.abs(hydro.clarke.yv) > 1e-9 ? (hydro.clarke.nv / hydro.clarke.yv) * L - 0.03 * L : 0;
+    this.foreAftAeros = def.foreAft ? def.foreAft.sails.map((sl) => sailAero(sl.kind, sl.aspect)) : [];
+    this.foreAftOut = def.foreAft ? emptyForeAftLoad(def.foreAft) : null;
+    this.sheets = new Float64Array(def.foreAft?.sails.length ?? 0);
+    this.jibIndex = def.foreAft ? def.foreAft.sails.findIndex((sl) => sl.kind === 'jib') : -1;
+    this.foilAeros = def.foils.map(foilAero);
+    this.lateralZ = def.foils.length
+      ? def.foils.reduce((sum, f) => sum + f.zCe, 0) / def.foils.length
+      : def.hydrostatics.centreOfBuoyancy.z;
+    // Righting moment at the crew's heel limit, from the stored GZ curve: the linear design GM
+    // does not represent a ballast boat's form stability near upright (the sloop's GM is
+    // negative, but its righting arm at 25° is +0.3 m).
+    const hz = def.hydrostatics;
+    const k = Math.min(hz.gz.length - 1.01, HEEL_LIMIT_DEG / 5);
+    const gzLimit = hz.gz[Math.floor(k)]! + (k - Math.floor(k)) * (hz.gz[Math.ceil(k)]! - hz.gz[Math.floor(k)]!);
+    this.heelAllowance = hydro.mass * g * Math.max(0, gzLimit);
 
     // Equilibrium in this environment (water density may differ from the design density).
     const eq = solveFloating(def.physicsHull, def.mass / rho, 0, {
@@ -311,7 +353,7 @@ export class Vessel {
     this.autopilotOn = config.autopilot;
     this.headingCmdDeg = config.headingDeg;
     this.speedCmdKn = config.speedKn;
-    if (definition.sails) {
+    if (definition.sails || definition.foreAft) {
       // Start with the canvas the crew would carry in this wind (the helmsman starts furled).
       let set = config.autopilot ? 1 : 0;
       if (this.wind && config.autopilot) {
@@ -573,7 +615,7 @@ export class Vessel {
       this.windU = this.windSample.u;
       this.windV = this.windSample.v;
     }
-    if (def.sails) {
+    if (def.sails || def.foreAft) {
       // The engine-less ship sets canvas instead of throttle; the autopilot crew reefs as the
       // apparent wind rises, a helmsman (autopilot off) carries whatever is ordered.
       const R0 = s.rot;
@@ -833,6 +875,24 @@ export class Vessel {
       mx += -hy.lateralZ * yH;
     }
 
+    // 4b. Lateral foils (fin keel): lift and drag from the water flow at the foil centre,
+    // scaled by submergence like the rudder (the flow is the same water-relative velocity
+    // the hull resistance sees, plus the rotation-induced lateral velocity at the foil).
+    if (sub > 0) {
+      const im = Math.min(1, Math.max(0, sub));
+      for (let i = 0; i < def.foils.length; i++) {
+        const f = def.foils[i]!;
+        const u = ur + s.q * f.zCe;
+        const vEff = vr + s.r * f.xCe - s.p * f.zCe;
+        const ff = foilForce(u, vEff, f.area, this.foilAeros[i]!, rho, this.foilOut);
+        fx += im * ff.fx;
+        fy += im * ff.fy;
+        mx += -f.zCe * (im * ff.fy);
+        my += f.zCe * (im * ff.fx);
+        mz += f.xCe * (im * ff.fy);
+      }
+    }
+
     // 5. Roll damping (Ikeda-type: linear + speed-dependent lift + quadratic).
     const bRoll = hy.rollB0 + hy.rollBLift * Math.abs(ur) + hy.rollBQuad * Math.abs(s.p);
     mx -= bRoll * s.p * Math.min(1, sub);
@@ -901,14 +961,15 @@ export class Vessel {
       mz += wl.mz;
       let tx = wl.fx;
       let ty = wl.fy;
+      const heelCos = Math.max(0, R[8]!);
+      const heelFactor = heelCos * heelCos;
       if (def.sails) {
-        const heelCos = Math.max(0, R[8]!);
         const sl = sailLoad(
           def.sails,
           vax,
           vay,
           this.sailSet,
-          heelCos * heelCos,
+          heelFactor,
           this.sailOut,
           this.sailBalanceX,
         );
@@ -919,6 +980,47 @@ export class Vessel {
         mz += sl.mz;
         tx += sl.fx;
         ty += sl.fy;
+      }
+      if (def.foreAft && this.foreAftOut) {
+        // Apparent wind in the heading frame (x along the heading, y to port), auto-trimmed
+        // sheets once per substep, then the heading-frame forces at the sails' body-frame
+        // application points — the same slots the square-rig load fills above.
+        const aw = apparentWind(this.windU, this.windV, shipX, shipY, R[0]!, R[3]!, this.apparentOut);
+        autoTrim(
+          def.foreAft,
+          this.foreAftAeros,
+          aw,
+          this.sailSet,
+          heelFactor,
+          this.lateralZ,
+          this.heelAllowance,
+          this.sheets,
+        );
+        const sl = foreAftLoad(
+          def.foreAft,
+          this.foreAftAeros,
+          aw,
+          this.sheets,
+          this.sailSet,
+          heelFactor,
+          this.foreAftOut,
+        );
+        fx += sl.fx;
+        fy += sl.fy;
+        for (const it of sl.items) {
+          mx += -it.pz * it.fy;
+          my += it.pz * it.fx;
+          mz += it.px * it.fy - it.py * it.fx;
+        }
+        const rg = sl.rig;
+        mx += -rg.pz * rg.fy;
+        my += rg.pz * rg.fx;
+        mz += rg.px * rg.fy - rg.py * rg.fx;
+        tx += sl.fx;
+        ty += sl.fy;
+        this.jibDeg = this.jibIndex >= 0 ? this.sheets[this.jibIndex]! / DEG : 0;
+        this.mainAlphaDeg = sl.items[0]!.alpha / DEG;
+        this.sailOut.braceDeg = this.sheets[0]! / DEG;
       }
       this.windForce = Math.hypot(tx, ty);
     }
@@ -1017,6 +1119,17 @@ export class Vessel {
   telemetry(): VesselTelemetry {
     const k = this.kinematics;
     const e = quatToEuler(this.q);
+    const rigged = this.definition.foreAft !== null;
+    // Track through the water (hull-relative velocity in the body frame); the leeway angle is
+    // its drift angle (+ = drifting to port).
+    const ur = this.s.u - this.hull.waterU;
+    const vr = this.s.v - this.hull.waterV;
+    const windSpeed = Math.hypot(this.windU, this.windV);
+    // Velocity made good to windward: minus the component of the CoG velocity along the wind.
+    const vmgKn =
+      rigged && windSpeed > 1e-6
+        ? -(k.velocity.x * this.windU + k.velocity.y * this.windV) / windSpeed / KNOT
+        : 0;
     return {
       ...k,
       id: this.id,
@@ -1038,12 +1151,12 @@ export class Vessel {
       apparentWind: Math.hypot(this.apparentX, this.apparentY),
       apparentWindAngleDeg: Math.atan2(-this.apparentY, -this.apparentX) / DEG,
       windForce: this.windForce,
-      sailSet: this.definition.sails ? this.sailSet : 0,
+      sailSet: this.definition.sails || this.definition.foreAft ? this.sailSet : 0,
       braceDeg: this.sailOut.braceDeg,
-      jibDeg: 0,
-      sailAlphaDeg: 0,
-      leewayDeg: 0,
-      vmgKn: 0,
+      jibDeg: rigged ? this.jibDeg : 0,
+      sailAlphaDeg: rigged ? this.mainAlphaDeg : 0,
+      leewayDeg: rigged && Math.hypot(ur, vr) > 1e-6 ? Math.atan2(vr, ur) / DEG : 0,
+      vmgKn,
       health: this.damage.health,
       disabled: this.damage.disabled,
       damageCause: this.damage.cause,
