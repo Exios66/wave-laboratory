@@ -17,11 +17,12 @@
  *  - 333 m Nimitz-class aircraft carrier (fine hull with strong flare, 77 m wide flight deck
  *    with an angled landing area and a starboard island);
  *  - 31 m square-rigged pirate ship in the style of an early-18th-century frigate (Queen
- *    Anne's Revenge proportions): tumblehome, high sterncastle, three masts, no engine.
+ *    Anne's Revenge proportions): tumblehome, high sterncastle, three masts, no engine;
+ *  - 10 m fin-keel cruising sloop with a Bermuda rig and an auxiliary inboard.
  */
 import type { Vec3 } from '../core/vec';
 import type { VesselType } from '../schema/experiment';
-import type { HullPaint, VisualBox, VisualMaterial } from './api';
+import type { HullPaint, LateralFoil, VisualBox, VisualMaterial, ForeAftRig } from './api';
 import type { HullShape, LoftOptions } from './mesh';
 
 export interface HullDesign {
@@ -62,6 +63,10 @@ export interface HullDesign {
     }[];
     bowsprit: Vec3;
   };
+  /** Bermuda rig in the keel frame (converted to the CoG frame in definition.ts). */
+  foreAft?: ForeAftRig;
+  /** Lateral foils (fin keel) in the keel frame; areas/spans scale with the vessel. */
+  foils?: LateralFoil[];
 }
 
 const smoothstep = (e0: number, e1: number, x: number): number => {
@@ -624,6 +629,83 @@ function pirateShip(): HullDesign {
   };
 }
 
+// ---------------------------------------------------------------------------- sloop yacht
+
+function sloopYacht(): HullDesign {
+  const B = 3.2;
+  const D = 1.15;
+  const T = 0.56;
+  return {
+    displayName: 'Sloop yacht',
+    description:
+      '10 m fin-keel cruising sloop with a Bermuda (fore-and-aft) rig: a boom-footed main and ' +
+      'a headsail on the forestay, a bulb fin keel and a small auxiliary inboard for berthing ' +
+      'and motoring. Round-bilge canoe body with marked sheer and a fine bow.',
+    beam: B,
+    depth: D,
+    draft: T,
+    shape: {
+      xAft: (z) => -4.85 - 0.12 * z,
+      xFwd: (z) => (z < T ? 4.15 - 1.0 * (1 - z / T) ** 2 : 4.15 + 0.6 * (z - T)),
+      deckHeight: (u) => D + 0.3 * (2 * u - 1) ** 2,
+      // Masts and items are on the centre plane.
+      halfBreadth: (u, z) => {
+        const wT = 0.62 * smoothstep(0.4 * T, 1.05 * T, z);
+        const pr = 1.5 + 0.8 * Math.min(z / T, 1.6);
+        const pe = 1.5 + 1.2 * Math.min(z / D, 1.2);
+        // Bilge radius chosen so the waterline beam is ≈ 2.4 m under the flared max beam 3.2.
+        return (B / 2) * planForm(u, 0.42, 0.52, wT, pr, pe) * bilgeSection(z, B / 2, 1.63);
+      },
+      flatBottom: true,
+      draft: T,
+    },
+    physicsLoft: { stations: 30, levelsBelow: 7, levelsAbove: 3 },
+    renderLoft: { stations: 90, levelsBelow: 16, levelsAbove: 8 },
+    maxSpeedKn: 7,
+    superstructure: [
+      box(-0.5, 0, D + 0.16, 9.4, 2.7, 0.14, 'deck'),
+      box(0.4, 0, D + 0.55, 3.2, 2.5, 0.95, 'superstructure'),
+      box(0.5, 0, D + 0.85, 2.4, 2.52, 0.28, 'glass'),
+      box(-3.2, 0, D + 0.45, 2.0, 2.0, 0.45, 'accent'),
+      box(0.15, 0, D + 6.2, 0.16, 0.16, 12.4, 'wood'),
+      box(-3.1, 0, D + 0.8, 6.5, 0.12, 0.12, 'wood'),
+      box(0.15, 0, D + 13.0, 0.12, 0.7, 0.4, 'flag'),
+    ],
+    bridge: { x: -3.3, y: 0, z: D + 1.0 },
+    propeller: { x: -4.55, z: -0.12, diameter: 0.45, wake: 0.25, timeConstant: 1.5 },
+    rudder: { x: -5.55, z: -0.35, area: 0.55, aspect: 1.7, rateDeg: 5 },
+    paint: { bottom: 0x8f2323, boot: 0x1e2a4a, topside: 0xf5f5f0 },
+    palette: { deck: 0xb9986a, wood: 0xd9d4c8, glass: 0x7fa4b8 },
+    foreAft: {
+      mast: { x: 0.15, zFoot: D, zTop: D + 12.4 },
+      sails: [
+        // Main: 10.6 m luff, 6.4 m foot (triangular area ≈ 34 m², aspect ≈ 3.3).
+        { kind: 'main', area: 34, aspect: 3.3, tack: { x: 0.15, y: 0, z: D + 0.8 }, head: { x: 0.15, y: 0, z: D + 11.4 }, foot: 6.4 },
+        // Jib on the forestay: 10.7 m luff, 2.6 m foot (area ≈ 14 m²).
+        { kind: 'jib', area: 14, aspect: 8.2, tack: { x: 4.35, y: 0, z: D + 0.65 }, head: { x: 0.35, y: 0, z: D + 10.6 }, foot: 2.6 },
+      ],
+      rigDragArea: 1.2,
+    },
+    foils: [
+      // Fin keel to 1.7 m overall draft with a ballast bulb: span ≈ 1.4, chord root 1.2 → area ≈ 1.29, aspect = span²/area.
+      {
+        xLeRoot: 0.5,
+        xLeTip: 0.85,
+        chordRoot: 1.2,
+        chordTip: 0.65,
+        zRoot: 0.25,
+        zTip: -1.14,
+        area: 1.29,
+        span: 1.39,
+        aspect: 1.5,
+        xCe: 0.6,
+        zCe: -0.38,
+        bulb: { x: 0.95, z: -1.14, length: 1.5, radius: 0.22 },
+      },
+    ],
+  };
+}
+
 const BUILDERS: Record<VesselType, () => HullDesign> = {
   'box-barge': boxBarge,
   wigley,
@@ -634,6 +716,7 @@ const BUILDERS: Record<VesselType, () => HullDesign> = {
   'oil-tanker': oilTanker,
   'aircraft-carrier': aircraftCarrier,
   'pirate-ship': pirateShip,
+  'sloop-yacht': sloopYacht,
 };
 
 /** Full-scale (scale = 1) design of a built-in vessel type. */

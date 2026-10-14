@@ -7,6 +7,9 @@
 import type { Quat, Vec3 } from '../core/vec';
 import type { VesselType } from '../schema/experiment';
 import type { DamageCause } from './damage';
+import type { ForeAftRig } from './sailTypes';
+
+export type { ForeAftRig, ForeAftSail, Vec3Like } from './sailTypes';
 
 export interface TriangleMesh {
   /** xyz triples [m], body frame relative to CoG. */
@@ -81,29 +84,7 @@ export interface SailPlan {
   bowsprit: Vec3;
 }
 
-/** One fore-and-aft sail (body frame relative to CoG): a triangle on a luff line. */
-export interface ForeAftSail {
-  kind: 'main' | 'jib';
-  /** Sail area [m²] and geometric aspect ratio (luff² / area). */
-  area: number;
-  aspect: number;
-  /** Tack (luff foot) and head; the sail trails aft from the luff. */
-  tack: Vec3;
-  head: Vec3;
-  /** Foot length from tack to clew [m]. */
-  foot: number;
-}
-
-/**
- * Bermuda (fore-and-aft) rig: a mast with a boom-footed main and a headsail on the forestay.
- * `rigDragArea` is the drag area of mast, boom and rigging [m²]. Reusable by any hull: only the
- * positions and areas are hull specific.
- */
-export interface ForeAftRig {
-  mast: { x: number; zFoot: number; zTop: number };
-  sails: ForeAftSail[];
-  rigDragArea: number;
-}
+// ForeAftSail / ForeAftRig / Vec3Like: defined once in ./sailTypes, re-exported above.
 
 /**
  * A lateral-plane foil below the hull (fin keel, daggerboard, skeg): a trapezoid in the x–z
