@@ -245,6 +245,8 @@ export class SprayPool {
       alive++;
     }
     this.liveCount = alive;
+    // Reuse free slots after compaction, keeping the ring cursor when the pool is full.
+    if (alive < this.capacity) this.next = alive;
     this.object.visible = alive > 0;
     const geo = this.object.geometry;
     geo.setDrawRange(0, alive);
