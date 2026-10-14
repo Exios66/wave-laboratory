@@ -16,6 +16,7 @@
  * see exactly the same weather.
  */
 import { Pcg32, deriveSeed } from '../core/rng';
+import { smoothstep } from '../core/mathUtil';
 import { DEG } from '../core/units';
 import type { Environment, Weather } from '../schema/experiment';
 
@@ -69,11 +70,6 @@ export function whitecapFraction(u10: number): number {
 export function rainVisibilityKm(clearKm: number, rainMmH: number): number {
   const beta = 3.912 / Math.max(0.05, clearKm) + 0.25 * Math.max(0, rainMmH) ** 0.63;
   return 3.912 / beta;
-}
-
-function smoothstep(e0: number, e1: number, x: number): number {
-  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
-  return t * t * (3 - 2 * t);
 }
 
 /** Hash of (seed, integer) to [0, 1). */

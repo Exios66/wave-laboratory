@@ -18,6 +18,7 @@
  * Coordinates: world (x east, y north, z up) maps to Three.js as (x, z, −y).
  */
 import * as THREE from 'three';
+import { mulberry32 } from '../../core/rng';
 import type { SceneryFrame, SceneryLayer } from './types';
 
 // ---------------------------------------------------------------------------------------------
@@ -64,18 +65,6 @@ function hash2(ix: number, iy: number, salt: number): number {
   h ^= h >>> 13;
   h = Math.imul(h, 0xc2b2ae35);
   return (h ^ (h >>> 16)) >>> 0;
-}
-
-/** Small, fast seeded PRNG returning [0, 1). */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }
 
 /** The island in grid cell (ix, iy), or null when the cell is open sea. */

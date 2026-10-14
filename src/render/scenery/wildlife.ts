@@ -10,10 +10,12 @@
  */
 import * as THREE from 'three';
 import { deriveSeed, Pcg32 } from '../../core/rng';
+import { smoothstep } from '../../core/mathUtil';
 import type { SceneryFrame, SceneryLayer, SceneryVessel } from './types';
 
 const G = 9.81;
-const KN = 1852 / 3600;
+/** Knots → m/s conversion factor. */
+export const KN = 1852 / 3600;
 const TAU = Math.PI * 2;
 
 export type Species = 'dolphin' | 'whale' | 'turtle' | 'fish';
@@ -21,11 +23,6 @@ export const ALL_SPECIES: readonly Species[] = ['dolphin', 'whale', 'turtle', 'f
 
 function clamp(x: number, a: number, b: number): number {
   return x < a ? a : x > b ? b : x;
-}
-
-function smoothstep(a: number, b: number, x: number): number {
-  const u = clamp((x - a) / (b - a), 0, 1);
-  return u * u * (3 - 2 * u);
 }
 
 function lerp(a: number, b: number, t: number): number {
@@ -829,7 +826,6 @@ export class WildlifeSim {
     a.size = this.range(0.9, 1.08);
     a.remaining = 2 + Math.floor(this.rng.nextFloat() * 2);
     a.under = this.range(2, 6);
-    a.cycle = a.under + WHALE_SURFACING_S;
     a.phase = 0;
     a.hardiness = this.range(0.15, 0.6);
   }

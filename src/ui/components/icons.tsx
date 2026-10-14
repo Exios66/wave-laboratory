@@ -25,7 +25,6 @@ type IconName =
   | 'upload'
   | 'presets'
   | 'eye'
-  | 'eye-off'
   | 'camera'
   | 'plane'
   | 'warning'
@@ -94,9 +93,6 @@ const paths: Record<IconName, ReactElement> = {
       <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z" />
       <circle cx="12" cy="12" r="2.5" />
     </>
-  ),
-  'eye-off': (
-    <path d="M3 3l18 18M10.6 6.1A10 10 0 0 1 12 6c6.5 0 10 6 10 6a17 17 0 0 1-3 3.6M6.4 6.4C3.6 8.2 2 12 2 12s3.5 6 10 6a9.6 9.6 0 0 0 4.6-1.2" />
   ),
   camera: (
     <>

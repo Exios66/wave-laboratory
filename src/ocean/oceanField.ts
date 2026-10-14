@@ -608,6 +608,14 @@ function lerpField(
 }
 
 /** Bicubic Hermite interpolation of η using spectrally exact ηx, ηy, ηxy. */
+const heScratch = {
+  H: [0, 0],
+  G: [0, 0],
+  Hs: [0, 0],
+  Gs: [0, 0],
+  idx: [0, 0, 0, 0],
+};
+
 function hermiteEta(c: CascadeFields, x: number, y: number): number {
   const n = c.n;
   const h = c.size / n;
@@ -629,18 +637,23 @@ function hermiteEta(c: CascadeFields, x: number, y: number): number {
   const t3 = t2 * t;
   const s2 = s * s;
   const s3 = s2 * s;
-  const H = [2 * t3 - 3 * t2 + 1, -2 * t3 + 3 * t2];
-  const G = [t3 - 2 * t2 + t, t3 - t2];
-  const Hs = [2 * s3 - 3 * s2 + 1, -2 * s3 + 3 * s2];
-  const Gs = [s3 - 2 * s2 + s, s3 - s2];
-  const idx = [
-    [j0 + i0, j0 + i1],
-    [j1 + i0, j1 + i1],
-  ];
+  const { H, G, Hs, Gs, idx } = heScratch;
+  H[0] = 2 * t3 - 3 * t2 + 1;
+  H[1] = -2 * t3 + 3 * t2;
+  G[0] = t3 - 2 * t2 + t;
+  G[1] = t3 - t2;
+  Hs[0] = 2 * s3 - 3 * s2 + 1;
+  Hs[1] = -2 * s3 + 3 * s2;
+  Gs[0] = s3 - 2 * s2 + s;
+  Gs[1] = s3 - s2;
+  idx[0] = j0 + i0;
+  idx[1] = j0 + i1;
+  idx[2] = j1 + i0;
+  idx[3] = j1 + i1;
   let acc = 0;
   for (let b = 0; b < 2; b++) {
     for (let a = 0; a < 2; a++) {
-      const k = idx[b]![a]!;
+      const k = idx[2 * b + a]!;
       acc +=
         H[a]! * Hs[b]! * e[k]! +
         G[a]! * Hs[b]! * h * ex[k]! +

@@ -21,8 +21,8 @@
  * can lie slack on the bottom (X ≤ L − s₀, s₀ the length hanging vertically) exerts only its
  * hanging weight; a line shorter than the water is deep is a straight elastic bar.
  */
+import { STANDARD_GRAVITY as G } from '../core/constants';
 
-const G = 9.80665;
 /** Steel density [kg/m³]; submerged chain weighs (1 − ρ/ρ_steel) of its air weight. */
 const STEEL_DENSITY = 7850;
 /** Studless chain: mass per metre 0.0219 d² [kg/m, d in mm] and EA = 47.4e9 d² [N, d in m]. */
