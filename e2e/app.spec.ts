@@ -143,11 +143,14 @@ test.describe('Wave Laboratory app', () => {
     await waitForSimulation(page);
     await page.getByRole('combobox', { name: 'Simulation speed' }).selectOption('4');
     // At 4× speed the simulation outruns the wall clock: poll until it has.
-    const started = Date.now();
+    // Compare elapsed intervals so setup progress before the timer starts can't satisfy it.
     const time = page.locator('.transport__time');
+    const startTime = await simulationSeconds(time);
+    const started = Date.now();
     await expect
       .poll(
-        async () => (await simulationSeconds(time)) - (Date.now() - started) / 1000,
+        async () =>
+          (await simulationSeconds(time)) - startTime - (Date.now() - started) / 1000,
         { timeout: 30_000 },
       )
       .toBeGreaterThan(0);
@@ -155,7 +158,9 @@ test.describe('Wave Laboratory app', () => {
     const table = page.getByRole('table', { name: 'Wave gauges' });
     await expect(table).toBeVisible();
     await expect(table.getByRole('row')).toHaveCount(2);
-    await expect(table.getByRole('row').nth(1)).toContainText(/\d/);
+    // Hm0 cell of the first gauge row: 'x.xx m' once the recorder has real data,
+    // '—' before it — unlike the wave count, which shows digits even at 0.
+    await expect(table.getByRole('row').nth(1).locator('td').nth(0)).toContainText(/\d\.\d/);
     await page.getByRole('tab', { name: 'Vessel motions' }).click();
     await expect(page.getByRole('figure').first()).toBeVisible();
   });
