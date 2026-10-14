@@ -566,11 +566,14 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
   const lab = useLab.getState;
   const env = useLab((s) => s.experiment.environment);
   const diag = useLab((s) => s.diagnostics?.systems.find((x) => x.id === wave.id));
-  const update = (recipe: (w: WaveSystem) => void) =>
-    lab().updateExperiment((d) => {
-      const w = d.waves.find((x) => x.id === wave.id);
-      if (w) recipe(w);
-    });
+  const update = (recipe: (w: WaveSystem) => void, reload = true) =>
+    lab().updateExperiment(
+      (d) => {
+        const w = d.waves.find((x) => x.id === wave.id);
+        if (w) recipe(w);
+      },
+      { reload },
+    );
 
   const disp = dispersionFor(env);
   return (
@@ -578,7 +581,7 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
       <TextField
         label="Name"
         value={wave.name}
-        onCommit={(v) => update((w) => void (w.name = v))}
+        onCommit={(v) => update((w) => void (w.name = v), false)}
       />
       <Switch
         label="Enabled"
