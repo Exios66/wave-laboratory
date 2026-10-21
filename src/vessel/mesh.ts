@@ -117,29 +117,145 @@ export function loftHull(shape: HullShape, opts: LoftOptions): LoftedHull {
       else idx.push(a[k]!, a[k1]!, b[k]!, a[k1]!, b[k1]!, b[k]!);
     }
   }
-  // End caps: fan from the ring centroid.
-  const cap = (ring: number[], flip: boolean): void => {
-    let cx = 0;
-    let cy = 0;
-    let cz = 0;
-    for (const v of ring) {
-      cx += pos[3 * v]!;
-      cy += pos[3 * v + 1]!;
-      cz += pos[3 * v + 2]!;
-    }
-    const c = push(cx / ring.length, cy / ring.length, cz / ring.length);
-    for (let k = 0; k < ring.length; k++) {
-      const v0 = ring[k]!;
-      const v1 = ring[(k + 1) % ring.length]!;
-      if (flip) idx.push(c, v1, v0);
-      else idx.push(c, v0, v1);
-    }
-  };
-  cap(rings[0]!, true);
-  cap(rings[stations - 1]!, false);
+  capRing(pos, idx, rings[0]!, true);
+  capRing(pos, idx, rings[stations - 1]!, false);
 
   const mesh: TriangleMesh = { positions: new Float32Array(pos), indices: new Uint32Array(idx) };
   // Orient outward: the divergence-theorem volume must be positive.
+  if (meshVolume(mesh).volume < 0) flipOrientation(mesh);
+  return { mesh, deckEdge: new Uint32Array(deckEdge) };
+}
+
+/** End cap: a triangle fan from the ring centroid (exact for planar rings, see {@link loftHull}). */
+function capRing(pos: number[], idx: number[], ring: number[], flip: boolean): void {
+  let cx = 0;
+  let cy = 0;
+  let cz = 0;
+  for (const v of ring) {
+    cx += pos[3 * v]!;
+    cy += pos[3 * v + 1]!;
+    cz += pos[3 * v + 2]!;
+  }
+  pos.push(cx / ring.length, cy / ring.length, cz / ring.length);
+  const c = pos.length / 3 - 1;
+  for (let k = 0; k < ring.length; k++) {
+    const v0 = ring[k]!;
+    const v1 = ring[(k + 1) % ring.length]!;
+    if (flip) idx.push(c, v1, v0);
+    else idx.push(c, v0, v1);
+  }
+}
+
+/**
+ * Catamaran: two identical demihulls (each described by a {@link HullShape} about its own
+ * centreline) at y = ±halfSeparation, joined by a bridge deck. The whole craft is ONE closed
+ * surface, so pressure integration, hydrostatics and the GZ curve need no special handling.
+ *
+ * The section at every station is a single closed loop (the tunnel between the hulls is a
+ * notch in the outline, not a hole in the topology):
+ *   deck centre → port outer deck edge → port outer wall down → port keel → port inner wall up
+ *   → tunnel roof (underside of the bridge deck) → tunnel centre → mirrored for starboard.
+ * `tunnelRoof(u)` is the height of the bridge underside; where it reaches the deck height the
+ * bridge deck has no thickness, so letting it rise to `deckHeight` at both ends gives a lens
+ * shaped bridge that does not cap the (pointed) demihull ends. The demihull must satisfy the
+ * {@link HullShape} requirements and `halfSeparation > halfBreadth` at the tunnel roof.
+ */
+export interface CatamaranOptions {
+  /** Centreline-to-centreline half distance of the demihulls [m]. */
+  halfSeparation: number;
+  /** Height of the bridge-deck underside above the keel at parameter u [m]; ≤ deckHeight(u). */
+  tunnelRoof(u: number): number;
+}
+
+/** Interior points across the flat tunnel roof (per half), so slamming sees more than one panel. */
+const ROOF_POINTS = 2;
+
+export function loftCatamaran(
+  shape: HullShape,
+  opts: LoftOptions,
+  cat: CatamaranOptions,
+): LoftedHull {
+  const { stations, levelsBelow, levelsAbove } = opts;
+  const T = shape.draft;
+  const c = cat.halfSeparation;
+  const pos: number[] = [];
+  const idx: number[] = [];
+  const deckEdge: number[] = [];
+  const rings: number[][] = [];
+  const push = (x: number, y: number, z: number): number => {
+    pos.push(x, y, z);
+    return pos.length / 3 - 1;
+  };
+  const xAt = (u: number, z: number): number => {
+    const a = shape.xAft(z);
+    return a + u * (shape.xFwd(z) - a);
+  };
+
+  for (let i = 0; i < stations; i++) {
+    const s = i / (stations - 1);
+    const u = 0.55 * s + 0.45 * 0.5 * (1 - Math.cos(Math.PI * s));
+    const deck = shape.deckHeight(u);
+    const roof = Math.min(deck, Math.max(cat.tunnelRoof(u), T * 1.001));
+    const below: number[] = [];
+    for (let j = 1; j <= levelsBelow; j++) {
+      below.push(T * (1 - Math.cos((Math.PI / 2) * (j / levelsBelow))));
+    }
+    // Outer wall: up to the deck. Inner wall: up to the tunnel roof.
+    const outer = [...below];
+    const inner = [...below];
+    for (let j = 1; j <= levelsAbove; j++) {
+      outer.push(T + ((deck - T) * j) / levelsAbove);
+      inner.push(T + ((roof - T) * j) / levelsAbove);
+    }
+    const hb = (z: number): number => Math.max(0, shape.halfBreadth(u, z));
+    // Port half of the ring, from the deck edge round the hull to the tunnel roof.
+    const half: number[] = [];
+    const deckC = push(xAt(u, deck), 0, deck);
+    // Port outer wall, deck edge first (descending).
+    for (let k = outer.length - 1; k >= 0; k--) {
+      const z = outer[k]!;
+      half.push(push(xAt(u, z), c + hb(z), z));
+    }
+    deckEdge.push(half[0]!);
+    if (shape.flatBottom) half.push(push(xAt(u, 0), c + hb(0), 0));
+    half.push(push(xAt(u, 0), c, 0)); // keel
+    if (shape.flatBottom) half.push(push(xAt(u, 0), c - hb(0), 0));
+    for (let k = 0; k < inner.length; k++) {
+      const z = inner[k]!;
+      half.push(push(xAt(u, z), c - hb(z), z));
+    }
+    // Roof: from the last inner-wall point towards the centre line.
+    const yRoof = c - hb(roof);
+    for (let k = 1; k <= ROOF_POINTS; k++) {
+      half.push(push(xAt(u, roof), (yRoof * (ROOF_POINTS + 1 - k)) / (ROOF_POINTS + 1), roof));
+    }
+    const roofC = push(xAt(u, roof), 0, roof);
+    // Starboard: the mirror image, traversed from the roof centre back up to the deck edge.
+    const mirror: number[] = [];
+    for (let k = half.length - 1; k >= 0; k--) {
+      const q = half[k]!;
+      mirror.push(push(pos[3 * q]!, -pos[3 * q + 1]!, pos[3 * q + 2]!));
+    }
+    deckEdge.push(mirror[mirror.length - 1]!);
+    rings.push([deckC, ...half, roofC, ...mirror]);
+  }
+
+  // Ring = [deck centre, port…, roof centre, starboard…]; port segments are k < portEnd.
+  const R = rings[0]!.length;
+  const portEnd = R / 2;
+  for (let i = 0; i + 1 < stations; i++) {
+    const a = rings[i]!;
+    const b = rings[i + 1]!;
+    for (let k = 0; k < R; k++) {
+      const k1 = (k + 1) % R;
+      if (k < portEnd) idx.push(a[k]!, a[k1]!, b[k1]!, a[k]!, b[k1]!, b[k]!);
+      else idx.push(a[k]!, a[k1]!, b[k]!, a[k1]!, b[k1]!, b[k]!);
+    }
+  }
+  capRing(pos, idx, rings[0]!, true);
+  capRing(pos, idx, rings[stations - 1]!, false);
+
+  const mesh: TriangleMesh = { positions: new Float32Array(pos), indices: new Uint32Array(idx) };
   if (meshVolume(mesh).volume < 0) flipOrientation(mesh);
   return { mesh, deckEdge: new Uint32Array(deckEdge) };
 }

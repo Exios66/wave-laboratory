@@ -116,7 +116,11 @@ export function buildHydroModel(def: VesselDefinition, rho: number, g: number): 
   const props = submergedProperties(mesh, quatToMat3(quatIdentity()), { x: 0, y: 0, z: -zWl });
   const lwl = props.wlMaxX - props.wlMinX;
   const bwl = props.wlMaxY - props.wlMinY;
-  const J = 1 / (1 + (0.6 * bwl) / lwl);
+  // Multihull: every demihull is its own slender section; per-hull beam for the 3-D correction,
+  // form factor and manoeuvring derivatives, with the hull-force terms summed over the hulls.
+  const nHulls = def.multihull?.count ?? 1;
+  const bHull = def.multihull ? bwl - (nHulls - 1) * def.multihull.separation : bwl;
+  const J = 1 / (1 + (0.6 * bHull) / lwl);
 
   const n = STRIP_COUNT;
   const dx = lwl / n;
@@ -130,7 +134,9 @@ export function buildHydroModel(def: VesselDefinition, rho: number, g: number): 
   for (let i = 0; i < n; i++) {
     const x = props.wlMinX + (i + 0.5) * dx;
     const sec = sectionAt(mesh, x, zWl);
-    const lw = lewisAddedMass(sec.beam, sec.draft, sec.area, rho);
+    const lw = lewisAddedMass(sec.beam / nHulls, sec.draft, sec.area / nHulls, rho);
+    lw.a33 *= nHulls;
+    lw.a22 *= nHulls;
     stripX[i] = x;
     stripDraft[i] = Math.max(sec.draft, 1e-3 * T);
     // Sample relative motion at the section's mean depth A/b (Smith-effect equivalent depth).
@@ -230,12 +236,12 @@ export function buildHydroModel(def: VesselDefinition, rho: number, g: number): 
   const rollBQuad =
     (ROLL_QUADRATIC_DAMPING_RATIO * critRoll * 3 * Math.PI) /
     (8 * omegaRollEff * ROLL_QUADRATIC_REF_AMPLITUDE);
-  const cm = maxSectionArea / (bwl * T);
+  const cm = maxSectionArea / (nHulls * bHull * T);
   // OG: depth of G below the waterline, positive downward (Ikeda).
   const og = T - def.kg;
-  const rollBLift = ikedaLiftDamping(rho, 1, lwl, bwl, T, og, cm); // per unit speed
+  const rollBLift = nHulls * ikedaLiftDamping(rho, 1, lwl, bHull, T, og, cm); // per unit speed
 
-  const cb = volume / (lwl * bwl * T);
+  const cb = volume / (nHulls * lwl * bHull * T);
   return {
     rho,
     g,
@@ -266,14 +272,25 @@ export function buildHydroModel(def: VesselDefinition, rho: number, g: number): 
     rollBQuad,
     lwl,
     bwl,
-    formFactor: formFactor(cb, lwl, bwl, T),
+    formFactor: formFactor(cb, lwl, bHull, T),
     blockCoefficient: cb,
-    clarke: withKeelFin(clarkeDerivatives(lwl, bwl, T, cb), def.keelFin, lwl),
+    clarke: withKeelFin(
+      scaleDerivatives(clarkeDerivatives(lwl, bHull, T, cb), nHulls),
+      def.keelFin,
+      lwl,
+    ),
     lateralZ: zWl - 0.5 * T,
     slamThreshold: ochiThreshold(g, lwl),
     slamRegionX: props.wlMinX + 0.7 * lwl,
     rudderLiftSlope: rudderLiftSlope(def.propulsion.rudderAspectRatio),
   };
+}
+
+function scaleDerivatives(
+  c: { yv: number; yr: number; nv: number; nr: number },
+  k: number,
+): { yv: number; yr: number; nv: number; nr: number } {
+  return { yv: k * c.yv, yr: k * c.yr, nv: k * c.nv, nr: k * c.nr };
 }
 
 /**
