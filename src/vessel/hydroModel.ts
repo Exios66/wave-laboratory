@@ -37,6 +37,7 @@ import {
   surgeAddedMass,
 } from './coefficients';
 import { quatToMat3, sectionAt, submergedProperties } from './hydrostatics';
+import { meshBounds } from './mesh';
 
 export const STRIP_COUNT = 20;
 export const HEAVE_DAMPING_RATIO = 0.15;
@@ -114,8 +115,14 @@ export function buildHydroModel(def: VesselDefinition, rho: number, g: number): 
   const volume = hs.volume;
   const mass = def.mass;
   const props = submergedProperties(mesh, quatToMat3(quatIdentity()), { x: 0, y: 0, z: -zWl });
-  const lwl = props.wlMaxX - props.wlMinX;
-  const bwl = props.wlMaxY - props.wlMinY;
+  // A submarine has no real waterline (only its sail pierces the surface): the strips span the
+  // whole hull, and its effective draft for the empirical derivatives is the hull diameter.
+  const subm = def.submarine;
+  const bounds = meshBounds(mesh);
+  const lwl = subm ? bounds.max.x - bounds.min.x : props.wlMaxX - props.wlMinX;
+  const bwl = subm ? subm.hullDiameter : props.wlMaxY - props.wlMinY;
+  const x0 = subm ? bounds.min.x : props.wlMinX;
+  const Teff = subm ? subm.hullDiameter : T;
   const J = 1 / (1 + (0.6 * bwl) / lwl);
 
   const n = STRIP_COUNT;
@@ -128,8 +135,20 @@ export function buildHydroModel(def: VesselDefinition, rho: number, g: number): 
   const stripB33 = new Float64Array(n);
   let maxSectionArea = 0;
   for (let i = 0; i < n; i++) {
-    const x = props.wlMinX + (i + 0.5) * dx;
+    const x = x0 + (i + 0.5) * dx;
     const sec = sectionAt(mesh, x, zWl);
+    if (subm) {
+      // Deeply submerged near-circular section: A33 = A22 = ρ · (section area) (ρπr² for a
+      // circle), the exact 2-D result far below the surface; sampled at the hull axis. The
+      // immersion ratio stays 1 while the section is under (tiny nominal draft).
+      stripX[i] = x;
+      stripDraft[i] = 0.5;
+      stripZ[i] = subm.axisZ;
+      stripA33[i] = J * rho * sec.area * dx;
+      stripA22[i] = J * rho * sec.area * dx;
+      maxSectionArea = Math.max(maxSectionArea, sec.area);
+      continue;
+    }
     const lw = lewisAddedMass(sec.beam, sec.draft, sec.area, rho);
     stripX[i] = x;
     stripDraft[i] = Math.max(sec.draft, 1e-3 * T);
@@ -230,12 +249,13 @@ export function buildHydroModel(def: VesselDefinition, rho: number, g: number): 
   const rollBQuad =
     (ROLL_QUADRATIC_DAMPING_RATIO * critRoll * 3 * Math.PI) /
     (8 * omegaRollEff * ROLL_QUADRATIC_REF_AMPLITUDE);
-  const cm = maxSectionArea / (bwl * T);
-  // OG: depth of G below the waterline, positive downward (Ikeda).
+  const cm = maxSectionArea / (bwl * Teff);
+  // OG: depth of G below the waterline, positive downward (Ikeda). The lift component belongs
+  // to a hull piercing the surface; a submerged hull has none.
   const og = T - def.kg;
-  const rollBLift = ikedaLiftDamping(rho, 1, lwl, bwl, T, og, cm); // per unit speed
+  const rollBLift = subm ? 0 : ikedaLiftDamping(rho, 1, lwl, bwl, T, og, cm); // per unit speed
 
-  const cb = volume / (lwl * bwl * T);
+  const cb = volume / (lwl * bwl * Teff);
   return {
     rho,
     g,
@@ -266,12 +286,12 @@ export function buildHydroModel(def: VesselDefinition, rho: number, g: number): 
     rollBQuad,
     lwl,
     bwl,
-    formFactor: formFactor(cb, lwl, bwl, T),
+    formFactor: formFactor(cb, lwl, bwl, Teff),
     blockCoefficient: cb,
-    clarke: withKeelFin(clarkeDerivatives(lwl, bwl, T, cb), def.keelFin, lwl),
-    lateralZ: zWl - 0.5 * T,
+    clarke: withKeelFin(clarkeDerivatives(lwl, bwl, Teff, cb), def.keelFin, lwl),
+    lateralZ: subm ? subm.axisZ : zWl - 0.5 * T,
     slamThreshold: ochiThreshold(g, lwl),
-    slamRegionX: props.wlMinX + 0.7 * lwl,
+    slamRegionX: x0 + 0.7 * lwl,
     rudderLiftSlope: rudderLiftSlope(def.propulsion.rudderAspectRatio),
   };
 }

@@ -22,7 +22,9 @@ oceanographic wave spectra, drop ships into it, and measure how they handle the 
   columns, plus added mass, radiation and viscous damping, propulsion, rudder and autopilot.
   Wind acts on every hull through its frontal and side areas, and the square-rigged pirate ship
   sails on the wind alone, bracing and reefing as the wind changes. The fleet runs from a
-  lifeboat to a VLCC oil tanker and a Nimitz-class aircraft carrier. Slamming, green water and
+  lifeboat to a VLCC oil tanker and a Nimitz-class aircraft carrier, and a 70 m diesel-electric
+  submarine runs at periscope depth: fully submerged and neutrally buoyant, held at the ordered keel
+  depth by bow and stern hydroplanes and a ballast tank while the swell heaves and pitches her. Slamming, green water and
   capsize are detected, and a collision or heavy slam can breach a watertight compartment that
   floods through the hole, costing stability (free surface) and eventually sinking the ship. A ship can drop anchor (or start moored to a buoy): an elastic
   catenary chain pulls at the bow, she weathervanes into the wind, and the anchor drags if the load

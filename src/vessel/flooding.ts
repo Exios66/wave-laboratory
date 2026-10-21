@@ -500,6 +500,11 @@ export interface StabilityParticulars {
   kb: number;
   bm: number;
   kg: number;
+  /**
+   * Fully submerged hull (submarine): floodwater adds weight but no buoyancy, so there is no
+   * parallel sinkage and KB, BM keep their intact values.
+   */
+  submerged?: boolean;
 }
 
 export interface EffectiveGm {
@@ -526,8 +531,10 @@ export function effectiveGm(
 ): EffectiveGm {
   const delta = p.mass + floodMass;
   const vol = p.mass / p.rho;
-  const sink = floodMass / (p.rho * p.waterplaneArea);
-  const vol2 = vol + floodMass / p.rho;
+  // Guard: without a waterplane there is nothing to sink on (0 / 0 would poison the telemetry).
+  const floats = !p.submerged && p.waterplaneArea > 1e-9;
+  const sink = floats ? floodMass / (p.rho * p.waterplaneArea) : 0;
+  const vol2 = floats ? vol + floodMass / p.rho : vol;
   const kb = (vol * p.kb + sink * p.waterplaneArea * (p.draft + 0.5 * sink)) / vol2;
   const bm = (p.bm * vol) / vol2;
   const kg = (p.mass * p.kg + weightMoment) / delta;

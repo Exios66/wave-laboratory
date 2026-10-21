@@ -423,6 +423,28 @@ test.describe('Wave Laboratory app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('adds a submarine that holds periscope depth and takes a depth order', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    await page.getByRole('button', { name: 'Add vessel' }).click();
+    await page.getByRole('menuitem', { name: /^Submarine/ }).click();
+    await expect(page.getByRole('heading', { name: 'Vessel', exact: true })).toBeVisible();
+    // The keel depth order starts at the design periscope depth and the readout agrees.
+    const depth = page.getByRole('textbox', { name: 'Keel depth' });
+    await expect(depth).toHaveValue('15');
+    const readout = page.locator('.readout dt', { hasText: 'Keel depth' }).locator('xpath=../dd');
+    await expect
+      .poll(async () => Number.parseFloat((await readout.textContent())!), { timeout: 30_000 })
+      .toBeCloseTo(15, 0);
+    await depth.fill('20');
+    await depth.press('Enter');
+    await expect(depth).toHaveValue('20');
+    await page.getByRole('button', { name: 'Follow' }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Simulation running' })).toBeAttached();
+    expect(errors).toEqual([]);
+  });
+
   test('keeps the flooding compartment valid across hull changes', async ({ page }) => {
     const errors = trackErrors(page);
     await page.goto('/');

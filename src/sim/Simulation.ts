@@ -183,7 +183,9 @@ export class Simulation {
   private collide(t: number): void {
     const bodies: { v: SimVessel; f: HullFootprint }[] = [];
     for (const v of this.vessels) {
-      if (v.hullFootprint && v.applyCollision) bodies.push({ v, f: v.hullFootprint() });
+      // A submarine runs far below the keels of surface ships: it neither hits nor is hit.
+      if (v.hullFootprint && v.applyCollision && !v.definition.submarine)
+        bodies.push({ v, f: v.hullFootprint() });
     }
     for (let i = 0; i < bodies.length; i++) {
       for (let j = i + 1; j < bodies.length; j++) {

@@ -71,6 +71,7 @@ export const VESSEL_TYPE_LABELS: Record<VesselType, string> = {
   'aircraft-carrier': 'Aircraft carrier',
   'pirate-ship': 'Pirate ship (square-rigged)',
   'sloop-yacht': 'Sloop yacht (Bermuda-rigged)',
+  submarine: 'Submarine (periscope depth)',
 };
 
 export function newVessel(type: VesselType, count: number): VesselConfig {
@@ -84,7 +85,7 @@ export function newVessel(type: VesselType, count: number): VesselConfig {
     x: Math.round(r * Math.cos(angle)),
     y: Math.round(r * Math.sin(angle)),
     headingDeg: 0,
-    speedKn: type === 'box-barge' ? 0 : type === 'pirate-ship' ? 5 : 6,
+    speedKn: type === 'box-barge' ? 0 : type === 'pirate-ship' ? 5 : type === 'submarine' ? 4 : 6,
     autopilot: type !== 'box-barge',
     kgFactor: 0.6,
     loadFactor: 1,

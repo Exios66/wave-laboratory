@@ -110,6 +110,32 @@ export interface LateralFoil {
   bulb: { x: number; z: number; length: number; radius: number } | null;
 }
 
+/** One hydroplane of a submarine (body frame relative to CoG). */
+export interface DivePlane {
+  /** Lift-centre position: x forward (+) or aft (−) of the CoG, z above (+) or below it [m]. */
+  x: number;
+  z: number;
+  /** Planform area [m²] and geometric aspect ratio. */
+  area: number;
+  aspect: number;
+}
+
+/**
+ * Submarine particulars: a fully submerged, neutrally buoyant hull held at depth by bow and
+ * stern hydroplanes (see `depthKeeping.ts`). Absent for surface ships.
+ */
+export interface SubmarineSpec {
+  /** Pressure-hull axis height in the body frame, hull diameter and overall length [m]. */
+  axisZ: number;
+  hullDiameter: number;
+  hullLength: number;
+  bowPlanes: DivePlane;
+  sternPlanes: DivePlane;
+  /** Mechanical plane limit [deg] and actuator rate [deg/s]. */
+  maxPlaneDeg: number;
+  planeRateDeg: number;
+}
+
 export interface VesselDefinition {
   type: VesselType;
   displayName: string;
@@ -161,6 +187,8 @@ export interface VesselDefinition {
   keelFin: { area: number; x: number } | null;
   /** Per-material colour overrides for the superstructure (sRGB hex). */
   palette: Partial<Record<VisualMaterial, number>>;
+  /** Submarine data (fully submerged hull held at depth by hydroplanes); null for surface ships. */
+  submarine: SubmarineSpec | null;
 }
 
 export interface VesselPoints {
@@ -228,6 +256,8 @@ export interface VesselCommand {
   rudderDeg?: number;
   /** Manual throttle −1…1 (used when autopilot is off). */
   throttle?: number;
+  /** Commanded keel depth below the mean surface [m] (submarines; default: the design depth). */
+  depthM?: number;
   /** Restore health to 1 and bring a disabled vessel back into service (plugs and pumps out). */
   repair?: boolean;
   /** Open a breach in a compartment (0 = bow); `area` [m²] defaults to a sizeable hole. */

@@ -332,6 +332,8 @@ const dist2 = (a: DeckSpot, b: DeckSpot): number => (a.x - b.x) ** 2 + (a.y - b.
  * captain (on crews of two or more) keeps near the bridge; the others spread over the deck.
  */
 export function planCrew(def: VesselDefinition, seed = 1): CrewMember[] {
+  // A submarine at periscope depth has no deck above water: the crew is below.
+  if (def.submarine) return [];
   const rand = mulberry32(seed);
   const deck = deckSurface(def);
   const wanted = crewCount(def);

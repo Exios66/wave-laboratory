@@ -937,6 +937,15 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
               { label: 'Speed', value: fmt(tel.speedKn, 1, 'kn') },
               { label: 'Heading', value: fmt(tel.headingDeg, 0, '°') },
               { label: 'Rudder', value: fmt(tel.rudderDeg, 1, '°') },
+              ...(def?.submarine
+                ? [
+                    {
+                      label: 'Keel depth',
+                      value: fmt(def.kg - tel.position.z, 1, 'm'),
+                      title: 'Depth of the keel below the mean surface',
+                    },
+                  ]
+                : []),
               {
                 label: 'Apparent wind',
                 value: `${fmt(tel.apparentWind, 0, 'm/s')} ${Math.abs(tel.apparentWindAngleDeg).toFixed(0)}° ${tel.apparentWindAngleDeg >= 0 ? 'P' : 'S'}`,
@@ -1020,6 +1029,21 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
             if (update((x) => void (x.speedKn = v), false)) live({ speedKn: v });
           }}
         />
+        {def?.submarine && (
+          <NumberField
+            label="Keel depth"
+            value={vessel.depthM ?? def.draft}
+            min={8}
+            max={300}
+            step={1}
+            unit="m"
+            unitLabel="metres"
+            onCommit={(v) => {
+              if (update((x) => void (x.depthM = v), false)) live({ depthM: v });
+            }}
+            hint="Ordered depth of the keel. The bow and stern planes and the ballast tank hold it; the default 15 m keeps the sail just awash. Applied live."
+          />
+        )}
         {!vessel.autopilot && (
           <>
             <NumberField
