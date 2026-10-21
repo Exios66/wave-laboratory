@@ -139,20 +139,19 @@ test.describe('Wave Laboratory app', () => {
   });
 
   test('records data and shows statistics', async ({ page }) => {
+    test.setTimeout(150_000);
     await page.goto('/');
     await waitForSimulation(page);
     await page.getByRole('combobox', { name: 'Simulation speed' }).selectOption('4');
-    // At 4× speed the simulation outruns the wall clock: poll until it has.
-    // Compare elapsed intervals so setup progress before the timer starts can't satisfy it.
+    // The recorder needs >= 128 gauge samples before it reports spectral parameters. Wait for
+    // enough *simulated* time to elapse rather than racing the wall clock: the frame loop caps
+    // each frame at 0.1 s of wall time, so under software rendering (a few fps) the simulation
+    // legitimately runs slower than real time even at 4x.
     const time = page.locator('.transport__time');
     const startTime = await simulationSeconds(time);
-    const started = Date.now();
     await expect
-      .poll(
-        async () => (await simulationSeconds(time)) - startTime - (Date.now() - started) / 1000,
-        { timeout: 30_000 },
-      )
-      .toBeGreaterThan(0);
+      .poll(async () => (await simulationSeconds(time)) - startTime, { timeout: 120_000 })
+      .toBeGreaterThan(30);
     await page.getByRole('tab', { name: 'Statistics' }).click();
     const table = page.getByRole('table', { name: 'Wave gauges' });
     await expect(table).toBeVisible();
