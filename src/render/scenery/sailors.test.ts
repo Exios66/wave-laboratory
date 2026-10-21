@@ -23,6 +23,7 @@ const TYPES: VesselType[] = [
   'trawler',
   'patrol-boat',
   'lifeboat',
+  'catamaran',
 ];
 const defs = new Map<VesselType, VesselDefinition>(
   TYPES.map((t) => [t, createVesselDefinition(t)]),

@@ -461,6 +461,27 @@ test.describe('Wave Laboratory app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('adds an oil tanker and a catamaran from the Add menu and renders them', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    const scene = page.getByRole('navigation', { name: 'Scene' });
+    const before = await scene.getByRole('button', { name: /\d+ kn/ }).count();
+    await scene.getByRole('button', { name: 'Add vessel' }).click();
+    await page.getByRole('menuitem', { name: 'Oil tanker (VLCC)' }).click();
+    await scene.getByRole('button', { name: 'Add vessel' }).click();
+    await page.getByRole('menuitem', { name: 'Catamaran (power, 15 m)' }).click();
+    await expect(scene.getByRole('button', { name: /\d+ kn/ })).toHaveCount(before + 2);
+    await expect(scene.getByRole('button', { name: /^Oil tanker \d/ })).toBeVisible();
+    await scene.getByRole('button', { name: /^Catamaran \d/ }).click();
+    await expect(page.getByRole('combobox', { name: 'Hull type' })).toHaveValue('catamaran');
+    await waitForSimulation(page);
+    await page.waitForTimeout(1500);
+    expect(errors).toEqual([]);
+  });
+
   test('drops and weighs the anchor from the inspector and reads the chain tension', async ({
     page,
   }) => {
