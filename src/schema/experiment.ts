@@ -252,7 +252,7 @@ export const VesselSchema = z.object({
   /** Anchor or buoy mooring the vessel starts on (see `MooringSchema`). */
   mooring: MooringSchema.optional(),
   /** Submarine: ordered keel depth below the surface [m]. Absent = the design periscope depth. */
-  depthM: finite().min(8).max(500).optional(),
+  depthM: finite().min(10).max(500).optional(),
 });
 export type VesselConfig = z.infer<typeof VesselSchema>;
 

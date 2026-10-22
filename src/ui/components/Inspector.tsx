@@ -1033,8 +1033,8 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
           <NumberField
             label="Keel depth"
             value={vessel.depthM ?? def.draft}
-            min={8}
-            max={300}
+            min={10}
+            max={500}
             step={1}
             unit="m"
             unitLabel="metres"
@@ -1126,7 +1126,9 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
               { label: 'Length', value: fmt(def.length, 1, 'm') },
               { label: 'Beam', value: fmt(def.beam, 1, 'm') },
               { label: 'Draft', value: fmt(def.draft, 2, 'm') },
-              { label: 'Freeboard', value: fmt(def.depth - def.draft, 2, 'm') },
+              ...(def.submarine
+                ? []
+                : [{ label: 'Freeboard', value: fmt(def.depth - def.draft, 2, 'm') }]),
               { label: 'Mass', value: fmt(def.mass / 1000, 0, 't') },
               { label: 'GM', value: fmt(def.gm, 2, 'm'), title: 'Transverse metacentric height' },
               { label: 'Max speed', value: fmt(def.maxSpeed / 0.5144, 0, 'kn') },

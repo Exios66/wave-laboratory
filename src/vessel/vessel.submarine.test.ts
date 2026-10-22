@@ -8,6 +8,7 @@ import { quatIdentity } from '../core/vec';
 import { OceanField } from '../ocean/oceanField';
 import { env, regular } from '../test/fixtures';
 import { createVesselDefinition } from './definition';
+import { MIN_KEEL_DEPTH } from './depthKeeping';
 import { effectiveGm } from './flooding';
 import { quatToMat3, submergedProperties } from './hydrostatics';
 import { meshBounds, meshVolume } from './mesh';
@@ -112,32 +113,55 @@ describe('depth keeping', () => {
     }
   });
 
-  it('follows a commanded depth change using the planes, without overshooting far', () => {
-    const v = makeVessel('submarine', { speedKn: 6, autopilot: true });
-    run(v, 20);
-    v.command({ depthM: 20 }); // keel 15 → 20 m
-    let maxDepth = 0;
-    const t = run(
-      v,
-      900,
-      () => {
-        maxDepth = Math.max(maxDepth, -v.telemetry().position.z);
-      },
-      20,
-    );
-    const d = v.diagnostics();
-    report(
-      `submarine dive 5 m: depth ${d.depth.toFixed(2)} m (cmd ${d.depthCmd.toFixed(2)}), peak ${maxDepth.toFixed(2)} m at t = ${t} s`,
-    );
-    expect(Math.abs(d.depth - d.depthCmd)).toBeLessThan(0.5);
-    expect(maxDepth - d.depthCmd).toBeLessThan(1.5);
-    expect(Math.abs(v.telemetry().pitchDeg)).toBeLessThan(1);
-  });
+  // Calm-water depth orders from periscope depth (keel 15 m): the boat must settle on the order
+  // without limit-cycling, with bounded overshoot and pitch, whatever the speed.
+  const orders: { kn: number; order: number; seconds: number; overshoot: number }[] = [
+    { kn: 5, order: 25, seconds: 1100, overshoot: 2 },
+    { kn: 10, order: 25, seconds: 900, overshoot: 3 },
+    { kn: 5, order: 40, seconds: 1300, overshoot: 3 },
+    { kn: 4, order: 40, seconds: 1500, overshoot: 3 },
+    // Hover: no plane authority, the ballast pump alone moves her, slowly.
+    { kn: 0, order: 25, seconds: 2000, overshoot: 3 },
+  ];
+  for (const o of orders) {
+    it(`settles on a ${o.order} m keel-depth order at ${o.kn} kn`, () => {
+      const v = makeVessel('submarine', { speedKn: o.kn, autopilot: true });
+      run(v, 20);
+      v.command({ depthM: o.order });
+      let peak = 0;
+      let maxPitch = 0;
+      let lastOutside = 0;
+      const kg = def.kg;
+      const t = run(
+        v,
+        o.seconds,
+        (time) => {
+          const keel = v.diagnostics().depth + kg;
+          peak = Math.max(peak, keel);
+          maxPitch = Math.max(maxPitch, Math.abs(v.telemetry().pitchDeg));
+          if (Math.abs(keel - o.order) > 1) lastOutside = time;
+        },
+        20,
+      );
+      const d = v.diagnostics();
+      report(
+        `submarine ${o.kn} kn, 15 → ${o.order} m: final ${(d.depth + kg).toFixed(2)} m, peak ${peak.toFixed(2)} m,`,
+        `last outside ±1 m at ${lastOutside.toFixed(0)} s of ${t.toFixed(0)}, max pitch ${maxPitch.toFixed(2)}°,`,
+        `ballast ${d.ballastKg.toFixed(0)} kg`,
+      );
+      expect(Math.abs(d.depth + kg - o.order)).toBeLessThan(0.5);
+      expect(lastOutside).toBeLessThan(t - 150); // settled, not still oscillating
+      expect(peak - o.order).toBeLessThan(o.overshoot);
+      expect(maxPitch).toBeLessThan(5);
+      expect(v.telemetry().capsized).toBe(false);
+    });
+  }
 
   it('clamps an absurd depth order between the surface and the seabed', () => {
     const v = makeVessel('submarine', { speedKn: 5, autopilot: true });
     v.command({ depthM: 0 });
-    expect(v.diagnostics().depthCmd).toBeGreaterThan(4);
+    // Never shallower than the minimum keel depth (the order is a keel depth, the CoG sits kg above).
+    expect(v.diagnostics().depthCmd + def.kg).toBeCloseTo(MIN_KEEL_DEPTH, 6);
     v.command({ depthM: 1e6 });
     expect(v.diagnostics().depthCmd).toBeLessThan(4000);
   });

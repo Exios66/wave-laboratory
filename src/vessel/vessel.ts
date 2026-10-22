@@ -39,7 +39,7 @@ import {
   type ResistanceParams,
 } from './coefficients';
 import { Autopilot, rateLimit } from './control';
-import { DepthKeeper, planeForce, type PlaneForce } from './depthKeeping';
+import { DepthKeeper, MIN_KEEL_DEPTH, planeForce, type PlaneForce } from './depthKeeping';
 import { DamageModel, steeringFactor, thrustFactor, type DamageCause } from './damage';
 import {
   buildCompartments,
@@ -480,11 +480,12 @@ export class Vessel {
     if (cmd.rudderDeg !== undefined) this.rudderCmdDeg = cmd.rudderDeg;
     if (cmd.throttle !== undefined) this.throttleCmd = Math.max(-1, Math.min(1, cmd.throttle));
     if (cmd.depthM !== undefined && this.diver) {
-      // Keel depth → CoG depth; the hull top stays 1 m under and the keel clear of the bottom.
+      // Keel depth → CoG depth, within the physical limits: never shallower than the minimum
+      // keel depth (crown clear of the swell), and the keel 10 m clear of the bottom.
       const d = this.definition;
-      const lo = 1 + d.submarine!.axisZ + 0.5 * d.submarine!.hullDiameter;
-      const hi = Math.max(lo, this.seaDepth - 10 - d.kg);
-      this.diver.depthCmd = Math.max(lo, Math.min(hi, cmd.depthM - d.kg));
+      const lo = Math.min(MIN_KEEL_DEPTH, d.draft);
+      const hi = Math.max(lo, this.seaDepth - 10);
+      this.diver.depthCmd = Math.max(lo, Math.min(hi, cmd.depthM)) - d.kg;
     }
     if (cmd.autopilot !== undefined && cmd.autopilot !== this.autopilotOn) {
       this.autopilotOn = cmd.autopilot;
