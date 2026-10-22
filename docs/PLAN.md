@@ -25,6 +25,7 @@ commits the static build into `docs/` on `main`. There is no GitHub Actions work
 | Sandbox UI: presets, save/open/share, undo/redo, phone layout, accessibility checks                                      | ✅                     |
 | HDR post stack: bloom on sun glint, ACES applied once, optional grain and vignette (display preferences)                 | ✅                     |
 | Underwater camera: per-channel absorption fog, Snell's window, hulls from below, automatic switch for every camera       | ✅                     |
+| Submarine at periscope depth: neutral buoyancy, plane and ballast depth keeping (`#20`)                                  | ✅                     |
 | Ambient world: passerby naval traffic, offshore rigs and wind farms, underwater scenery and atmosphere (`#43`)           | ✅                     |
 | Stokes/cnoidal/focused waves, grid (SWE/Boussinesq) solvers, scripting API, L1/L2 radiation                              | ⏳ Later phases        |
 

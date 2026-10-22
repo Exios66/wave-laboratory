@@ -1351,12 +1351,15 @@ export class LabRenderer implements LabRendererApi {
       const fx = fwd.x;
       const fy = -fwd.z;
       const norm = Math.hypot(fx, fy) || 1;
-      const bowX = def.points.bow.x;
-      const sternX = def.points.propeller.x;
+      // A submarine at periscope depth only disturbs the surface at its sail and periscope: a
+      // short, narrow feather instead of a full hull wake.
+      const sub = def.submarine !== null;
+      const bowX = sub ? def.points.bridge.x + 1.5 : def.points.bow.x;
+      const sternX = sub ? def.points.bridge.x - 1.5 : def.points.propeller.x;
       sources.push({
         id: state.id,
-        length: def.length,
-        beam: def.beam,
+        length: sub ? 6 : def.length,
+        beam: sub ? 1.2 : def.beam,
         bow: { x: p.x + (fx / norm) * bowX, y: -p.z + (fy / norm) * bowX },
         stern: { x: p.x + (fx / norm) * sternX, y: -p.z + (fy / norm) * sternX },
         speed: Math.hypot(state.velocity.x - current.x, state.velocity.y - current.y),

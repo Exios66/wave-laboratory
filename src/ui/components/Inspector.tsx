@@ -937,6 +937,15 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
               { label: 'Speed', value: fmt(tel.speedKn, 1, 'kn') },
               { label: 'Heading', value: fmt(tel.headingDeg, 0, '°') },
               { label: 'Rudder', value: fmt(tel.rudderDeg, 1, '°') },
+              ...(def?.submarine
+                ? [
+                    {
+                      label: 'Keel depth',
+                      value: fmt(def.kg - tel.position.z, 1, 'm'),
+                      title: 'Depth of the keel below the mean surface',
+                    },
+                  ]
+                : []),
               {
                 label: 'Apparent wind',
                 value: `${fmt(tel.apparentWind, 0, 'm/s')} ${Math.abs(tel.apparentWindAngleDeg).toFixed(0)}° ${tel.apparentWindAngleDeg >= 0 ? 'P' : 'S'}`,
@@ -1020,6 +1029,21 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
             if (update((x) => void (x.speedKn = v), false)) live({ speedKn: v });
           }}
         />
+        {def?.submarine && (
+          <NumberField
+            label="Keel depth"
+            value={vessel.depthM ?? def.draft}
+            min={10}
+            max={500}
+            step={1}
+            unit="m"
+            unitLabel="metres"
+            onCommit={(v) => {
+              if (update((x) => void (x.depthM = v), false)) live({ depthM: v });
+            }}
+            hint="Ordered depth of the keel. The bow and stern planes and the ballast tank hold it; the default 15 m keeps the sail just awash. Applied live."
+          />
+        )}
         {!vessel.autopilot && (
           <>
             <NumberField
@@ -1102,7 +1126,9 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
               { label: 'Length', value: fmt(def.length, 1, 'm') },
               { label: 'Beam', value: fmt(def.beam, 1, 'm') },
               { label: 'Draft', value: fmt(def.draft, 2, 'm') },
-              { label: 'Freeboard', value: fmt(def.depth - def.draft, 2, 'm') },
+              ...(def.submarine
+                ? []
+                : [{ label: 'Freeboard', value: fmt(def.depth - def.draft, 2, 'm') }]),
               { label: 'Mass', value: fmt(def.mass / 1000, 0, 't') },
               { label: 'GM', value: fmt(def.gm, 2, 'm'), title: 'Transverse metacentric height' },
               { label: 'Max speed', value: fmt(def.maxSpeed / 0.5144, 0, 'kn') },

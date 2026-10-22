@@ -43,6 +43,7 @@ import {
   surgeAddedMass,
 } from './coefficients';
 import { quatToMat3, sectionAt, submergedProperties } from './hydrostatics';
+import { meshBounds } from './mesh';
 
 export const STRIP_COUNT = 20;
 export const HEAVE_DAMPING_RATIO = 0.15;
@@ -116,6 +117,8 @@ export interface HydroModel {
  * draft for water density `rho` [kg/m³] and gravity `g` [m/s²]. Returns strip coefficients and
  * the inverse effective mass matrix in the body frame. Multihull heave/sway added mass and
  * hull-force derivatives sum identical demihulls; see the module header for model limits.
+ * Submarine strips span the full hull, empirical derivatives use hull diameter as draft,
+ * and the surface-ship lift contribution to roll damping is zero.
  * @throws {RangeError} If the effective mass matrix is singular during inversion.
  */
 export function buildHydroModel(def: VesselDefinition, rho: number, g: number): HydroModel {
@@ -127,10 +130,17 @@ export function buildHydroModel(def: VesselDefinition, rho: number, g: number): 
   const volume = hs.volume;
   const mass = def.mass;
   const props = submergedProperties(mesh, quatToMat3(quatIdentity()), { x: 0, y: 0, z: -zWl });
-  const lwl = props.wlMaxX - props.wlMinX;
-  const bwl = props.wlMaxY - props.wlMinY;
+  // A submarine has no real waterline (only its sail pierces the surface): the strips span the
+  // whole hull, and its effective draft for the empirical derivatives is the hull diameter.
+  const subm = def.submarine;
+  const bounds = meshBounds(mesh);
+  const lwl = subm ? bounds.max.x - bounds.min.x : props.wlMaxX - props.wlMinX;
+  const bwl = subm ? subm.hullDiameter : props.wlMaxY - props.wlMinY;
+  const x0 = subm ? bounds.min.x : props.wlMinX;
+  const Teff = subm ? subm.hullDiameter : T;
   // Multihull: every demihull is its own slender section; per-hull beam for the 3-D correction,
   // form factor and manoeuvring derivatives, with the hull-force terms summed over the hulls.
+  // (A submarine is a single hull: nHulls = 1.)
   const nHulls = def.multihull?.count ?? 1;
   const bHull = def.multihull ? bwl - (nHulls - 1) * def.multihull.separation : bwl;
   const J = 1 / (1 + (0.6 * bHull) / lwl);
@@ -145,8 +155,22 @@ export function buildHydroModel(def: VesselDefinition, rho: number, g: number): 
   const stripB33 = new Float64Array(n);
   let maxSectionArea = 0;
   for (let i = 0; i < n; i++) {
-    const x = props.wlMinX + (i + 0.5) * dx;
+    const x = x0 + (i + 0.5) * dx;
     const sec = sectionAt(mesh, x, zWl);
+    if (subm) {
+      // Deeply submerged section: heave added mass A33 = ρ · (section area) (ρπr² for the circular
+      // hull, exact far below the surface). Sway uses the equivalent ellipse of the section's own
+      // vertical extent, A22 = ρπ (h/2)², which is the circle's value for the bare hull but picks
+      // up the tall sail that a plain area term would miss. Sampled at
+      // the hull axis; the immersion ratio stays 1 while the section is under (tiny nominal draft).
+      stripX[i] = x;
+      stripDraft[i] = 0.5;
+      stripZ[i] = subm.axisZ;
+      stripA33[i] = J * rho * sec.area * dx;
+      stripA22[i] = J * rho * Math.max(sec.area, Math.PI * (0.5 * sec.height) ** 2) * dx;
+      maxSectionArea = Math.max(maxSectionArea, sec.area);
+      continue;
+    }
     const lw = lewisAddedMass(sec.beam / nHulls, sec.draft, sec.area / nHulls, rho);
     lw.a33 *= nHulls;
     lw.a22 *= nHulls;
@@ -249,12 +273,13 @@ export function buildHydroModel(def: VesselDefinition, rho: number, g: number): 
   const rollBQuad =
     (ROLL_QUADRATIC_DAMPING_RATIO * critRoll * 3 * Math.PI) /
     (8 * omegaRollEff * ROLL_QUADRATIC_REF_AMPLITUDE);
-  const cm = maxSectionArea / (nHulls * bHull * T);
-  // OG: depth of G below the waterline, positive downward (Ikeda).
+  const cm = maxSectionArea / (nHulls * bHull * Teff);
+  // OG: depth of G below the waterline, positive downward (Ikeda). The lift component belongs
+  // to a hull piercing the surface; a submerged hull has none.
   const og = T - def.kg;
-  const rollBLift = nHulls * ikedaLiftDamping(rho, 1, lwl, bHull, T, og, cm); // per unit speed
+  const rollBLift = subm ? 0 : nHulls * ikedaLiftDamping(rho, 1, lwl, bHull, T, og, cm); // per unit speed
 
-  const cb = volume / (nHulls * lwl * bHull * T);
+  const cb = volume / (nHulls * lwl * bHull * Teff);
   return {
     rho,
     g,
@@ -285,16 +310,16 @@ export function buildHydroModel(def: VesselDefinition, rho: number, g: number): 
     rollBQuad,
     lwl,
     bwl,
-    formFactor: formFactor(cb, lwl, bHull, T),
+    formFactor: formFactor(cb, lwl, bHull, Teff),
     blockCoefficient: cb,
     clarke: withKeelFin(
-      scaleDerivatives(clarkeDerivatives(lwl, bHull, T, cb), nHulls),
+      scaleDerivatives(clarkeDerivatives(lwl, bHull, Teff, cb), nHulls),
       def.keelFin,
       lwl,
     ),
-    lateralZ: zWl - 0.5 * T,
+    lateralZ: subm ? subm.axisZ : zWl - 0.5 * T,
     slamThreshold: ochiThreshold(g, lwl),
-    slamRegionX: props.wlMinX + 0.7 * lwl,
+    slamRegionX: x0 + 0.7 * lwl,
     rudderLiftSlope: rudderLiftSlope(def.propulsion.rudderAspectRatio),
   };
 }
