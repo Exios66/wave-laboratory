@@ -122,6 +122,9 @@ describe('depth keeping', () => {
     { kn: 4, order: 40, seconds: 1500, overshoot: 3 },
     // Hover: no plane authority, the ballast pump alone moves her, slowly.
     { kn: 0, order: 25, seconds: 2000, overshoot: 3 },
+    { kn: 0, order: 40, seconds: 2800, overshoot: 4 },
+    { kn: 5, order: 100, seconds: 1800, overshoot: 6 },
+    { kn: 0, order: 100, seconds: 4200, overshoot: 8 },
   ];
   for (const o of orders) {
     it(`settles on a ${o.order} m keel-depth order at ${o.kn} kn`, () => {

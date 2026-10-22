@@ -340,6 +340,8 @@ export interface SectionProperties {
   beam: number;
   draft: number;
   area: number;
+  /** Vertical extent of the submerged outline, lowest to highest point under the water [m]. */
+  height: number;
 }
 
 /**
@@ -360,6 +362,7 @@ export function sectionAt(mesh: TriangleMesh, x: number, zWl: number): SectionPr
   const p = mesh.positions;
   const ix = mesh.indices;
   let zMin = Infinity;
+  let zMax = -Infinity;
   let area = 0;
   let beam = 0;
   const pt = [0, 0, 0, 0];
@@ -404,6 +407,7 @@ export function sectionAt(mesh: TriangleMesh, x: number, zWl: number): SectionPr
       y2 = y1 + (y2 - y1) * s;
       z2 = zWl;
     }
+    zMax = Math.max(zMax, z1, z2);
     area += 0.5 * (y1 + y2) * (z2 - z1);
   }
   // ∮ y dz is +A for a counter-clockwise (y right, z up) outline and −A for a clockwise one;
@@ -413,5 +417,6 @@ export function sectionAt(mesh: TriangleMesh, x: number, zWl: number): SectionPr
     beam: Math.max(0, ccw ? beam : -beam),
     draft: Number.isFinite(zMin) ? zWl - zMin : 0,
     area: Math.abs(area),
+    height: Number.isFinite(zMin) ? zMax - zMin : 0,
   };
 }

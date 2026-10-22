@@ -156,14 +156,16 @@ export function buildHydroModel(def: VesselDefinition, rho: number, g: number): 
     const x = x0 + (i + 0.5) * dx;
     const sec = sectionAt(mesh, x, zWl);
     if (subm) {
-      // Deeply submerged near-circular section: A33 = A22 = ρ · (section area) (ρπr² for a
-      // circle), the exact 2-D result far below the surface; sampled at the hull axis. The
-      // immersion ratio stays 1 while the section is under (tiny nominal draft).
+      // Deeply submerged section: heave added mass A33 = ρ · (section area) (ρπr² for the circular
+      // hull, exact far below the surface). Sway uses the equivalent ellipse of the section's own
+      // vertical extent, A22 = ρπ (h/2)², which is the circle's value for the bare hull but picks
+      // up the tall sail that a plain area term would miss. Sampled at
+      // the hull axis; the immersion ratio stays 1 while the section is under (tiny nominal draft).
       stripX[i] = x;
       stripDraft[i] = 0.5;
       stripZ[i] = subm.axisZ;
       stripA33[i] = J * rho * sec.area * dx;
-      stripA22[i] = J * rho * sec.area * dx;
+      stripA22[i] = J * rho * Math.max(sec.area, Math.PI * (0.5 * sec.height) ** 2) * dx;
       maxSectionArea = Math.max(maxSectionArea, sec.area);
       continue;
     }
