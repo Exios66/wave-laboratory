@@ -20,7 +20,7 @@
  *    Anne's Revenge proportions): tumblehome, high sterncastle, three masts, no engine;
  *  - 10 m fin-keel cruising sloop with a Bermuda rig and an auxiliary inboard;
  *  - 15 m power catamaran: two slender round-bilge demihulls joined by a bridge deck, lofted as
- *    one closed mesh (very high initial GM, early vanishing stability).
+ *    one closed mesh (very high GM/B, righting arm peaking at small heel).
  */
 import type { Vec3 } from '../core/vec';
 import type { VesselType } from '../schema/experiment';
@@ -752,7 +752,7 @@ function catamaran(): HullDesign {
     description:
       '15 m power catamaran: two slender round-bilge demihulls (L/B ≈ 14) joined by a bridge ' +
       'deck with a tunnel between them, lofted as one closed hull. Very high initial stability ' +
-      'but a righting arm that peaks at small heel and vanishes early (the weather hull lifts ' +
+      'but a righting arm that peaks at small heel, about 20° (the weather hull lifts ' +
       'clear). Twin screws are modelled as one equivalent centreline propulsor and rudder.',
     beam: sep + 2 * Bh,
     depth: D,

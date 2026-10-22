@@ -23,8 +23,8 @@ oceanographic wave spectra, drop ships into it, and measure how they handle the 
   Wind acts on every hull through its frontal and side areas, and the square-rigged pirate ship
   sails on the wind alone, bracing and reefing as the wind changes. The fleet runs from a
   lifeboat and a 15 m power catamaran (two demihulls and a bridge deck lofted as one closed
-  mesh, so it has a very high initial GM but a righting arm that peaks at small heel and
-  vanishes early) to a VLCC oil tanker and a Nimitz-class aircraft carrier. Slamming, green water and
+  mesh, so it has a very high GM/B and a righting arm that peaks at small heel, about 20°,
+  as the weather hull lifts clear) to a VLCC oil tanker and a Nimitz-class aircraft carrier. Slamming, green water and
   capsize are detected, and a collision or heavy slam can breach a watertight compartment that
   floods through the hole, costing stability (free surface) and eventually sinking the ship. A ship can drop anchor (or start moored to a buoy): an elastic
   catenary chain pulls at the bow, she weathervanes into the wind, and the anchor drags if the load

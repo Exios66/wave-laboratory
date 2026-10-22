@@ -468,7 +468,7 @@ export const PRESETS: readonly Preset[] = [
       'Catamaran vs trawler',
       'The catamaran’s initial stability is several times the trawler’s: it rolls fast and ' +
         'follows the wave slope, while the trawler rolls slowly and deeply. Open the cat’s ' +
-        'inspector to see its GZ curve peak at small heel and vanish early. Raise its KG or ' +
+        'inspector to see its GZ curve peak at small heel (about 20°). Raise its KG or ' +
         'the wave height to approach its stability limit.',
       env({ windSpeed: 6 }),
       [

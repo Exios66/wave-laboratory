@@ -23,6 +23,12 @@
  *  - B_L: Ikeda's lift component, proportional to speed (see `ikedaLiftDamping`);
  *  - B_q: quadratic (eddy-making/bilge) term sized so that its equivalent linear damping is 4 %
  *    of critical at 10° roll amplitude (B_eq = 8/(3π) ω φ_a B_q, Himeno 1981).
+ *
+ * Multihull (catamaran) limitations: heave/sway added mass is summed per demihull, but roll
+ * added inertia (20 % of the dry inertia) and roll damping are monohull-style; they ignore the
+ * demihulls' heave added mass and damping acting at the ±half-separation lever arm, so the roll
+ * period may be off by ~20 %. Yaw damping ignores the hull spacing, and the strips sample the
+ * waves at y = 0 rather than at each demihull.
  */
 import { SEAWATER_KINEMATIC_VISCOSITY } from '../core/constants';
 import { quatIdentity } from '../core/vec';
