@@ -53,7 +53,7 @@ import {
   type SceneryLayer,
 } from './scenery/types';
 import { DEFAULT_WILDLIFE_SEED, WildlifeLayer } from './scenery/wildlife';
-import { UnderwaterSceneryLayer } from './underwater/scenery';
+import { reefsNear, UnderwaterSceneryLayer } from './underwater/scenery';
 import { createRadialOceanGeometry, OCEAN_DENSITY, OCEAN_SLICES } from './scene/oceanMesh';
 import { RainField, SMOKE_STYLE, SprayPool } from './scene/particles';
 import { GpuSprayPool } from './scene/gpuSpray';
@@ -75,6 +75,7 @@ import {
   nextUnderwaterState,
   underwaterInscatter,
 } from './underwater/optics';
+import { maxCameraDepth, maxCameraDepthAt, underwaterRays } from './underwater/seafloor';
 import { flightDeckTexture, jollyRogerTexture } from './scene/textures';
 
 export interface LabRendererOptions {
@@ -218,7 +219,6 @@ function oceanTextureType(gl: WebGL2RenderingContext): THREE.TextureDataType {
 const UNDERWATER_VIEW = {
   depth: 4,
   minDepth: 1.5,
-  maxDepth: 30,
   /** Eye stays this far below the local wave surface [m] (the auto-switch band is narrower). */
   margin: 0.5,
   /** Gaze above level [rad] at the default view: the hull and the surface overhead. */
@@ -1329,6 +1329,8 @@ export class LabRenderer implements LabRendererApi {
       underwater: this.underwater,
       cameraDepth: this.stats.cameraDepth,
       waterType: this.env?.waterType ?? 'oceanic-ib',
+      waterDepth: this.env?.depth,
+      islands: this.ambience.islands,
       tier: this.quality === 'low' ? 'lite' : this.quality === 'medium' ? 'mid' : 'full',
       hostiles: this.ambience.hostiles,
     };
@@ -1429,11 +1431,10 @@ export class LabRenderer implements LabRendererApi {
     }
     if (this.mode === 'underwater') {
       // Scrolling out sinks the eye deeper; in brings it up toward the surface.
-      const seabed = (this.env?.depth ?? 4000) - 1;
       this.uwDepth = THREE.MathUtils.clamp(
         this.uwDepth * factor,
         UNDERWATER_VIEW.minDepth,
-        Math.max(UNDERWATER_VIEW.minDepth, Math.min(UNDERWATER_VIEW.maxDepth, seabed)),
+        maxCameraDepth(this.env?.depth ?? 4000),
       );
       return;
     }
@@ -1862,7 +1863,13 @@ export class LabRenderer implements LabRendererApi {
     );
     const sy = Math.sin(this.yaw);
     const cy = Math.cos(this.yaw);
-    const y = -this.uwDepth;
+    // Over an island reef the floor is shallower than the open-sea clamp: keep the eye above it.
+    const ex = tx + reach * sy;
+    const ez = tz + reach * cy;
+    const reefs = this.ambience.underwater
+      ? reefsNear(ex, -ez, { islands: this.ambience.islands })
+      : [];
+    const y = -Math.min(this.uwDepth, maxCameraDepthAt(ex, -ez, this.env?.depth ?? 4000, reefs));
     this.orbitCentre.set(tx, 0, tz);
     this.camera.up.set(0, 1, 0);
     this.camera.position.set(tx + reach * sy, y, tz + reach * cy);
@@ -1921,7 +1928,23 @@ export class LabRenderer implements LabRendererApi {
     this.hemi.intensity *= UNDERWATER_VIEW.fill;
     if (this.post.available) {
       this.fog.density = 0;
-      this.post.setUnderwater({ kd: optics.attenuation, inscatter: ins });
+      // Depth grade for every tier; volumetric god rays on the full tier only.
+      const sun = this.lightState?.sunDir ?? (u.uSunDir!.value as THREE.Vector3);
+      const rays =
+        this.quality === 'high'
+          ? underwaterRays(
+              [sun.x, sun.y, sun.z],
+              this.lightLevel,
+              this.stats.cameraDepth,
+              optics.attenuation[1],
+            )
+          : null;
+      this.post.setUnderwater({
+        kd: optics.attenuation,
+        inscatter: ins,
+        depth: this.stats.cameraDepth,
+        rays,
+      });
     } else {
       // No half-float target for the absorption pass: a scalar fog in the water's colour.
       this.fog.density = fallbackFogDensity(optics.attenuation);
