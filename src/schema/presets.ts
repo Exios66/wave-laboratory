@@ -461,6 +461,36 @@ export const PRESETS: readonly Preset[] = [
     ),
   },
   {
+    id: 'catamaran-beam-sea',
+    title: 'Catamaran vs trawler in beam seas',
+    summary: 'A 15 m power catamaran and a trawler rolling in the same regular beam waves.',
+    experiment: experiment(
+      'Catamaran vs trawler',
+      'The catamaran’s initial stability is several times the trawler’s: it rolls fast and ' +
+        'follows the wave slope, while the trawler rolls slowly and deeply. Open the cat’s ' +
+        'inspector to see its GZ curve peak at small heel (about 20°). Raise its KG or ' +
+        'the wave height to approach its stability limit.',
+      env({ windSpeed: 6 }),
+      [
+        {
+          id: 'reg-1',
+          name: 'Beam waves',
+          kind: 'regular',
+          enabled: true,
+          height: 1.2,
+          period: 6,
+          directionDeg: 270,
+          phaseDeg: 0,
+        },
+      ],
+      [
+        vessel('cat-1', 'catamaran', 'Catamaran', { y: 30, headingDeg: 0, autopilot: false }),
+        vessel('trawler-1', 'trawler', 'Trawler', { y: -30, headingDeg: 0, autopilot: false }),
+      ],
+      [gauge(-50, 0)],
+    ),
+  },
+  {
     id: 'shallow-swell',
     title: 'Swell in shallow water (TMA)',
     summary:

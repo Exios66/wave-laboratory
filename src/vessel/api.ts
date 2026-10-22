@@ -161,6 +161,12 @@ export interface VesselDefinition {
   keelFin: { area: number; x: number } | null;
   /** Per-material colour overrides for the superstructure (sRGB hex). */
   palette: Partial<Record<VisualMaterial, number>>;
+  /**
+   * Multihull layout: number of demihulls and their centreline spacing [m]. Absent for a
+   * monohull. The mesh is still one closed surface; hydrodynamic strips use it to treat each
+   * demihull as its own slender section.
+   */
+  multihull?: { count: number; separation: number };
 }
 
 export interface VesselPoints {

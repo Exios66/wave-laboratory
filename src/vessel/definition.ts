@@ -28,9 +28,9 @@ import type {
   WindageSpec,
 } from './api';
 import { calmWaterResistance, formFactor } from './coefficients';
-import { hullDesign, type HullDesign } from './hulls';
+import { hullDesign, loftDesignHull, type HullDesign } from './hulls';
 import { gzCurve, quatToMat3, submergedProperties, vanishingStabilityAngle } from './hydrostatics';
-import { loftHull, meshBounds, transformMesh } from './mesh';
+import { meshBounds, transformMesh } from './mesh';
 
 /** Radii of gyration as fractions of beam (roll) and waterline length (pitch, yaw). */
 export const ROLL_GYRADIUS = 0.38;
@@ -39,6 +39,13 @@ export const PITCH_YAW_GYRADIUS = 0.25;
 /** Heel angles of the stored GZ curve [deg]. */
 const GZ_HEELS = Array.from({ length: 37 }, (_, i) => i * 5);
 
+/**
+ * Build scaled hull geometry, loading particulars, hydrostatics and propulsion data for a
+ * built-in vessel, with body-frame geometry centered on the center of gravity.
+ * `scale` multiplies design lengths; `kgFactor` sets KG as a fraction of the scaled depth.
+ * `loadFactor` targets a multiple of the design displacement in seawater (1025 kg/m³), with
+ * draft bounded between 2 % of the design draft and 98 % of the depth; 1 uses the design draft.
+ */
 export function createVesselDefinition(
   type: VesselType,
   scale = 1,
@@ -53,8 +60,8 @@ export function createVesselDefinition(
   const B = d.beam * s;
   const D = d.depth * s;
 
-  const physicsKeel = loftHull(d.shape, d.physicsLoft);
-  const renderKeel = loftHull(d.shape, d.renderLoft);
+  const physicsKeel = loftDesignHull(d, d.physicsLoft);
+  const renderKeel = loftDesignHull(d, d.renderLoft);
   const zero = { x: 0, y: 0, z: 0 };
   const scaledKeel = transformMesh(physicsKeel.mesh, s, zero);
   const ident = quatToMat3(quatIdentity());
@@ -78,7 +85,11 @@ export function createVesselDefinition(
   const bm = props.wpIyy / volume;
   const bmL = props.wpIxx / volume;
   const gm = kb + bm - kg;
-  const cb = volume / (lwl * bwl * T);
+  // Multihull: block coefficient and slenderness refer to one demihull (overall beam minus the
+  // hull spacing), the way resistance data for catamarans are quoted.
+  const nHulls = d.multihull ? 2 : 1;
+  const bHull = d.multihull ? bwl - d.multihull.separation * s : bwl;
+  const cb = volume / (nHulls * lwl * bHull * T);
 
   const gz = gzCurve(physicsHull, volume, GZ_HEELS, lwl);
   const avsDeg = vanishingStabilityAngle(GZ_HEELS, gz);
@@ -95,7 +106,7 @@ export function createVesselDefinition(
   // Propulsion sized so that full effective thrust balances calm-water resistance at the
   // service speed (thrust deduction is folded into the "effective" thrust).
   const maxSpeed = d.maxSpeedKn * KNOT * Math.sqrt(s); // Froude scaling of speed
-  const k1 = formFactor(cb, lwl, bwl, T);
+  const k1 = formFactor(cb, lwl, bHull, T);
   // Sailing ships have no engine: the sails are their propulsion.
   const sailing = d.rig !== undefined;
   const maxThrust = sailing
@@ -185,6 +196,7 @@ export function createVesselDefinition(
         }
       : null,
     palette: { ...d.palette },
+    ...(d.multihull ? { multihull: { count: 2, separation: d.multihull.separation * s } } : {}),
   };
 }
 
@@ -281,15 +293,28 @@ export function designWindage(d: HullDesign): WindageSpec {
       fill(lat, nx, x - cell, x + cell, z - (deck - T) / 16, z + (deck - T) / 16);
     }
   }
-  // Hull section: widest half-breadth at each height.
+  // Hull section: widest half-breadth at each height. A catamaran's demihulls stand apart below
+  // the bridge-deck underside (tunnel) and form one full-width block above it.
+  const mh = d.multihull;
+  const halfSep = mh ? mh.separation / 2 : 0;
   for (let k = 0; k < nz; k++) {
     const z = T + (k + 0.5) * cell;
     let hw = 0;
+    let hullHw = 0;
     for (let i = 0; i <= 40; i++) {
       const u = i / 40;
-      if (z <= shape.deckHeight(u)) hw = Math.max(hw, shape.halfBreadth(u, z));
+      if (z > shape.deckHeight(u)) continue;
+      const h = shape.halfBreadth(u, z);
+      if (mh && z <= mh.tunnelRoof(u)) hullHw = Math.max(hullHw, h);
+      else hw = Math.max(hw, h + halfSep);
     }
     if (hw > 0) fill(fro, ny, yMax - hw, yMax + hw, z - cell / 2, z + cell / 2);
+    if (hullHw > 0) {
+      for (const side of [-1, 1]) {
+        const yc = yMax + side * halfSep;
+        fill(fro, ny, yc - hullHw, yc + hullHw, z - cell / 2, z + cell / 2);
+      }
+    }
   }
   for (const b of boxes) {
     if (b.z1 <= T) continue;
