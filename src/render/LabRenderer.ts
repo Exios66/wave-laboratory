@@ -67,6 +67,7 @@ import {
   spindriftStrength,
 } from './scene/sprayMath';
 import { ChainView } from './scene/chain';
+import { ForeAftRigView } from './scene/foreAftRig';
 import { RigView } from './scene/rig';
 import { WakeField, type WakeSource } from './scene/wakes';
 import {
@@ -126,6 +127,8 @@ interface VesselView {
   materials: THREE.MeshStandardMaterial[];
   textures: THREE.Texture[];
   rig: RigView | null;
+  /** Bermuda rig and keel of a yacht. */
+  foreAft: ForeAftRigView | null;
   /** Anchor chain, drawn in world coordinates while an anchor is down. */
   chain: ChainView;
   /** Paint colours as built, darkened toward soot as the ship is damaged. */
@@ -1125,6 +1128,7 @@ export class LabRenderer implements LabRendererApi {
     }
     view.group.userData.capsized = state.capsized;
     view.rig?.update(state.sailSet, state.braceDeg, state.apparentWindAngleDeg, state.apparentWind);
+    view.foreAft?.update(state.sailSet, state.braceDeg, state.jibDeg, state.apparentWind);
     // The chain runs from the anchor to the hawse pipe of the hull as drawn.
     const bow = view.definition.points.bow;
     view.chain.update(
@@ -1509,6 +1513,14 @@ export class LabRenderer implements LabRendererApi {
     for (const box of definition.superstructure) {
       // Masts of a rigged ship are drawn round by the rig; their boxes only count as windage.
       if (definition.sails && box.material === 'wood' && box.size.x < 1 && box.size.y < 1) continue;
+      // Likewise a yacht's mast and its boom (a thin wood spar) belong to the fore-and-aft rig.
+      if (
+        definition.foreAft &&
+        box.material === 'wood' &&
+        ((box.size.x < 1 && box.size.y < 1) || (box.size.y < 0.2 && box.size.z < 0.2))
+      ) {
+        continue;
+      }
       let mat = shared.get(box.material);
       if (!mat) {
         mat = this.material(box.material, palette);
@@ -1568,6 +1580,16 @@ export class LabRenderer implements LabRendererApi {
       group.add(mesh);
     }
 
+    let foreAft: ForeAftRigView | null = null;
+    if (definition.foreAft) {
+      foreAft = new ForeAftRigView(
+        definition.foreAft,
+        definition.foils,
+        { wood: palette.wood ?? HULL_COLORS.wood, sail: palette.sail ?? HULL_COLORS.sail },
+        id,
+      );
+      group.add(foreAft.group);
+    }
     let rig: RigView | null = null;
     if (definition.sails) {
       rig = new RigView(
@@ -1614,6 +1636,7 @@ export class LabRenderer implements LabRendererApi {
       materials,
       textures,
       rig,
+      foreAft,
       chain: new ChainView(definition.length),
       baseColors: materials.map((m) => m.color.clone()),
       shownHealth: 1,
@@ -1689,6 +1712,7 @@ export class LabRenderer implements LabRendererApi {
     for (const mat of view.materials) mat.dispose();
     for (const tex of view.textures) tex.dispose();
     view.rig?.dispose();
+    view.foreAft?.dispose();
   }
 
   private applySelection(): void {
@@ -1755,7 +1779,12 @@ export class LabRenderer implements LabRendererApi {
           target,
           azimuth,
           polar,
-          this.mode === 'top' ? Math.max(this.radius, focus.definition.length) : this.radius,
+          this.mode === 'top'
+            ? Math.max(this.radius, focus.definition.length)
+            : this.mode === 'follow' && !this.userMoved
+              ? // Frame the ship being followed, not the biggest one in the scene.
+                Math.min(this.radius, THREE.MathUtils.clamp(focus.definition.length * 2.4, 28, 700))
+              : this.radius,
         );
         return;
       }
