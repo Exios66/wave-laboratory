@@ -41,7 +41,7 @@ Traffic is one `InstancedMesh` per hull class (7: trawler, cargo, patrol, liner,
 
 The issue's definition of done asks that "defaults stay a fair-weather, quiet sea". Today every family except `hostiles` ships **on** by default, including `traffic`, `structures` and `underwater`. Hostiles (pirates, recon passes) are off by default, which is the part of the plan that makes the sea less quiet. Trade-off for a decision:
 
-- **Keep `traffic: true`** (current): the horizon is alive from the first load, the feature is visible to everyone, and the cost is bounded by the tier caps (at most 12 / 8 / 4 hulls). Ships are far away (the origin clear zone is about 630 m) and never reach the player's vessel.
+- **Keep `traffic: true`** (current): the horizon is alive from the first load, the feature is visible to everyone, and the cost is bounded by the tier caps (at most 12 / 8 / 4 hulls). Ships start far away (the origin clear zone is about 630 m), but traffic is scenery only: it has no collision with the player's vessel and no avoidance, so a vessel sailed out of the clear zone can pass through a lane ship visually (nothing feeds back into physics).
 - **Default `traffic: false`**: matches the issue wording literally and keeps the first-run scene minimal, but most users would never discover the feature or the wakes and wildlife it feeds (bow-riding dolphins, trailing gulls).
 
 The default has not been changed; the setting is one line in `DEFAULT_AMBIENCE` (`src/render/scenery/types.ts`) plus the persisted-settings e2e expectation.

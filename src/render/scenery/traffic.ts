@@ -1116,7 +1116,7 @@ export class TrafficLayer implements SceneryLayer {
 
   update(frame: SceneryFrame): void {
     if (!this.object.visible) {
-      this.activePoses = [];
+      if (this.activePoses.length > 0) this.activePoses = [];
       return;
     }
     const tier = frame.tier ?? 'full';
