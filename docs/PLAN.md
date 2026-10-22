@@ -293,6 +293,7 @@ These are for problems where linear superposition breaks down: shoaling, refract
 | Sailing yacht                 | Heel, windage, keel lift                             |
 | RIB / planing boat            | High-speed slamming demo                             |
 | Lifeboat / small craft        | Survival-conditions demo                             |
+| Power catamaran (shipped)     | Multihull stability: very high GM/B, GZ peak at ~20° |
 | Floating wind platform (spar) | Offshore engineering demo with mooring               |
 
 ---
