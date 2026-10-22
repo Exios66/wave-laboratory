@@ -1337,22 +1337,6 @@ export class LabRenderer implements LabRendererApi {
       hostiles: this.ambience.hostiles,
     };
     for (const layer of this.layers) layer.update(frame);
-    {
-      const v = new THREE.Vector3();
-      let vis = 0;
-      let near = 1e9;
-      let v35 = 0;
-      for (const c of this.marineLife.object.children) {
-        const m = c as THREE.InstancedMesh;
-        for (let k = 0; k < m.count; k++) {
-          v.set(m.instanceMatrix.array[k * 16 + 12]!, m.instanceMatrix.array[k * 16 + 13]!, m.instanceMatrix.array[k * 16 + 14]!);
-          const d = v.distanceTo(frame.camera.position);
-          v.project(frame.camera);
-          if (Math.abs(v.x) < 1 && Math.abs(v.y) < 1 && v.z < 1) { vis++; if (d < 35) v35++; if (d < near) near = d; }
-        }
-      }
-      (window as unknown as Record<string, unknown>).__marine = { vis, v35, near, cam: frame.camera.position.toArray() };
-    }
   }
 
   /** Ship wakes along each hull's track (visual only; see scene/wakes.ts). */
