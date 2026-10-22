@@ -25,6 +25,8 @@ Wave Laboratory populates the horizon and underwater column with deterministic, 
 
 Underwater draws: full = seabed, plants, coral/rock, wrecks, particles (the god rays are a post effect, no extra draw); mid = seabed, plants, coral/rock; lite = seabed. In blue water every tier draws only the particles. Surfaced cost is 0.
 
+Island reefs: when `islands` is on and the sea is deep, `reefsNear` turns each island into a `ReefSource`; `floorDepthAt(x, y, envDepth, reefs)` gives a 1.5 to 4 m lagoon floor, then a 1:8 shelf (60 m deep roughly 430 m past the lagoon edge, influence ends at 600 m). The floor, plants, coral, rocks and wrecks draw only where that floor exists (`floorModeAt`); the camera clamp over a reef is `maxCameraDepthAt`. Far from every island, or with islands off, the deep sea is blue water (draws: particles only). Islands start at least 450 m from the origin, so the default start is open blue water: sail to an island to dive its reef.
+
 Each cap lives in the module that enforces it (`render/scenery/traffic.ts`, `render/underwater/scenery.ts`).
 
 ## House Rules
