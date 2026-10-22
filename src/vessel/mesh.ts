@@ -170,6 +170,12 @@ export interface CatamaranOptions {
 /** Interior points across the flat tunnel roof (per half), so slamming sees more than one panel. */
 const ROOF_POINTS = 2;
 
+/**
+ * Loft two identical demihulls and their bridge deck as one closed, outward-oriented mesh in
+ * the keel frame, returning the mesh and vertex indices along both outer deck edges.
+ * `shape` describes one demihull; spacing and tunnel geometry follow {@link CatamaranOptions}.
+ * The tunnel roof is raised to at least 1.001 times the design draft, then capped at deck height.
+ */
 export function loftCatamaran(
   shape: HullShape,
   opts: LoftOptions,

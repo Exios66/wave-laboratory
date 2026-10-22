@@ -39,6 +39,13 @@ export const PITCH_YAW_GYRADIUS = 0.25;
 /** Heel angles of the stored GZ curve [deg]. */
 const GZ_HEELS = Array.from({ length: 37 }, (_, i) => i * 5);
 
+/**
+ * Build scaled hull geometry, loading particulars, hydrostatics and propulsion data for a
+ * built-in vessel, with body-frame geometry centered on the center of gravity.
+ * `scale` multiplies design lengths; `kgFactor` sets KG as a fraction of the scaled depth.
+ * `loadFactor` targets a multiple of the design displacement in seawater (1025 kg/m³), with
+ * draft bounded between 2 % of the design draft and 98 % of the depth; 1 uses the design draft.
+ */
 export function createVesselDefinition(
   type: VesselType,
   scale = 1,

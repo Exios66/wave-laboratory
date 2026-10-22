@@ -340,6 +340,11 @@ export interface SectionProperties {
  * intervals (right edges rise through the level just below the water surface, left edges
  * descend through it). That holds for any section topology, so a catamaran's two demihulls
  * are counted separately.
+ *
+ * Returns nonnegative submerged area [m²], total waterline width [m] and depth from the
+ * waterline to the lowest submerged section point [m], independent of overall winding.
+ * Dry or absent sections return zeros. A fully submerged section retains its area and depth
+ * from the waterline, but has zero beam when the sampled level is above it.
  */
 export function sectionAt(mesh: TriangleMesh, x: number, zWl: number): SectionProperties {
   const p = mesh.positions;
