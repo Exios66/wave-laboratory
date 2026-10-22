@@ -43,7 +43,10 @@ const LOADED: FromWorker = {
   diagnostics: { hs: 1, systems: [], warnings: [] },
 } as unknown as FromWorker;
 
-function frame(t: number, overrides: Partial<SimFrame> = {}): Extract<FromWorker, { type: 'frame' }> {
+function frame(
+  t: number,
+  overrides: Partial<SimFrame> = {},
+): Extract<FromWorker, { type: 'frame' }> {
   return {
     type: 'frame',
     frame: {
@@ -61,7 +64,9 @@ function frame(t: number, overrides: Partial<SimFrame> = {}): Extract<FromWorker
 }
 
 function client(): { c: SimClient; w: FakeWorker } {
-  const c = new SimClient(() => new FakeWorker('fake://worker', { type: 'module' }) as unknown as Worker);
+  const c = new SimClient(
+    () => new FakeWorker('fake://worker', { type: 'module' }) as unknown as Worker,
+  );
   return { c, w: FakeWorker.instances.at(-1)! };
 }
 

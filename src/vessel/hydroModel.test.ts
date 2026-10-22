@@ -3,12 +3,7 @@ import { SEAWATER_DENSITY, STANDARD_GRAVITY } from '../core/constants';
 import { Pcg32 } from '../core/rng';
 import { createVesselDefinition } from './definition';
 import { clarkeDerivatives } from './coefficients';
-import {
-  HEAVE_DAMPING_RATIO,
-  STRIP_COUNT,
-  buildHydroModel,
-  invert6,
-} from './hydroModel';
+import { HEAVE_DAMPING_RATIO, STRIP_COUNT, buildHydroModel, invert6 } from './hydroModel';
 
 /** Row-major 6×6 matrix product. */
 function mul(a: Float64Array, b: Float64Array): Float64Array {
@@ -57,12 +52,8 @@ describe('invert6', () => {
   it('satisfies M⁻¹·M ≈ I for a fixed SPD matrix (entries known by hand)', () => {
     // Tridiagonal, strictly diagonally dominant ⇒ SPD.
     const m = new Float64Array([
-      5, 1, 0, 0, 0, 0,
-      1, 6, 1, 0, 0, 0,
-      0, 1, 7, 1, 0, 0,
-      0, 0, 1, 8, 1, 0,
-      0, 0, 0, 1, 9, 1,
-      0, 0, 0, 0, 1, 10,
+      5, 1, 0, 0, 0, 0, 1, 6, 1, 0, 0, 0, 0, 1, 7, 1, 0, 0, 0, 0, 1, 8, 1, 0, 0, 0, 0, 1, 9, 1, 0,
+      0, 0, 0, 1, 10,
     ]);
     expectIdentity(mul(invert6(m), m), 12);
     // The argument itself is not mutated.
@@ -139,23 +130,15 @@ describe('buildHydroModel (box barge)', () => {
       a33 += h.stripA33[i]!;
       a55 += h.stripA33[i]! * h.stripX[i]! ** 2;
     }
-    expect(h.omegaHeave).toBeCloseTo(
-      Math.sqrt(h.c33 / (h.mass + a33)),
-      9,
-    );
-    expect(h.omegaPitch).toBeCloseTo(
-      Math.sqrt(Math.max(h.c55, 0) / (def.inertia.y + a55)),
-      9,
-    );
+    expect(h.omegaHeave).toBeCloseTo(Math.sqrt(h.c33 / (h.mass + a33)), 9);
+    expect(h.omegaPitch).toBeCloseTo(Math.sqrt(Math.max(h.c55, 0) / (def.inertia.y + a55)), 9);
     expect(h.omegaHeave).toBeGreaterThan(0);
     expect(h.omegaPitch).toBeGreaterThan(0);
   });
 
   it('passes the Clarke derivatives through for a hull without a keel fin', () => {
     expect(def.keelFin).toBeNull();
-    expect(h.clarke).toEqual(
-      clarkeDerivatives(h.lwl, h.bwl, def.draft, h.blockCoefficient),
-    );
+    expect(h.clarke).toEqual(clarkeDerivatives(h.lwl, h.bwl, def.draft, h.blockCoefficient));
   });
 
   it('places the manoeuvring force below the waterline and slams per Ochi', () => {

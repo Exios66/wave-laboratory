@@ -44,7 +44,10 @@ const LOADED: FromWorker = {
   diagnostics: { hs: 1, systems: [], warnings: [] },
 } as unknown as FromWorker;
 
-function frame(t: number, overrides: Partial<SimFrame> = {}): Extract<FromWorker, { type: 'frame' }> {
+function frame(
+  t: number,
+  overrides: Partial<SimFrame> = {},
+): Extract<FromWorker, { type: 'frame' }> {
   return {
     type: 'frame',
     frame: {
