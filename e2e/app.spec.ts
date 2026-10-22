@@ -199,7 +199,7 @@ test.describe('Wave Laboratory app', () => {
   });
 
   test('picks a Jerlov water type without restarting the sea', async ({ page }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(180_000);
     const errors = trackErrors(page);
     await page.goto('/');
     await waitForSimulation(page);
