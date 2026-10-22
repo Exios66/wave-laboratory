@@ -25,6 +25,28 @@ async function simulationSeconds(time: ReturnType<Page['locator']>): Promise<num
   return Number(m![1]);
 }
 
+/**
+ * The playback clock passes `from` without ever dropping below it (a restart would reset it to 0).
+ * Polls instead of sleeping because software rendering can take seconds to advance one step.
+ */
+async function expectClockContinues(
+  time: ReturnType<Page['locator']>,
+  from: number,
+): Promise<void> {
+  let lowest = Infinity;
+  await expect
+    .poll(
+      async () => {
+        const t = await simulationSeconds(time);
+        lowest = Math.min(lowest, t);
+        return t;
+      },
+      { timeout: 30_000 },
+    )
+    .toBeGreaterThan(from);
+  expect(lowest).toBeGreaterThanOrEqual(from);
+}
+
 test.describe('Wave Laboratory app', () => {
   test('boots, simulates and renders without errors', async ({ page }) => {
     const errors = trackErrors(page);
@@ -196,17 +218,16 @@ test.describe('Wave Laboratory app', () => {
     const t0 = await simulationSeconds(time);
     await water.selectOption('coastal-9');
     await expect(water).toHaveValue('coastal-9');
-    await page.waitForTimeout(800);
+    // No restart: the clock keeps counting up from where it was and never falls back toward 0.
+    await expectClockContinues(time, t0);
     const t1 = await simulationSeconds(time);
-    expect(t1).toBeGreaterThan(t0);
     await page.screenshot({ path: 'test-results/water-type-coastal-9.png' });
 
     await expect.poll(() => simulationSeconds(time), { timeout: 30_000 }).toBeGreaterThan(t1 + 1);
     const t2 = await simulationSeconds(time);
     await water.selectOption('oceanic-i');
     await expect(water).toHaveValue('oceanic-i');
-    await page.waitForTimeout(800);
-    expect(await simulationSeconds(time)).toBeGreaterThan(t2);
+    await expectClockContinues(time, t2);
     await page.screenshot({ path: 'test-results/water-type-oceanic-i.png' });
     expect(errors).toEqual([]);
   });
@@ -485,7 +506,8 @@ test.describe('Wave Laboratory app', () => {
     await expect(bay.locator('option')).toHaveCount(6);
     await bay.selectOption('5');
     await hull.selectOption('patrol-boat');
-    await expect(bay.locator('option')).toHaveCount(4);
+    // A hull change reloads the whole simulation (new ocean, new vessel); allow for software GL.
+    await expect(bay.locator('option')).toHaveCount(4, { timeout: 30_000 });
     await expect(bay).toHaveValue('3');
     await page.getByRole('button', { name: 'Flood compartment' }).click();
     await expect(page.getByText('1 breach(es) open.', { exact: true })).toBeVisible();
