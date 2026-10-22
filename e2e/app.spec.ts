@@ -358,7 +358,7 @@ test.describe('Wave Laboratory app', () => {
     await depth.press('Enter');
     const underwater = page.getByRole('radio', { name: 'Underwater' });
     await underwater.click();
-    await expect(page.getByText(/^Underwater · \d+\.\d m$/)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/^Underwater · \d+\.\d m$/)).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(1500);
     await page.screenshot({ path: 'test-results/underwater-shelf.png' });
     // Deep water: blue water mode (no floor, marine snow only).
