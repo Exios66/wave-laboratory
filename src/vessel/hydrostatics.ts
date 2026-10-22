@@ -344,16 +344,28 @@ export interface SectionProperties {
 
 /**
  * Transverse section x = const of an upright hull floating with its waterline at z = zWl
- * (mesh coordinates). Assumes each side of the section is single-valued in z, which holds for
- * the lofted hulls (half-breadth is a function of height).
+ * (mesh coordinates). The cut of the closed, consistently oriented mesh is a set of directed
+ * segments; the submerged area is the signed line integral ∮ y dz over them (the waterline
+ * closure has dz = 0), and the waterline beam is the sum of the widths of all waterline
+ * intervals (right edges rise through the level just below the water surface, left edges
+ * descend through it). That holds for any section topology, so a catamaran's two demihulls
+ * are counted separately.
+ *
+ * Returns nonnegative submerged area [m²], total waterline width [m] and depth from the
+ * waterline to the lowest submerged section point [m], independent of overall winding.
+ * Dry or absent sections return zeros. A fully submerged section retains its area and depth
+ * from the waterline, but has zero beam when the sampled level is above it.
  */
 export function sectionAt(mesh: TriangleMesh, x: number, zWl: number): SectionProperties {
   const p = mesh.positions;
   const ix = mesh.indices;
-  let beam = 0;
   let zMin = Infinity;
   let area = 0;
+  let beam = 0;
   const pt = [0, 0, 0, 0];
+  const zLevel = zWl - 1e-5 * (1 + Math.abs(zWl));
+  // Whether the edge that produced each crossing runs from the negative to the positive side.
+  const up = [false, false];
   for (let t = 0; t < ix.length; t += 3) {
     let k = 0;
     for (let e = 0; e < 3 && k < 4; e++) {
@@ -363,24 +375,43 @@ export function sectionAt(mesh: TriangleMesh, x: number, zWl: number): SectionPr
       const xb = p[b]! - x;
       if (xa < 0 === xb < 0) continue;
       const s = xa / (xa - xb);
+      up[k >> 1] = xa < 0;
       pt[k++] = p[a + 1]! + (p[b + 1]! - p[a + 1]!) * s;
       pt[k++] = p[a + 2]! + (p[b + 2]! - p[a + 2]!) * s;
     }
     if (k < 4) continue;
-    let y1 = Math.abs(pt[0]!);
-    let z1 = pt[1]!;
-    let y2 = Math.abs(pt[2]!);
-    let z2 = pt[3]!;
-    if (z1 > z2) [y1, z1, y2, z2] = [y2, z2, y1, z1];
-    if (z1 >= zWl) continue;
-    zMin = Math.min(zMin, z1);
-    if (z2 > zWl) {
+    // Direct the segment from the crossing of the + → − edge to that of the − → + edge.
+    let y1 = up[0] ? pt[2]! : pt[0]!;
+    let z1 = up[0] ? pt[3]! : pt[1]!;
+    let y2 = up[0] ? pt[0]! : pt[2]!;
+    let z2 = up[0] ? pt[1]! : pt[3]!;
+    if (Math.min(z1, z2) >= zWl) continue;
+    zMin = Math.min(zMin, z1, z2);
+    // Waterline width: signed crossings of a level just below the water surface (half-open in
+    // z, so a vertex row exactly on the level is counted once).
+    if (z1 < zLevel && zLevel <= z2) {
+      beam += y1 + ((y2 - y1) * (zLevel - z1)) / (z2 - z1);
+    } else if (z2 < zLevel && zLevel <= z1) {
+      beam -= y1 + ((y2 - y1) * (zLevel - z1)) / (z2 - z1);
+    }
+    // Clip to the water.
+    if (z1 > zWl) {
+      const s = (zWl - z2) / (z1 - z2);
+      y1 = y2 + (y1 - y2) * s;
+      z1 = zWl;
+    } else if (z2 > zWl) {
       const s = (zWl - z1) / (z2 - z1);
       y2 = y1 + (y2 - y1) * s;
       z2 = zWl;
     }
-    if (z2 >= zWl - 1e-6 * (1 + Math.abs(zWl))) beam = Math.max(beam, 2 * y2);
     area += 0.5 * (y1 + y2) * (z2 - z1);
   }
-  return { beam, draft: Number.isFinite(zMin) ? zWl - zMin : 0, area };
+  // ∮ y dz is +A for a counter-clockwise (y right, z up) outline and −A for a clockwise one;
+  // the width sum flips with it.
+  const ccw = area > 0;
+  return {
+    beam: Math.max(0, ccw ? beam : -beam),
+    draft: Number.isFinite(zMin) ? zWl - zMin : 0,
+    area: Math.abs(area),
+  };
 }

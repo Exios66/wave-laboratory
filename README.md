@@ -22,9 +22,12 @@ oceanographic wave spectra, drop ships into it, and measure how they handle the 
   columns, plus added mass, radiation and viscous damping, propulsion, rudder and autopilot.
   Wind acts on every hull through its frontal and side areas, and the square-rigged pirate ship
   sails on the wind alone, bracing and reefing as the wind changes. The fleet runs from a
-  lifeboat to a VLCC oil tanker and a Nimitz-class aircraft carrier, and a 70 m diesel-electric
-  submarine runs at periscope depth: fully submerged and neutrally buoyant, held at the ordered keel
-  depth by bow and stern hydroplanes and a ballast tank while the swell heaves and pitches her. Slamming, green water and
+  lifeboat and a 15 m power catamaran (two demihulls and a bridge deck lofted as one closed
+  mesh, so it has a very high GM/B and a righting arm that peaks at small heel, about 20°,
+  as the weather hull lifts clear) to a VLCC oil tanker and a Nimitz-class aircraft carrier, and a
+  70 m diesel-electric submarine runs at periscope depth: fully submerged and neutrally buoyant,
+  held at the ordered keel depth by bow and stern hydroplanes and a ballast tank while the swell
+  heaves and pitches her. Slamming, green water and
   capsize are detected, and a collision or heavy slam can breach a watertight compartment that
   floods through the hole, costing stability (free surface) and eventually sinking the ship. A ship can drop anchor (or start moored to a buoy): an elastic
   catenary chain pulls at the bow, she weathervanes into the wind, and the anchor drags if the load
@@ -106,7 +109,7 @@ paths, so it also works from any other static host or sub-folder.
 1. Pick a **preset** or start a **new** experiment. The built-in presets include a moderate
    sea with a container ship, a rogue wave meeting a ship, a hurricane with a tanker and a
    carrier, a pirate ship on a beam reach, a squall line, a North Sea winter storm, a Southern
-   Ocean swell plus wind sea, a Wigley hull in a regular-wave tank, a box barge in beam seas,
+   Ocean swell plus wind sea, a Wigley hull in a regular-wave tank, a box barge in beam seas, a catamaran and a trawler in beam seas,
    TMA swell in shallow water, and calm harbour ripples.
 2. In the **Scene** panel, add wave systems, vessels and wave gauges. Select anything to edit
    it in the **Inspector**. Drag the edges of the 3D view to resize those panels and the data

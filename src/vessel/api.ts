@@ -189,6 +189,12 @@ export interface VesselDefinition {
   palette: Partial<Record<VisualMaterial, number>>;
   /** Submarine data (fully submerged hull held at depth by hydroplanes); null for surface ships. */
   submarine: SubmarineSpec | null;
+  /**
+   * Multihull layout: number of demihulls and their centreline spacing [m]. Absent for a
+   * monohull. The mesh is still one closed surface; hydrodynamic strips use it to treat each
+   * demihull as its own slender section.
+   */
+  multihull?: { count: number; separation: number };
 }
 
 export interface VesselPoints {

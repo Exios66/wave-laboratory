@@ -21,6 +21,8 @@
  *  - 10 m fin-keel cruising sloop with a Bermuda rig and an auxiliary inboard;
  *  - 70 m diesel-electric submarine at periscope depth: a body of revolution (6.6 m hull) merged
  *    with a sail, keel 15 m below the surface, only the sail top and masts piercing it.
+ *  - 15 m power catamaran: two slender round-bilge demihulls joined by a bridge deck, lofted as
+ *    one closed mesh (very high GM/B, righting arm peaking at small heel).
  */
 import type { Vec3 } from '../core/vec';
 import type { VesselType } from '../schema/experiment';
@@ -33,7 +35,7 @@ import type {
   VisualMaterial,
   ForeAftRig,
 } from './api';
-import type { HullShape, LoftOptions } from './mesh';
+import { loftCatamaran, loftHull, type HullShape, type LoftedHull, type LoftOptions } from './mesh';
 import {
   SAIL_TOP_Z,
   SUB_AXIS_Z,
@@ -95,6 +97,23 @@ export interface HullDesign {
   mesh?: (fine: boolean) => TriangleMesh;
   /** Fully submerged hull held at depth by hydroplanes (keel frame; scaled like the hull). */
   submarine?: SubmarineSpec;
+  /**
+   * Catamaran: `shape` describes ONE demihull about its own centreline; two copies at
+   * y = ±separation/2 are joined by a bridge deck whose underside is `tunnelRoof(u)` above the
+   * keel. `beam` is then the overall beam.
+   */
+  multihull?: { separation: number; tunnelRoof(u: number): number };
+}
+
+/** Loft a design's hull surface: the monohull loft, or the catamaran loft with its bridge deck. */
+export function loftDesignHull(d: HullDesign, opts: LoftOptions): LoftedHull {
+  if (d.mesh) return { mesh: d.mesh(opts === d.renderLoft), deckEdge: new Uint32Array(0) };
+  const mh = d.multihull;
+  if (!mh) return loftHull(d.shape, opts);
+  return loftCatamaran(d.shape, opts, {
+    halfSeparation: mh.separation / 2,
+    tunnelRoof: mh.tunnelRoof,
+  });
 }
 
 const smoothstep = (e0: number, e1: number, x: number): number => {
@@ -816,6 +835,62 @@ function submarine(): HullDesign {
   };
 }
 
+// ---------------------------------------------------------------------------- catamaran
+
+/** Full-scale power-catamaran design in the keel frame; `shape` describes one demihull. */
+function catamaran(): HullDesign {
+  const D = 2.2;
+  const T = 0.85;
+  const Bh = 0.55; // demihull half-breadth (wall-sided above the bilge)
+  const sep = 4.6; // centreline spacing of the demihulls
+  const thick = 0.45; // bridge-deck thickness amidships
+  const deckAt = (u: number): number => D + 0.15 * (2 * u - 1) ** 2;
+  return {
+    displayName: 'Catamaran',
+    description:
+      '15 m power catamaran: two slender round-bilge demihulls (L/B ≈ 14) joined by a bridge ' +
+      'deck with a tunnel between them, lofted as one closed hull. Very high initial stability ' +
+      'but a righting arm that peaks at small heel, about 20° (the weather hull lifts ' +
+      'clear). Twin screws are modelled as one equivalent centreline propulsor and rudder.',
+    beam: sep + 2 * Bh,
+    depth: D,
+    draft: T,
+    shape: {
+      xAft: (z) => -7.2 - 0.05 * z,
+      xFwd: (z) => (z < T ? 7.8 - 1.4 * (1 - z / T) ** 2 : 7.8 + 0.5 * (z - T)),
+      deckHeight: deckAt,
+      halfBreadth: (u, z) => {
+        const wT = 0.7 * smoothstep(0.1 * T, 0.9 * T, z);
+        const pr = 1.6 + 0.6 * Math.min(z / T, 1.5);
+        const pe = 1.7 + 0.9 * Math.min(z / D, 1.2);
+        return Bh * planForm(u, 0.4, 0.55, wT, pr, pe) * bilgeSection(z, Bh, 0.45);
+      },
+      flatBottom: true,
+      draft: T,
+    },
+    multihull: {
+      separation: sep,
+      // Thin lens: the bridge underside rises to the deck at both ends.
+      tunnelRoof: (u) => deckAt(u) - thick * smoothstep(0, 0.16, u) * smoothstep(1, 0.84, u),
+    },
+    physicsLoft: { stations: 28, levelsBelow: 4, levelsAbove: 2 },
+    renderLoft: { stations: 90, levelsBelow: 12, levelsAbove: 6 },
+    maxSpeedKn: 16,
+    superstructure: [
+      box(-1.2, 0, D + 0.95, 6.4, 4.4, 1.9, 'superstructure'),
+      box(-0.4, 0, D + 1.35, 4.6, 4.42, 0.55, 'glass'),
+      box(-1.0, 0, D + 1.98, 6.8, 4.8, 0.14, 'accent'),
+      box(-2.2, 0, D + 3.0, 0.1, 0.1, 2.1, 'accent'),
+      box(4.4, 0, D + 0.55, 4.0, 4.6, 0.12, 'deck'),
+    ],
+    bridge: { x: 0.4, y: 0, z: D + 1.5 },
+    propeller: { x: -6.4, z: 0.3, diameter: 0.7, wake: 0.1, timeConstant: 1.5 },
+    rudder: { x: -7.0, z: 0.3, area: 0.9, aspect: 1.6, rateDeg: 5 },
+    paint: { bottom: 0x1b2733, boot: 0xe8edf0, topside: 0xf6f8fa },
+    palette: { superstructure: 0xeef2f5, glass: 0x5f8fa8, accent: 0x2b3a47, deck: 0xb9b2a3 },
+  };
+}
+
 const BUILDERS: Record<VesselType, () => HullDesign> = {
   'box-barge': boxBarge,
   wigley,
@@ -828,6 +903,7 @@ const BUILDERS: Record<VesselType, () => HullDesign> = {
   'pirate-ship': pirateShip,
   'sloop-yacht': sloopYacht,
   submarine,
+  catamaran,
 };
 
 /** Full-scale (scale = 1) design of a built-in vessel type. */

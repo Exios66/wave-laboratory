@@ -107,7 +107,7 @@ export interface ParticleStyle {
   growth: number;
 }
 
-const SPRAY_STYLE: ParticleStyle = {
+export const SPRAY_STYLE: ParticleStyle = {
   gravity: 0.8,
   drag: 1.4,
   color: [0.95, 0.95, 0.95],

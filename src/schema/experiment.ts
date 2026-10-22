@@ -206,6 +206,7 @@ export const VesselTypeSchema = z.enum([
   'pirate-ship',
   'sloop-yacht',
   'submarine',
+  'catamaran',
 ]);
 export type VesselType = z.infer<typeof VesselTypeSchema>;
 

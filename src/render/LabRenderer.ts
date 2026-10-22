@@ -56,6 +56,16 @@ import { DEFAULT_WILDLIFE_SEED, WildlifeLayer } from './scenery/wildlife';
 import { UnderwaterSceneryLayer } from './underwater/scenery';
 import { createRadialOceanGeometry, OCEAN_DENSITY, OCEAN_SLICES } from './scene/oceanMesh';
 import { RainField, SMOKE_STYLE, SprayPool } from './scene/particles';
+import { GpuSprayPool } from './scene/gpuSpray';
+import {
+  drawCount,
+  makeRng,
+  pointVerticalSpeed,
+  scheduleCrestBursts,
+  slamStrength,
+  spindriftRate,
+  spindriftStrength,
+} from './scene/sprayMath';
 import { ChainView } from './scene/chain';
 import { RigView } from './scene/rig';
 import { WakeField, type WakeSource } from './scene/wakes';
@@ -292,7 +302,11 @@ export class LabRenderer implements LabRendererApi {
   private readonly fog = new THREE.FogExp2(0xc8d6e5, 1e-4);
   private quality: OceanQuality = 'high';
   private rain: RainField;
-  private spray: SprayPool;
+  private spray: GpuSprayPool;
+  /** Fractional emission carried between frames (crest bursts, spindrift) and its generator. */
+  private crestCarry = 0;
+  private driftCarry = 0;
+  private readonly sprayRng = makeRng(0x7ea5);
   private smoke: SprayPool;
   /** Collisions already turned into spray (keyed by time and pair). */
   private readonly seenCollisions = new Set<string>();
@@ -501,7 +515,7 @@ export class LabRenderer implements LabRendererApi {
 
     const budget = BUDGET[this.quality];
     this.rain = new RainField(budget.rain);
-    this.spray = new SprayPool(budget.spray);
+    this.spray = new GpuSprayPool(budget.spray);
     this.smoke = new SprayPool(Math.round(budget.spray / 3), SMOKE_STYLE);
     this.scene.add(this.rain.object, this.spray.object, this.smoke.object);
     this.applyQualityUniforms();
@@ -661,7 +675,7 @@ export class LabRenderer implements LabRendererApi {
     this.spray.dispose();
     this.smoke.dispose();
     this.rain = new RainField(budget.rain);
-    this.spray = new SprayPool(budget.spray);
+    this.spray = new GpuSprayPool(budget.spray);
     this.smoke = new SprayPool(Math.round(budget.spray / 3), SMOKE_STYLE);
     this.scene.add(this.rain.object, this.spray.object, this.smoke.object);
     this.applyQualityUniforms();
@@ -768,11 +782,18 @@ export class LabRenderer implements LabRendererApi {
     const pixelScale =
       this.renderer.getDrawingBufferSize(this.tmp2).y /
       (2 * Math.tan((this.camera.fov * Math.PI) / 360));
-    this.spray.update(camDt, this.windThree, light, pixelScale);
+    const size = this.tmp2;
+    this.spray.setLighting(
+      this.sprayDir.copy(this.sun.position).normalize(),
+      this.daylight * (1 - 0.85 * smoothstep(0.3, 1, cloud)),
+      this.fogColor,
+    );
+    this.spray.update(camDt, light, pixelScale, size.x / Math.max(1, size.y));
     this.smoke.update(camDt, this.windThree, light, pixelScale);
   }
 
   private readonly tmp2 = new THREE.Vector2();
+  private readonly sprayDir = new THREE.Vector3();
 
   /** Bow spray from the vessels and spindrift off the crests in a gale. */
   private emitSpray(dt: number, wind: number): void {
@@ -785,26 +806,28 @@ export class LabRenderer implements LabRendererApi {
       const def = view.definition;
       const kn = Math.max(0, state.speedKn);
       const heave = Math.min(1, Math.abs(state.bowAccel) / 9.81);
-      const intensity =
-        Math.min(1, kn / 18) * 0.5 +
-        heave * 0.6 +
-        (state.slamming || this.sprayBursts.has(state.id) ? 1.2 : 0) +
-        (state.greenWater ? 0.8 : 0);
-      if (intensity < 0.05) continue;
-      const rate = intensity * 700 * budget * Math.sqrt(def.beam / 10);
-      const n = Math.min(200, Math.floor(rate * dt + Math.random()));
-      if (n <= 0) continue;
       const bow = rotate(state.attitude, {
         x: def.points.bow.x - def.length * 0.04,
         y: 0,
         z: def.points.bow.z - def.depth * 0.6,
       });
+      // A slam throws a sheet scaled by how fast the bow meets the water.
+      const slam =
+        state.slamming || this.sprayBursts.has(state.id)
+          ? 0.4 + 0.6 * slamStrength(pointVerticalSpeed(state.velocity, state.angularVelocity, bow))
+          : 0;
+      const intensity =
+        Math.min(1, kn / 18) * 0.5 + heave * 0.6 + 1.2 * slam + (state.greenWater ? 0.8 : 0);
+      if (intensity < 0.05) continue;
+      const rate = intensity * 700 * budget * Math.sqrt(def.beam / 10);
+      const n = Math.min(200, Math.floor(rate * dt + this.sprayRng()));
+      if (n <= 0) continue;
       const fwd = rotate(state.attitude, { x: 1, y: 0, z: 0 });
       const port = rotate(state.attitude, { x: 0, y: 1, z: 0 });
       const v = state.velocity;
       const up = 3 + 9 * intensity;
       for (const side of [1, -1]) {
-        const out = 2 + 5 * intensity;
+        const out = 2 + 5 * intensity + 4 * slam;
         this.spray.emit(
           {
             x: state.position.x + bow.x + port.x * side * def.beam * 0.3,
@@ -818,32 +841,62 @@ export class LabRenderer implements LabRendererApi {
             life: 0.9 + 0.8 * intensity,
           },
           Math.ceil(n / 2),
+          this.windThree.x,
+          this.windThree.z,
         );
       }
     }
     this.sprayBursts.clear();
-    // Spindrift: from Beaufort 8 the wind tears spray off the breaking crests.
-    if (wind > 16 && this.frame) {
-      const strength = Math.min(1, (wind - 16) / 14);
-      const n = Math.floor(strength * 500 * budget * dt + Math.random());
-      const focus = this.tmp;
-      const hs = this.ocean.uniforms.uHs!.value as number;
+    if (!this.frame) return;
+    const hs = this.ocean.uniforms.uHs!.value as number;
+    const focus = this.tmp;
+    const wx = this.windThree.x;
+    const wz = this.windThree.z;
+    // Breaking-crest spray. There is no CPU ocean on the render side, so a deterministic proxy
+    // scatters puffs around the camera focus by wind and sea state (see scheduleCrestBursts).
+    const crest = scheduleCrestBursts(wind, hs, dt, this.crestCarry, budget, this.sprayRng);
+    this.crestCarry = crest.carry;
+    for (const b of crest.bursts) {
+      this.spray.emit(
+        {
+          x: focus.x + b.dx,
+          y: b.height,
+          z: focus.z + b.dz,
+          vx: wx * 0.5,
+          vy: b.up,
+          vz: wz * 0.5,
+          spread: 0.9,
+          size: 0.35 + 0.08 * hs,
+          life: 1.1 + 0.12 * hs,
+        },
+        b.count,
+        wx,
+        wz,
+      );
+    }
+    // Spindrift: from Beaufort 8 the wind tears streaks of spray off the crests, rising with wind.
+    const strength = spindriftStrength(wind);
+    if (strength > 0) {
+      const [n, rest] = drawCount(spindriftRate(wind) * budget, dt, this.driftCarry, 120);
+      this.driftCarry = rest;
       for (let i = 0; i < n; i++) {
-        const r = 30 + Math.random() * 220;
-        const a = Math.random() * Math.PI * 2;
+        const r = 30 + this.sprayRng() * 220;
+        const a = this.sprayRng() * Math.PI * 2;
         this.spray.emit(
           {
             x: focus.x + r * Math.cos(a),
-            y: Math.random() * hs * 0.5,
+            y: this.sprayRng() * hs * 0.5,
             z: focus.z + r * Math.sin(a),
-            vx: this.windThree.x * 0.5,
-            vy: 1 + Math.random() * 3,
-            vz: this.windThree.z * 0.5,
+            vx: wx * 0.7,
+            vy: 0.5 + this.sprayRng() * 2,
+            vz: wz * 0.7,
             spread: 1.5,
             size: 0.4 + strength * 0.6,
             life: 1.5 + strength,
           },
           1,
+          wx,
+          wz,
         );
       }
     }
@@ -916,6 +969,8 @@ export class LabRenderer implements LabRendererApi {
           life: 1.2 + sev,
         },
         Math.round(40 + 160 * sev),
+        this.windThree.x,
+        this.windThree.z,
       );
       this.smoke.emit(
         {

@@ -72,6 +72,7 @@ export const VESSEL_TYPE_LABELS: Record<VesselType, string> = {
   'pirate-ship': 'Pirate ship (square-rigged)',
   'sloop-yacht': 'Sloop yacht (Bermuda-rigged)',
   submarine: 'Submarine (periscope depth)',
+  catamaran: 'Catamaran (power, 15 m)',
 };
 
 export function newVessel(type: VesselType, count: number): VesselConfig {
