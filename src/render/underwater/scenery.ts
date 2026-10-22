@@ -219,7 +219,7 @@ export function underwaterFeaturesInCell(
     'grass',
     cx,
     cy,
-    (cellFloor < 18 ? 20 : 12) + Math.floor(rnd() * 10),
+    (cellFloor < 18 ? 70 : 45) + Math.floor(rnd() * 30),
     UW_CELL * 0.5,
     0.8 + 0.5 * rnd(),
     seed ^ 0x2d,
@@ -362,7 +362,7 @@ function vertexHash(x: number, y: number): number {
   return s - Math.floor(s);
 }
 
-const MAX_PLANTS = 1400;
+const MAX_PLANTS = 2800;
 const MAX_HARD = 260;
 const MAX_WRECKS = 16;
 const MAX_PARTICLES = 1500;
@@ -641,7 +641,7 @@ export class UnderwaterSceneryLayer implements SceneryLayer {
             this.tmpS.set(sc, sc * (0.8 + 0.5 * rnd()), sc);
             this.tmpC.setHSL(0.14 + 0.1 * rnd(), 0.45 + 0.2 * rnd(), 0.3 + 0.1 * rnd());
           } else {
-            this.tmpS.set(sc * 1.4, sc * (0.14 + 0.1 * rnd()), sc * 1.4);
+            this.tmpS.set(sc * 2, sc * (0.2 + 0.14 * rnd()), sc * 2);
             this.tmpC.setHSL(0.24 + 0.1 * rnd(), 0.55, 0.38 + 0.1 * rnd());
           }
           this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
