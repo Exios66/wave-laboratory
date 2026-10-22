@@ -111,6 +111,13 @@ export interface HydroModel {
   rudderLiftSlope: number;
 }
 
+/**
+ * Build added mass, damping, restoring and maneuvering coefficients at the vessel's loaded
+ * draft for water density `rho` [kg/m³] and gravity `g` [m/s²]. Returns strip coefficients and
+ * the inverse effective mass matrix in the body frame. Multihull heave/sway added mass and
+ * hull-force derivatives sum identical demihulls; see the module header for model limits.
+ * @throws {RangeError} If the effective mass matrix is singular during inversion.
+ */
 export function buildHydroModel(def: VesselDefinition, rho: number, g: number): HydroModel {
   const nu = SEAWATER_KINEMATIC_VISCOSITY;
   const mesh = def.physicsHull;
@@ -292,6 +299,7 @@ export function buildHydroModel(def: VesselDefinition, rho: number, g: number): 
   };
 }
 
+/** Return a new set of maneuvering derivatives scaled by the hull count `k`. */
 function scaleDerivatives(
   c: { yv: number; yr: number; nv: number; nr: number },
   k: number,

@@ -740,6 +740,7 @@ function sloopYacht(): HullDesign {
 
 // ---------------------------------------------------------------------------- catamaran
 
+/** Full-scale power-catamaran design in the keel frame; `shape` describes one demihull. */
 function catamaran(): HullDesign {
   const D = 2.2;
   const T = 0.85;
