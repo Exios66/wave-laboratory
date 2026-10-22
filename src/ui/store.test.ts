@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { presetExperiment } from '../schema/presets';
-import { readDisplay, useLab } from './store';
+import { DEFAULT_AMBIENCE } from '../render/scenery/types';
+import { readDisplay, sanitizeAmbience, useLab } from './store';
 
 const lab = useLab.getState;
 
@@ -104,5 +105,23 @@ describe('display preferences', () => {
     expect(readDisplay()).toEqual({ bloom: 'auto', grain: false, vignette: false });
     saved.set('wave-lab:display', JSON.stringify({ bloom: 7, grain: true }));
     expect(readDisplay()).toEqual({ bloom: 'auto', grain: true, vignette: false });
+  });
+});
+
+describe('ambience sanitising (traffic families)', () => {
+  it('falls back to defaults for missing or mistyped traffic flags from old storage', () => {
+    const old = { traffic: 'yes', structures: 1, hostiles: null, underwater: undefined };
+    const s = sanitizeAmbience(old as never);
+    expect(s.traffic).toBe(DEFAULT_AMBIENCE.traffic);
+    expect(s.structures).toBe(DEFAULT_AMBIENCE.structures);
+    expect(s.hostiles).toBe(DEFAULT_AMBIENCE.hostiles);
+    expect(s.underwater).toBe(DEFAULT_AMBIENCE.underwater);
+    expect(sanitizeAmbience({})).toEqual(DEFAULT_AMBIENCE);
+  });
+
+  it('keeps explicit booleans', () => {
+    const s = sanitizeAmbience({ traffic: false, hostiles: true });
+    expect(s.traffic).toBe(false);
+    expect(s.hostiles).toBe(true);
   });
 });
