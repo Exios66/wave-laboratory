@@ -1059,8 +1059,9 @@ export class Vessel {
         tx += sl.fx;
         ty += sl.fy;
         this.jibDeg = this.jibIndex >= 0 ? this.sheets[this.jibIndex]! / DEG : 0;
-        this.mainAlphaDeg = sl.items[0]!.alpha / DEG;
-        this.sailOut.braceDeg = this.sheets[0]! / DEG;
+        const mainIndex = def.foreAft.sails.findIndex((sail) => sail.kind === 'main');
+        this.mainAlphaDeg = mainIndex >= 0 ? sl.items[mainIndex]!.alpha / DEG : 0;
+        this.sailOut.braceDeg = mainIndex >= 0 ? this.sheets[mainIndex]! / DEG : 0;
       }
       this.windForce = Math.hypot(tx, ty);
     }

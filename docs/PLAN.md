@@ -293,6 +293,7 @@ These are for problems where linear superposition breaks down: shoaling, refract
 | Sailing yacht                 | Heel, windage, keel lift                             |
 | RIB / planing boat            | High-speed slamming demo                             |
 | Lifeboat / small craft        | Survival-conditions demo                             |
+| Power catamaran (shipped)     | Multihull stability: very high GM/B, GZ peak at ~20° |
 | Floating wind platform (spar) | Offshore engineering demo with mooring               |
 
 ---
@@ -317,6 +318,7 @@ These are for problems where linear superposition breaks down: shoaling, refract
 
 - Foam: Jacobian/breaking-driven foam accumulated in persistent textures with decay and advection, plus whitecap coverage tied to wind speed, ship wake foam and shoreline foam.
 - GPU particle systems for spray, spindrift and bow splashes, emitted from slamming events and breaking crests.
+  Shipped: spray is a GPU ring buffer (`scene/gpuSpray.ts`). Emitting writes only birth state (position, velocity, lifetime, wind) and uploads just those slots; the vertex shader evaluates the flight in closed form (drag toward the wind plus gravity, `scene/sprayMath.ts`, checked against RK4). Bow sheets scale with the bow's vertical speed on a slam; breaking-crest spray uses a deterministic proxy by wind and Hs because the render side has no CPU ocean; spindrift streaks start at Beaufort 8 and rise with wind. Smoke stays on the CPU pool. Not done: depth-texture soft particles.
 - Underwater view: absorption fog, god rays, Snell's window, bubbles; a seamless transition across the waterline.
 - Post-processing: HDR pipeline, TAA, bloom, exposure, filmic/ACES tone mapping, optional upscaling.
 
