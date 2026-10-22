@@ -346,6 +346,30 @@ test.describe('Wave Laboratory app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('underwater scenery renders on a shelf and in blue water without errors', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    await page.getByText('Water, wind & sun').click();
+    const depth = page.getByLabel(/Water depth/).first();
+    await depth.fill('20');
+    await depth.press('Enter');
+    const underwater = page.getByRole('radio', { name: 'Underwater' });
+    await underwater.click();
+    await expect(page.getByText(/^Underwater · \d+\.\d m$/)).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(1500);
+    await page.screenshot({ path: 'test-results/underwater-shelf.png' });
+    // Deep water: blue water mode (no floor, marine snow only).
+    await depth.fill('4000');
+    await depth.press('Enter');
+    await page.waitForTimeout(1500);
+    await page.screenshot({ path: 'test-results/underwater-blue.png' });
+    await page.getByRole('radio', { name: 'Orbit' }).click();
+    expect(errors).toEqual([]);
+  });
+
   test('enlarges the 3D view by hiding the side panels and chart dock', async ({ page }) => {
     const errors = trackErrors(page);
     await page.goto('/');

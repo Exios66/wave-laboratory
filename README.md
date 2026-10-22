@@ -43,7 +43,10 @@ oceanographic wave spectra, drop ships into it, and measure how they handle the 
   below the waves switches to the underwater look automatically, with a live depth badge. Light
   fades per colour with depth following the water type's K_d (red first in clear water, blue
   first in turbid coastal water), the surface seen from below shows the rippled sky inside the
-  48.6° window and a mirror outside it, and hulls are seen from beneath.
+  48.6° window and a mirror outside it, and hulls are seen from beneath. The seafloor follows the
+  experiment's water depth (a rippled floor with kelp forests, seagrass, coral and rocks in 60 m or
+  less, open blue water with drifting marine snow when deeper), with animated caustics, god rays
+  toward the refracted sun and a depth colour grade.
   ![Looking up into Snell's window](docs/screenshots/underwater-snells-window.jpg)
   ![A hull from below](docs/screenshots/underwater-hull.jpg)
   ![Oceanic I water](docs/screenshots/underwater-oceanic-i.jpg)
