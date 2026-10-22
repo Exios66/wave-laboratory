@@ -44,6 +44,9 @@ oceanographic wave spectra, drop ships into it, and measure how they handle the 
   fades per colour with depth following the water type's K_d (red first in clear water, blue
   first in turbid coastal water), the surface seen from below shows the rippled sky inside the
   48.6° window and a mirror outside it, and hulls are seen from beneath.
+  Underwater there is marine life too (Settings → Ambience, with Wildlife on): schools of baitfish,
+  reef fish around coral and wrecks, tuna, rays and jellyfish that glow at night, all instanced and
+  budgeted per quality tier (none but a few jellyfish on low).
   ![Looking up into Snell's window](docs/screenshots/underwater-snells-window.jpg)
   ![A hull from below](docs/screenshots/underwater-hull.jpg)
   ![Oceanic I water](docs/screenshots/underwater-oceanic-i.jpg)
