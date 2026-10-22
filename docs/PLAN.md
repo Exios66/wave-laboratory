@@ -26,6 +26,7 @@ commits the static build into `docs/` on `main`. There is no GitHub Actions work
 | HDR post stack: bloom on sun glint, ACES applied once, optional grain and vignette (display preferences)                 | ✅                     |
 | Underwater camera: per-channel absorption fog, Snell's window, hulls from below, automatic switch for every camera       | ✅                     |
 | Ambient world: passerby naval traffic, offshore rigs and wind farms, underwater scenery and atmosphere (`#43`)           | ✅                     |
+| Underwater marine life: instanced fish schools, reef fish, tuna, rays and jellyfish, tiered budgets (`#53`)              | ✅                     |
 | Stokes/cnoidal/focused waves, grid (SWE/Boussinesq) solvers, scripting API, L1/L2 radiation                              | ⏳ Later phases        |
 
 **Deviation from §2:** the renderer uses **WebGL 2 through Three.js**, not raw WebGPU. Every

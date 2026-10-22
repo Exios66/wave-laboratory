@@ -53,6 +53,7 @@ import {
   type SceneryLayer,
 } from './scenery/types';
 import { DEFAULT_WILDLIFE_SEED, WildlifeLayer } from './scenery/wildlife';
+import { MarineLifeLayer } from './underwater/marineLife';
 import { UnderwaterSceneryLayer } from './underwater/scenery';
 import { createRadialOceanGeometry, OCEAN_DENSITY, OCEAN_SLICES } from './scene/oceanMesh';
 import { RainField, SMOKE_STYLE, SprayPool } from './scene/particles';
@@ -267,6 +268,7 @@ export class LabRenderer implements LabRendererApi {
   private readonly islands = new IslandLayer();
   private readonly traffic = new TrafficLayer();
   private readonly underwaterScenery = new UnderwaterSceneryLayer();
+  private readonly marineLife = new MarineLifeLayer();
   private readonly wildlife = new WildlifeLayer(DEFAULT_WILDLIFE_SEED, (out) =>
     this.traffic.appendWildVessels(out),
   );
@@ -294,6 +296,7 @@ export class LabRenderer implements LabRendererApi {
     this.islands,
     this.traffic,
     this.underwaterScenery,
+    this.marineLife,
     this.wildlife,
     this.birds,
     this.sailors,
@@ -634,6 +637,7 @@ export class LabRenderer implements LabRendererApi {
       hostiles: this.ambience.hostiles,
     });
     this.underwaterScenery.setEnabled(this.ambience.underwater);
+    this.marineLife.setEnabled(this.ambience.underwater && this.ambience.wildlife);
     this.wildlife.setEnabled(this.ambience.wildlife);
     this.birds.setEnabled(this.ambience.wildlife);
     // Rubber ducks have no crew.
