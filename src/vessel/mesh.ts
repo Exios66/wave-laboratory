@@ -252,8 +252,12 @@ export function loftCatamaran(
       else idx.push(a[k]!, a[k1]!, b[k]!, a[k1]!, b[k1]!, b[k]!);
     }
   }
-  capRing(pos, idx, rings[0]!, true);
-  capRing(pos, idx, rings[stations - 1]!, false);
+  for (const end of [0, stations - 1]) {
+    const ring = rings[end]!;
+    // Split at deckC and roofC; the shared seam runs in opposite directions.
+    capRing(pos, idx, ring.slice(0, portEnd + 1), end === 0);
+    capRing(pos, idx, [ring[0]!, ...ring.slice(portEnd)], end === 0);
+  }
 
   const mesh: TriangleMesh = { positions: new Float32Array(pos), indices: new Uint32Array(idx) };
   if (meshVolume(mesh).volume < 0) flipOrientation(mesh);

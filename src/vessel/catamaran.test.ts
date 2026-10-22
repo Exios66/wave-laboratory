@@ -10,13 +10,32 @@ import { lewisAddedMass } from './coefficients';
 import { buildHydroModel } from './hydroModel';
 import { hullDesign, loftDesignHull } from './hulls';
 import { quatToMat3, sectionAt, submergedProperties } from './hydrostatics';
-import { checkWatertight, meshVolume } from './mesh';
+import { checkWatertight, loftCatamaran, meshArea, meshVolume } from './mesh';
 import { makeVessel, report, run } from './testUtil';
 
 const def = createVesselDefinition('catamaran');
 const trawler = createVesselDefinition('trawler');
 
 describe('catamaran hull', () => {
+  it('caps box demihulls without overlapping triangles across the tunnel', () => {
+    const { mesh } = loftCatamaran(
+      {
+        xAft: () => -2,
+        xFwd: () => 2,
+        deckHeight: () => 6,
+        halfBreadth: () => 1,
+        flatBottom: true,
+        draft: 1,
+      },
+      { stations: 3, levelsBelow: 2, levelsAbove: 2 },
+      { halfSeparation: 2, tunnelRoof: () => 1.5 },
+    );
+    // Section: 6 × 6 rectangle minus a 2 × 1.5 tunnel, extruded over 4 m.
+    expect(meshVolume(mesh).volume).toBeCloseTo(132, 5);
+    expect(meshArea(mesh)).toBeCloseTo(2 * 33 + 27 * 4, 5);
+    expect(checkWatertight(mesh).ok).toBe(true);
+  });
+
   it('is a single watertight, outward-oriented surface at both resolutions', () => {
     const d = hullDesign('catamaran');
     for (const loft of [d.physicsLoft, d.renderLoft]) {
