@@ -109,7 +109,7 @@ const UnderwaterShader = {
         acc *= dmax / 12.0;
         float towardSun = max(dot(rd, -uSunTravel), 0.0);
         float phase = 0.35 + 0.65 * towardSun * towardSun;
-        rays = (uInscatter * 3.0 + vec3(0.004, 0.012, 0.016)) * acc * phase * uRays * 0.5;
+        rays = (uInscatter * 3.0 + vec3(0.004, 0.012, 0.016)) * acc * phase * uRays * 0.08;
       }
       vec3 outc = c.rgb * T + veil * (1.0 - T) + rays;
       float lum = dot(outc, vec3(0.2126, 0.7152, 0.0722));

@@ -318,7 +318,7 @@ export function underwaterAtmosphere(
 
 /** Particle pool in use per tier, by floor mode: blue water is mostly particulate, so it gets more. */
 export function particleCount(tier: 'full' | 'mid' | 'lite', blue: boolean): number {
-  const table = blue ? { full: 900, mid: 480, lite: 240 } : { full: 420, mid: 0, lite: 0 };
+  const table = blue ? { full: 1500, mid: 800, lite: 400 } : { full: 600, mid: 0, lite: 0 };
   return table[tier];
 }
 
@@ -344,7 +344,7 @@ function vertexHash(x: number, y: number): number {
 const MAX_PLANTS = 1400;
 const MAX_HARD = 260;
 const MAX_WRECKS = 16;
-const MAX_PARTICLES = 900;
+const MAX_PARTICLES = 1500;
 
 export class UnderwaterSceneryLayer implements SceneryLayer {
   readonly object = new THREE.Group();
@@ -533,7 +533,7 @@ export class UnderwaterSceneryLayer implements SceneryLayer {
         time: frame.wallT,
         count,
         box: mode === 'blue' ? 90 : 60,
-        size: bio ? 0.42 : 0.3,
+        size: bio ? 0.26 : 0.17,
         color: [atm.snowTint[0] * gain, atm.snowTint[1] * gain, atm.snowTint[2] * gain],
         opacity: 0.9,
         drift: [Math.sin(rad) * drift, -Math.cos(rad) * drift],

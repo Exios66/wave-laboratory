@@ -27,7 +27,7 @@ void main() {
   gl_Position = projectionMatrix * mv;
   float dist = length(rel);
   float sz = uSize * (0.5 + aSeed.w);
-  gl_PointSize = clamp(sz * 420.0 / max(0.4, -mv.z), 1.5, 16.0);
+  gl_PointSize = clamp(sz * 420.0 / max(0.4, -mv.z), 1.5, 7.0);
   // Fade at the edge of the box, and above the surface.
   vFade = (1.0 - smoothstep(box * 0.32, box * 0.5, dist)) * step(world.y, -0.3);
 }
