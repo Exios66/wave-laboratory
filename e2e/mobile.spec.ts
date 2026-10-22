@@ -39,6 +39,18 @@ test.describe('mobile layout', () => {
     expect(errors).toEqual([]);
   });
 
+  test('underwater view renders on a phone without errors', async ({ page }) => {
+    const errors = trackErrors(page);
+    await ready(page);
+    const underwater = page.getByRole('radio', { name: 'Underwater' });
+    await underwater.click();
+    await expect(underwater).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByText(/^Underwater · \d+\.\d m$/)).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(1500);
+    await expectNoHorizontalScroll(page);
+    expect(errors).toEqual([]);
+  });
+
   test('switches panels and edits a vessel with touch', async ({ page }) => {
     await ready(page);
     const panels = page.getByRole('tablist', { name: 'Panels' });
