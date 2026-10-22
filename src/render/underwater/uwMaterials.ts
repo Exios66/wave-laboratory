@@ -105,7 +105,7 @@ uniform float uUwSway;`,
   float uwUp = smoothstep(0.25, 0.85, abs(uwN.y));
   float uwFade = exp(-uUwKd.g * 2.2 * uwDepth);
   float uwC = uwCaustic(vUwWorld.xz * 0.28, uUwTime * 0.5);
-  totalEmissiveRadiance += diffuseColor.rgb * uwC * uUwCaustic * uwFade * uwUp * 1.8;
+  totalEmissiveRadiance += diffuseColor.rgb * uwC * uUwCaustic * uwFade * uwUp * 0.9;
 }`,
       );
   };

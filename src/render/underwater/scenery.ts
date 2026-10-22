@@ -195,7 +195,7 @@ export function underwaterFeaturesInCell(
   const cx = (ix + 0.5) * UW_CELL;
   const cy = (iy + 0.5) * UW_CELL;
   // Shallow reef flats favour coral over kelp.
-  const biome = biomeNoise(cx / 200, cy / 200) - (cellFloor < 10 ? 0.3 : 0);
+  const biome = biomeNoise(cx / 200, cy / 200) - (cellFloor < 6 ? 0.3 : 0);
   const push = (
     kind: UnderwaterFeatureKind,
     tag: string,
@@ -219,7 +219,7 @@ export function underwaterFeaturesInCell(
     'grass',
     cx,
     cy,
-    9 + Math.floor(rnd() * 8),
+    (cellFloor < 18 ? 20 : 12) + Math.floor(rnd() * 10),
     UW_CELL * 0.5,
     0.8 + 0.5 * rnd(),
     seed ^ 0x2d,
@@ -237,7 +237,7 @@ export function underwaterFeaturesInCell(
       0.9 + 0.45 * rnd(),
       seed,
     );
-  } else if (rnd() < 0.3) {
+  } else if (rnd() < (cellFloor < 18 ? 0.7 : 0.3)) {
     push(
       'kelp',
       'kelp',
@@ -250,7 +250,7 @@ export function underwaterFeaturesInCell(
     );
   }
   // Rocks.
-  if (rnd() < 0.55) {
+  if (rnd() < (cellFloor < 18 ? 0.95 : 0.55)) {
     push(
       'rock',
       'rock',
@@ -263,7 +263,7 @@ export function underwaterFeaturesInCell(
     );
   }
   // Coral: reefs where the biome is low, the odd head elsewhere.
-  if (rnd() < (biome < 0.4 ? (cellFloor < 10 ? 0.85 : 0.55) : 0.12)) {
+  if (rnd() < (biome < 0.4 ? (cellFloor < 10 ? 0.85 : 0.55) : cellFloor < 18 ? 0.5 : 0.12)) {
     push(
       'coral',
       'coral',
@@ -348,7 +348,7 @@ export function seabedColor(n: number, noise: number, out: [number, number, numb
   const rocky = smoothstep(-0.35, -0.85, n);
   const silt = smoothstep(0.15, 0.95, n);
   const patch = 0.85 + 0.3 * noise;
-  const sand: [number, number, number] = [0.72, 0.64, 0.46];
+  const sand: [number, number, number] = [0.6, 0.53, 0.38];
   const siltC: [number, number, number] = [0.36, 0.34, 0.28];
   const rockC: [number, number, number] = [0.34, 0.33, 0.35];
   for (let c = 0; c < 3; c++) {
