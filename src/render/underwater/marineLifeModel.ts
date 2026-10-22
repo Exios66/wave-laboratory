@@ -27,7 +27,7 @@ export const MARINE_SPECIES: readonly MarineSpecies[] = [
   'shark',
 ];
 
-export const MARINE_CELL = 120;
+export const MARINE_CELL = 45;
 /** Schools whose home is further than this from the camera [m] are not drawn. */
 export const MARINE_RANGE = 220;
 const MARINE_SALT = 0x7f3a91c5;
@@ -143,32 +143,32 @@ export function marineSchoolsInCell(ix: number, iy: number): SchoolSpec[] {
     });
   };
 
-  if (rnd() < 0.85) {
-    const rx = 14 + 22 * rnd();
-    const ry = 14 + 22 * rnd();
-    add('baitfish', 24 + Math.floor(rnd() * 40), {
+  if (rnd() < 0.8) {
+    const rx = 8 + 14 * rnd();
+    const ry = 8 + 14 * rnd();
+    add('baitfish', 10 + Math.floor(rnd() * 16), {
       rx,
       ry,
       w: orbitSpeed(rnd, rx, ry, 1.2, 2.2),
       spread: 2.5 + 2 * rnd(),
       vspread: 1.5 + rnd(),
-      scale: 0.45 + 0.2 * rnd(),
+      scale: 0.65 + 0.25 * rnd(),
     });
   }
-  if (rnd() < 0.4) {
-    const rx = 40 + 50 * rnd();
-    const ry = 40 + 50 * rnd();
+  if (rnd() < 0.1) {
+    const rx = 25 + 35 * rnd();
+    const ry = 25 + 35 * rnd();
     add('tuna', 3 + Math.floor(rnd() * 4), {
       rx,
       ry,
       w: orbitSpeed(rnd, rx, ry, 3, 5),
       spread: 4 + 3 * rnd(),
       vspread: 2,
-      scale: 1.3 + 0.5 * rnd(),
+      scale: 1.8 + 0.6 * rnd(),
     });
   }
-  if (rnd() < 0.14) {
-    const rx = 60 + 60 * rnd();
+  if (rnd() < 0.03) {
+    const rx = 40 + 60 * rnd();
     const ry = 40 + 60 * rnd();
     add('ray', 1 + Math.floor(rnd() * 2), {
       rx,
@@ -176,10 +176,10 @@ export function marineSchoolsInCell(ix: number, iy: number): SchoolSpec[] {
       w: orbitSpeed(rnd, rx, ry, 1.6, 2.4),
       spread: 7,
       vspread: 1,
-      scale: 2 + 0.8 * rnd(),
+      scale: 3.5 + 1 * rnd(),
     });
   }
-  if (rnd() < 0.07) {
+  if (rnd() < 0.015) {
     const rx = 70 + 60 * rnd();
     const ry = 60 + 60 * rnd();
     add('shark', 1, {
@@ -188,17 +188,17 @@ export function marineSchoolsInCell(ix: number, iy: number): SchoolSpec[] {
       w: orbitSpeed(rnd, rx, ry, 2, 3),
       spread: 0,
       vspread: 1.5,
-      scale: 2.6 + 1.2 * rnd(),
+      scale: 3.5 + 1.2 * rnd(),
     });
   }
-  if (rnd() < 0.5) {
+  if (rnd() < 0.25) {
     add('jelly', 3 + Math.floor(rnd() * 5), {
       rx: 6 + 6 * rnd(),
       ry: 6 + 6 * rnd(),
       w: 0.04 + 0.03 * rnd(),
       spread: 8,
       vspread: 3,
-      scale: 0.9 + 0.5 * rnd(),
+      scale: 1.2 + 0.6 * rnd(),
     });
   }
   return out;
@@ -222,7 +222,7 @@ export function reefSchoolForSite(site: ReefSite): SchoolSpec {
     phase: rnd() * TAU,
     spread: 2.5 + 2 * rnd(),
     vspread: 0.8,
-    scale: 0.3 + 0.12 * rnd(),
+    scale: 0.5 + 0.2 * rnd(),
     seed: Math.floor(rnd() * 4294967296) >>> 0,
   };
 }
