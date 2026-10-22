@@ -215,7 +215,7 @@ export class MarineLifeLayer implements SceneryLayer {
 
     const lambert = (kind: Wiggle, freq: number, amp: number): THREE.MeshLambertMaterial => {
       const m = new THREE.MeshLambertMaterial({
-        emissive: new THREE.Color(0x1c4658),
+        emissive: new THREE.Color(0x3a7f99),
         side: kind === 'wing' ? THREE.DoubleSide : THREE.FrontSide,
       });
       animate(m, kind, this.time, freq, amp);
@@ -349,14 +349,14 @@ export class MarineLifeLayer implements SceneryLayer {
         for (let i = 0; i < s.count; i++, o += 16) {
           fishPose(s, i, t, seabedDepthAt, frame.hs, pose);
           const yaw = upright ? s.phase : pose.yaw;
-          const c = Math.cos(yaw) * pose.scale;
-          const sn = Math.sin(yaw) * pose.scale;
+          const c = Math.cos(yaw) * pose.scale * 6;
+          const sn = Math.sin(yaw) * pose.scale * 6;
           arr[o] = c;
           arr[o + 1] = 0;
           arr[o + 2] = -sn;
           arr[o + 3] = 0;
           arr[o + 4] = 0;
-          arr[o + 5] = pose.scale;
+          arr[o + 5] = pose.scale * 6;
           arr[o + 6] = 0;
           arr[o + 7] = 0;
           arr[o + 8] = sn;

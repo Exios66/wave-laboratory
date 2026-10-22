@@ -143,19 +143,19 @@ export function marineSchoolsInCell(ix: number, iy: number): SchoolSpec[] {
     });
   };
 
-  if (rnd() < 0.6) {
-    const rx = 18 + 30 * rnd();
-    const ry = 18 + 30 * rnd();
+  if (rnd() < 0.85) {
+    const rx = 14 + 22 * rnd();
+    const ry = 14 + 22 * rnd();
     add('baitfish', 24 + Math.floor(rnd() * 40), {
       rx,
       ry,
       w: orbitSpeed(rnd, rx, ry, 1.2, 2.2),
-      spread: 3 + 3 * rnd(),
+      spread: 2.5 + 2 * rnd(),
       vspread: 1.5 + rnd(),
-      scale: 0.22 + 0.1 * rnd(),
+      scale: 0.45 + 0.2 * rnd(),
     });
   }
-  if (rnd() < 0.3) {
+  if (rnd() < 0.4) {
     const rx = 40 + 50 * rnd();
     const ry = 40 + 50 * rnd();
     add('tuna', 3 + Math.floor(rnd() * 4), {
@@ -164,7 +164,7 @@ export function marineSchoolsInCell(ix: number, iy: number): SchoolSpec[] {
       w: orbitSpeed(rnd, rx, ry, 3, 5),
       spread: 4 + 3 * rnd(),
       vspread: 2,
-      scale: 0.9 + 0.4 * rnd(),
+      scale: 1.3 + 0.5 * rnd(),
     });
   }
   if (rnd() < 0.14) {
@@ -198,7 +198,7 @@ export function marineSchoolsInCell(ix: number, iy: number): SchoolSpec[] {
       w: 0.04 + 0.03 * rnd(),
       spread: 8,
       vspread: 3,
-      scale: 0.45 + 0.35 * rnd(),
+      scale: 0.9 + 0.5 * rnd(),
     });
   }
   return out;
@@ -222,7 +222,7 @@ export function reefSchoolForSite(site: ReefSite): SchoolSpec {
     phase: rnd() * TAU,
     spread: 2.5 + 2 * rnd(),
     vspread: 0.8,
-    scale: 0.16 + 0.08 * rnd(),
+    scale: 0.3 + 0.12 * rnd(),
     seed: Math.floor(rnd() * 4294967296) >>> 0,
   };
 }

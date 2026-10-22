@@ -1337,6 +1337,7 @@ export class LabRenderer implements LabRendererApi {
       hostiles: this.ambience.hostiles,
     };
     for (const layer of this.layers) layer.update(frame);
+    (window as unknown as Record<string, unknown>).__marine = { v: this.marineLife.object.visible, calls: this.marineLife.activeDrawCalls, n: this.marineLife.activeInstances, tier: frame.tier, uw: frame.underwater, cam: frame.camera.position.toArray(), kids: this.marineLife.object.children.map((c) => (c as THREE.InstancedMesh).count) };
   }
 
   /** Ship wakes along each hull's track (visual only; see scene/wakes.ts). */
