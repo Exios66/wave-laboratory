@@ -16,7 +16,7 @@
 import { mulberry32 } from '../../core/rng';
 import type { SceneryTier } from '../scenery/types';
 
-export type MarineSpecies = 'baitfish' | 'reef' | 'tuna' | 'ray' | 'jelly';
+export type MarineSpecies = 'baitfish' | 'reef' | 'tuna' | 'ray' | 'jelly' | 'shark';
 
 export const MARINE_SPECIES: readonly MarineSpecies[] = [
   'baitfish',
@@ -24,6 +24,7 @@ export const MARINE_SPECIES: readonly MarineSpecies[] = [
   'tuna',
   'ray',
   'jelly',
+  'shark',
 ];
 
 export const MARINE_CELL = 120;
@@ -45,7 +46,10 @@ export interface MarineBudget {
 }
 
 export const MARINE_BUDGET: Record<SceneryTier, MarineBudget> = {
-  full: { drawCalls: 5, caps: { baitfish: 320, reef: 160, tuna: 40, ray: 6, jelly: 24 } },
+  full: {
+    drawCalls: 6,
+    caps: { baitfish: 320, reef: 160, tuna: 40, ray: 6, jelly: 24, shark: 2 },
+  },
   mid: { drawCalls: 3, caps: { baitfish: 150, reef: 80, jelly: 12 } },
   lite: { drawCalls: 1, caps: { jelly: 8 } },
 };
@@ -175,6 +179,18 @@ export function marineSchoolsInCell(ix: number, iy: number): SchoolSpec[] {
       scale: 2 + 0.8 * rnd(),
     });
   }
+  if (rnd() < 0.07) {
+    const rx = 70 + 60 * rnd();
+    const ry = 60 + 60 * rnd();
+    add('shark', 1, {
+      rx,
+      ry,
+      w: orbitSpeed(rnd, rx, ry, 2, 3),
+      spread: 0,
+      vspread: 1.5,
+      scale: 2.6 + 1.2 * rnd(),
+    });
+  }
   if (rnd() < 0.5) {
     add('jelly', 3 + Math.floor(rnd() * 5), {
       rx: 6 + 6 * rnd(),
@@ -255,6 +271,7 @@ export function planMarineLife(
     tuna: 0,
     ray: 0,
     jelly: 0,
+    shark: 0,
   };
   const schools: SchoolSpec[] = [];
   for (const { s } of cand) {

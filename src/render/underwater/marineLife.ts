@@ -7,7 +7,7 @@
  * frame with no allocation. Tails, wings and bells animate in the vertex shader. The plan (which
  * schools occupy which instance slots) is rebuilt only when the camera has moved a fair way.
  *
- * Draw-call budget (`MARINE_BUDGET`): full 5, mid 3, lite 1 (jellyfish only). Surfaced
+ * Draw-call budget (`MARINE_BUDGET`): full 6, mid 3, lite 1 (jellyfish only). Surfaced
  * (`!frame.underwater`) the group is hidden and nothing updates.
  *
  * The absorption pass fades red first, so the palettes lean blue, green and silver, with a small
@@ -160,6 +160,12 @@ const STYLE: Record<MarineSpecies, SpeciesStyle> = {
       [0.3, 0.45, 0.55],
     ],
   },
+  shark: {
+    palette: [
+      [0.45, 0.55, 0.65],
+      [0.5, 0.58, 0.6],
+    ],
+  },
   jelly: {
     palette: [
       [0.7, 0.85, 1.0],
@@ -220,6 +226,7 @@ export class MarineLifeLayer implements SceneryLayer {
       { sp: 'baitfish', geo: fishGeo, mat: lambert('tail', 11, 0.1) },
       { sp: 'reef', geo: fishGeo, mat: lambert('tail', 8, 0.1) },
       { sp: 'tuna', geo: fishGeo, mat: lambert('tail', 6, 0.08) },
+      { sp: 'shark', geo: fishGeo, mat: lambert('tail', 3.5, 0.07) },
       { sp: 'ray', geo: rayGeo, mat: lambert('wing', 1.6, 0.4) },
       { sp: 'jelly', geo: jellyGeo, mat: this.jellyMat },
     ];
