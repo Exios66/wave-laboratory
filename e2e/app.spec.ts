@@ -327,6 +327,54 @@ test.describe('Wave Laboratory app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('top, follow and bridge cameras engage without errors and return to orbit', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    for (const name of ['Top', 'Follow', 'Bridge']) {
+      const radio = page.getByRole('radio', { name, exact: true });
+      await radio.click();
+      await expect(radio).toHaveAttribute('aria-checked', 'true');
+      // Let a few frames render in the new mode (and the bridge hide its own glass).
+      await page.waitForTimeout(600);
+    }
+    await page.screenshot({ path: 'test-results/bridge-view.png' });
+    await page.getByRole('radio', { name: 'Orbit', exact: true }).click();
+    await expect(page.getByRole('radio', { name: 'Orbit', exact: true })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(errors).toEqual([]);
+  });
+
+  test('adds a sloop yacht and rides it with the follow and bridge cameras', async ({ page }) => {
+    test.setTimeout(90_000);
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    const scene = page.getByRole('navigation', { name: 'Scene' });
+    await scene.getByRole('button', { name: 'Add vessel' }).click();
+    await page.getByRole('menuitem', { name: /Sloop yacht/ }).click();
+    await waitForSimulation(page);
+    const yacht = scene.getByRole('button', { name: /^Sloop yacht \d/ });
+    await expect(yacht).toBeVisible();
+    await yacht.click();
+    await expect(page.getByRole('heading', { name: 'Vessel', exact: true })).toBeVisible();
+    await page
+      .getByRole('button', { name: /^Follow/ })
+      .first()
+      .click();
+    await page.waitForTimeout(1500);
+    await page.screenshot({ path: 'test-results/sloop-follow.png' });
+    const bridge = page.getByRole('radio', { name: 'Bridge', exact: true });
+    await bridge.click();
+    await expect(bridge).toHaveAttribute('aria-checked', 'true');
+    await page.waitForTimeout(1000);
+    expect(errors).toEqual([]);
+  });
+
   test('underwater camera shows a live depth badge and returns to orbit', async ({ page }) => {
     const errors = trackErrors(page);
     await page.goto('/');

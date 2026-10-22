@@ -21,7 +21,8 @@ oceanographic wave spectra, drop ships into it, and measure how they handle the 
   instantaneous wetted hull (hydrostatics + Froude–Krylov), sampled on up to 280 water
   columns, plus added mass, radiation and viscous damping, propulsion, rudder and autopilot.
   Wind acts on every hull through its frontal and side areas, and the square-rigged pirate ship
-  sails on the wind alone, bracing and reefing as the wind changes. The fleet runs from a
+  sails on the wind alone, bracing and reefing as the wind changes. The Bermuda-rigged sloop yacht trims its main and jib to the apparent wind, heels,
+  makes leeway that its fin keel resists and points about 40° off the true wind. The fleet runs from a
   lifeboat to a VLCC oil tanker and a Nimitz-class aircraft carrier. Slamming, green water and
   capsize are detected, and a collision or heavy slam can breach a watertight compartment that
   floods through the hole, costing stability (free surface) and eventually sinking the ship. A ship can drop anchor (or start moored to a buoy): an elastic
