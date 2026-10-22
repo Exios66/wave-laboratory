@@ -41,7 +41,20 @@ export interface ReefSource {
   x: number;
   y: number;
   radius: number;
+  /** 'seamount': a submerged pinnacle reef with no island above it (`radius` is the crest radius). */
+  kind?: 'island' | 'seamount';
 }
+
+/**
+ * The home reef: a submerged seamount under the default start, so the first dive has a floor,
+ * kelp, coral, rocks and the Avenger. Scenery only: physics keeps `env.depth`, and nothing above
+ * water marks it (it is no island, so islands, traffic and the navigation clear zones ignore it).
+ */
+export const HOME_REEF: ReefSource = { x: 0, y: 0, radius: 250, kind: 'seamount' };
+/** Crest depth range [m]: the shallowest point at the centre, the rim of the crest. */
+export const HOME_REEF_CREST = [8, 14] as const;
+/** The seamount's flanks shelve at 1:6. */
+export const HOME_REEF_SLOPE = 1 / 6;
 
 /** Outer edge of the lagoon as a multiple of the island radius (matches `ISLAND_FOOTPRINT`). */
 export const REEF_LAGOON = 1.8;
@@ -58,6 +71,15 @@ export const REEF_INFLUENCE = 600;
  * {@link REEF_SLOPE}. Relief is added by the caller.
  */
 export function reefDepthAt(x: number, y: number, reef: ReefSource): number | null {
+  if (reef.kind === 'seamount') {
+    const d = Math.hypot(x - reef.x, y - reef.y);
+    if (d > reef.radius + REEF_INFLUENCE) return null;
+    if (d <= reef.radius) {
+      const t = d / reef.radius;
+      return HOME_REEF_CREST[0] + (HOME_REEF_CREST[1] - HOME_REEF_CREST[0]) * t * t;
+    }
+    return HOME_REEF_CREST[1] + HOME_REEF_SLOPE * (d - reef.radius);
+  }
   const lagoon = reef.radius * REEF_LAGOON;
   const d = Math.hypot(x - reef.x, y - reef.y);
   const edge = d - lagoon;

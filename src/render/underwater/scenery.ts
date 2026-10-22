@@ -30,6 +30,7 @@ import type { SceneryFrame, SceneryLayer } from '../scenery/types';
 import {
   floorDepthAt,
   floorModeAt,
+  HOME_REEF,
   REEF_INFLUENCE,
   type ReefSource,
   SHELF_MAX_DEPTH,
@@ -103,9 +104,29 @@ export function seabedDepthAt(
   return floorDepthAt(x, y, envDepth, reefs) ?? Math.min(envDepth, 120);
 }
 
-/** Island reefs near world `(x, y)`: the islands whose shelf can shape the floor in view. */
-export function reefsNear(x: number, y: number): ReefSource[] {
-  return islandsNear(x, y, REEF_INFLUENCE + 200).map((i) => ({ x: i.x, y: i.y, radius: i.radius }));
+/**
+ * Reefs near world `(x, y)` that can shape the floor in view: the islands' shelves (`islands`) and
+ * the submerged home reef under the default start (`home`, on whenever the underwater scenery is).
+ */
+export function reefsNear(
+  x: number,
+  y: number,
+  opts: { islands?: boolean; home?: boolean } = {},
+): ReefSource[] {
+  const { islands = true, home = true } = opts;
+  const out: ReefSource[] = [];
+  if (islands) {
+    for (const i of islandsNear(x, y, REEF_INFLUENCE + 200)) {
+      out.push({ x: i.x, y: i.y, radius: i.radius });
+    }
+  }
+  if (
+    home &&
+    Math.hypot(x - HOME_REEF.x, y - HOME_REEF.y) < HOME_REEF.radius + REEF_INFLUENCE + 250
+  ) {
+    out.push(HOME_REEF);
+  }
+  return out;
 }
 
 /** Tip sway amplitude [rad] of a kelp blade for a significant wave height `hs`. */
@@ -372,6 +393,7 @@ export class UnderwaterSceneryLayer implements SceneryLayer {
   private reefX = Number.NaN;
   private reefY = Number.NaN;
   private reefVersion = 0;
+  private reefIslands = false;
 
   private readonly tmpM = new THREE.Matrix4();
   private readonly tmpP = new THREE.Vector3();
@@ -471,20 +493,18 @@ export class UnderwaterSceneryLayer implements SceneryLayer {
     const camZ = frame.camera.position.z;
     const worldX = camX;
     const worldY = -camZ;
-    // Island reefs lift a floor out of deep water around each island (only with islands on).
-    if (!frame.islands) {
-      if (this.reefs.length > 0) {
-        this.reefs = [];
-        this.reefVersion++;
-      }
-      this.reefX = Number.NaN;
-    } else if (
+    // Reefs lift a floor out of deep water: the home reef under the start (always), and each
+    // island's shelf (with islands on). Refreshed as the camera moves or the islands toggle.
+    const islandsOn = frame.islands === true;
+    if (
       Number.isNaN(this.reefX) ||
+      islandsOn !== this.reefIslands ||
       Math.hypot(worldX - this.reefX, worldY - this.reefY) > 20
     ) {
       this.reefX = worldX;
       this.reefY = worldY;
-      this.reefs = reefsNear(worldX, worldY);
+      this.reefIslands = islandsOn;
+      this.reefs = reefsNear(worldX, worldY, { islands: islandsOn });
       this.reefVersion++;
     }
     const reefs = this.reefs;
@@ -525,7 +545,7 @@ export class UnderwaterSceneryLayer implements SceneryLayer {
     this.particles.points.visible = count > 0;
     if (count > 0) {
       const bio = atm.bioStrength > 0.25;
-      const gain = bio ? 2.6 : 0.5 + 1.1 * frame.daylight;
+      const gain = bio ? 0.85 : 0.5 + 1.1 * frame.daylight;
       const rad = (frame.windDirectionDeg * Math.PI) / 180;
       const drift = 0.05 + 0.012 * frame.windSpeed;
       this.particles.update({

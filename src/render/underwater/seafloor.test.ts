@@ -7,6 +7,9 @@ import {
   depthGrade,
   floorDepthAt,
   floorModeAt,
+  HOME_REEF,
+  HOME_REEF_CREST,
+  HOME_REEF_SLOPE,
   maxCameraDepth,
   maxCameraDepthAt,
   REEF_INFLUENCE,
@@ -147,5 +150,43 @@ describe('island reefs in deep water', () => {
     expect(cam).toBeGreaterThanOrEqual(CAMERA_MIN_DEPTH);
     expect(cam).toBeLessThan(floorDepthAt(x, reef.y, 4000, [reef])!);
     expect(maxCameraDepthAt(0, 0, 4000, [reef])).toBe(CAMERA_MAX_DEPTH);
+  });
+});
+
+describe('home reef (submerged seamount at the origin)', () => {
+  it('gives a floor at the origin in the default 4000 m sea, with a crest of 8 to 14 m', () => {
+    const centre = floorDepthAt(0, 0, 4000, [HOME_REEF])!;
+    expect(centre).toBeGreaterThanOrEqual(HOME_REEF_CREST[0] - 1);
+    expect(centre).toBeLessThanOrEqual(HOME_REEF_CREST[0] + 1);
+    let min = Infinity;
+    let max = -Infinity;
+    for (let a = 0; a < 360; a += 5) {
+      for (const r of [0, 60, 120, 180, 240]) {
+        const d = floorDepthAt(r * Math.cos(a), r * Math.sin(a), 4000, [HOME_REEF])!;
+        min = Math.min(min, d);
+        max = Math.max(max, d);
+      }
+    }
+    expect(min).toBeGreaterThanOrEqual(HOME_REEF_CREST[0] - 2);
+    expect(max).toBeLessThanOrEqual(HOME_REEF_CREST[1] + 2);
+    expect(floorModeAt(0, 0, 4000, [HOME_REEF])).toBe('shelf');
+  });
+
+  it('shelves at 1:6 and is blue water beyond about 700 m', () => {
+    const rim = HOME_REEF.radius;
+    expect(reefDepthAt(rim + 60, 0, HOME_REEF)).toBeCloseTo(
+      HOME_REEF_CREST[1] + 60 * HOME_REEF_SLOPE,
+      9,
+    );
+    expect(reefDepthAt(rim + REEF_INFLUENCE + 1, 0, HOME_REEF)).toBeNull();
+    expect(floorDepthAt(900, 0, 4000, [HOME_REEF])).toBeNull();
+    expect(floorModeAt(900, 0, 4000, [HOME_REEF])).toBe('blue');
+  });
+
+  it('clamps the camera above the crest', () => {
+    const cam = maxCameraDepthAt(0, 0, 4000, [HOME_REEF]);
+    expect(cam).toBeLessThan(floorDepthAt(0, 0, 4000, [HOME_REEF])!);
+    expect(cam).toBeGreaterThanOrEqual(CAMERA_MIN_DEPTH);
+    expect(cam).toBeLessThan(HOME_REEF_CREST[0]);
   });
 });

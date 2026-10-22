@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import type { SceneryFrame } from '../scenery/types';
+import { HOME_REEF, HOME_REEF_CREST } from './seafloor';
 import {
   kelpSwayAngle,
   reefsNear,
@@ -134,20 +135,29 @@ describe('UnderwaterSceneryLayer', () => {
 
 describe('island reef shelves in deep water', () => {
   it('puts flora, rocks and coral on the shelf around an island and nothing in open sea', () => {
-    const reefs = reefsNear(500, 800);
+    const reefs = reefsNear(500, 800, { home: false });
     expect(reefs.length).toBeGreaterThan(0);
     const here = underwaterFeaturesNear(reefs[0]!.x, reefs[0]!.y, 200, 4000, reefs);
     expect(here.length).toBeGreaterThan(5);
     expect(here.some((f) => f.kind === 'coral' || f.kind === 'rock')).toBe(true);
     for (const f of here) expect(f.depth).toBeLessThanOrEqual(60);
-    // Far from every island the deep sea stays blue water.
-    expect(underwaterFeaturesNear(0, 0, 130, 4000, reefsNear(0, 0))).toEqual([]);
+    // Far from every island and the home reef the deep sea stays blue water.
+    let open = 0;
+    for (let a = 0; a < 360; a += 3) {
+      const x = 3000 * Math.cos(a);
+      const y = 3000 * Math.sin(a);
+      const near = reefsNear(x, y);
+      if (near.length > 0) continue;
+      open++;
+      expect(underwaterFeaturesNear(x, y, 130, 4000, near)).toEqual([]);
+    }
+    expect(open).toBeGreaterThan(0);
     // Islands off: no reefs, so no features even beside an island.
     expect(underwaterFeaturesNear(reefs[0]!.x, reefs[0]!.y, 200, 4000, [])).toEqual([]);
   });
 
   it('draws the floor layers near a reef when islands are on, and only particulate otherwise', () => {
-    const reefs = reefsNear(500, 800);
+    const reefs = reefsNear(500, 800, { home: false });
     const r = reefs[0]!;
     const cam = new THREE.PerspectiveCamera();
     cam.position.set(r.x + r.radius * 1.8 + 40, -3, -r.y);
@@ -157,6 +167,31 @@ describe('island reef shelves in deep water', () => {
     expect(layer.activeDrawCalls).toBeLessThanOrEqual(UNDERWATER_BUDGET.full);
     layer.update(makeFrame({ camera: cam, waterDepth: 4000, islands: false, tier: 'full' }));
     expect(layer.activeDrawCalls).toBe(1);
+    layer.dispose();
+  });
+});
+
+describe('home reef under the default start', () => {
+  it('has flora, rocks, coral and the Avenger site on the seamount in the default 4000 m sea', () => {
+    const reefs = reefsNear(0, 0, { islands: false });
+    expect(reefs).toContain(HOME_REEF);
+    const near = underwaterFeaturesNear(0, 0, 200, 4000, reefs);
+    const kinds = new Set(near.map((f) => f.kind));
+    for (const k of ['kelp', 'grass', 'rock', 'coral', 'wreck-avenger'] as const) {
+      expect(kinds.has(k)).toBe(true);
+    }
+    for (const f of near) expect(f.depth).toBeLessThanOrEqual(HOME_REEF_CREST[1] + 3);
+  });
+
+  it('draws the floor layers at the default start with islands off, within budget', () => {
+    const layer = new UnderwaterSceneryLayer();
+    for (const tier of ['full', 'mid', 'lite'] as const) {
+      layer.update(makeFrame({ waterDepth: 4000, islands: false, tier }));
+      expect(layer.activeDrawCalls).toBeGreaterThanOrEqual(1);
+      expect(layer.activeDrawCalls).toBeLessThanOrEqual(UNDERWATER_BUDGET[tier]);
+    }
+    layer.update(makeFrame({ waterDepth: 4000, islands: false, tier: 'full' }));
+    expect(layer.activeDrawCalls).toBeGreaterThanOrEqual(4);
     layer.dispose();
   });
 });

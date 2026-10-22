@@ -1866,7 +1866,9 @@ export class LabRenderer implements LabRendererApi {
     // Over an island reef the floor is shallower than the open-sea clamp: keep the eye above it.
     const ex = tx + reach * sy;
     const ez = tz + reach * cy;
-    const reefs = this.ambience.islands ? reefsNear(ex, -ez) : [];
+    const reefs = this.ambience.underwater
+      ? reefsNear(ex, -ez, { islands: this.ambience.islands })
+      : [];
     const y = -Math.min(this.uwDepth, maxCameraDepthAt(ex, -ez, this.env?.depth ?? 4000, reefs));
     this.orbitCentre.set(tx, 0, tz);
     this.camera.up.set(0, 1, 0);
