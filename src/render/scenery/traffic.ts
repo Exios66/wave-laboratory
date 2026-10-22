@@ -14,10 +14,16 @@
  * Placement & routing live in pure functions (`trafficInCell`, `trafficNear`, `structuresInCell`,
  * `structuresNear`, `stepHostileEncounter`) so they are unit-tested in Node without WebGL.
  *
- * Rendering is one vertex-coloured `InstancedMesh` per hull class and per structure kind (10 draw
- * calls, each empty unless that class is on screen) plus a single shared additive point pass for
- * night navigation lights, deck lamps, rig flares and beacons, respecting the `TRAFFIC_BUDGET` /
- * `STRUCTURE_BUDGET` caps (`full`: 12 hulls / 3 rig cells, `mid`: 8 / 2, `lite`: 4 / 0).
+ * Rendering is one vertex-coloured `InstancedMesh` per hull class and per structure kind (7 + 3;
+ * the renderer skips empty ones, so a typical frame draws a handful) plus a single shared additive
+ * point pass for night navigation lights, deck lamps, rig flares and beacons, respecting the
+ * `TRAFFIC_BUDGET` / `STRUCTURE_BUDGET` caps (`full`: 12 hulls / 3 rig cells, `mid`: 8 / 2,
+ * `lite`: 4 / 0). The tier comes from the device-capped quality (`LabRenderer`), see AMBIENCE.md.
+ *
+ * Routing guarantees (all unit-tested): a route is a pure function of the cell and time (calm only
+ * gates visibility, never time), stays inside its own grid cell, keeps clear of the origin zone,
+ * islands and rigs, and is continuous in position and heading. Fishing fleets share one circle at
+ * even phase spacing and lanes are racetracks with rounded ends, so hulls never overlap.
  *
  * Coordinates: world (x east, y north, z up) maps to Three.js as (x, z, −y).
  */
@@ -149,11 +155,46 @@ const CLASS_DIMS: Record<
   pirate: { length: 34, beam: 9, height: 28, kn: 9.5 },
 };
 
-/** Clear of origin and any island / lagoon within `margin` metres. */
+/** Clear of origin, any island / lagoon and any offshore structure within `margin` metres. */
 function clearWater(x: number, y: number, margin: number): boolean {
   if (Math.hypot(x, y) < TRAFFIC_CLEAR_RADIUS + margin) return false;
-  const near = islandsNear(x, y, margin + 80);
-  return near.length === 0;
+  if (islandsNear(x, y, margin + 80).length > 0) return false;
+  const sx = Math.floor(x / STRUCTURE_CELL);
+  const sy = Math.floor(y / STRUCTURE_CELL);
+  for (let iy = sy - 1; iy <= sy + 1; iy++) {
+    for (let ix = sx - 1; ix <= sx + 1; ix++) {
+      const cell = structuresInCell(ix, iy);
+      if (!cell) continue;
+      for (const it of cell.items) {
+        if (Math.hypot(it.x - x, it.y - y) < margin + 40) return false;
+      }
+    }
+  }
+  return true;
+}
+
+/** Turn radius of the rounded ends of a shipping lane [m] (half the lane separation). */
+export const LANE_TURN_RADIUS = 80;
+/** Extra clearance kept between a ship's route and its grid cell edge [m]. */
+const CELL_EDGE_MARGIN = 20;
+
+/** Distance from `(x, y)` to the nearest edge of its traffic cell [m]. */
+function cellEdgeDistance(x: number, y: number): number {
+  const fx = x / TRAFFIC_CELL - Math.floor(x / TRAFFIC_CELL);
+  const fy = y / TRAFFIC_CELL - Math.floor(y / TRAFFIC_CELL);
+  return Math.min(fx, 1 - fx, fy, 1 - fy) * TRAFFIC_CELL;
+}
+
+/** True when the whole racetrack lane (end to end, `span` long) around `(cx, cy)` is open water. */
+function laneClear(cx: number, cy: number, heading: number, span: number, margin: number): boolean {
+  const c = Math.cos(heading);
+  const s = Math.sin(heading);
+  const n = 8;
+  for (let k = 0; k <= n; k++) {
+    const u = (k / n - 0.5) * span;
+    if (!clearWater(cx + c * u, cy + s * u, margin)) return false;
+  }
+  return true;
 }
 
 /**
@@ -176,26 +217,28 @@ function buildTrafficCell(ix: number, iy: number): TrafficShipSpec[] {
   const roll = rnd();
   const out: TrafficShipSpec[] = [];
   if (roll < 0.42) {
-    // Fishing fleet ground: 2–3 trawlers circling or dredging.
+    // Fishing fleet ground: 2-3 trawlers sharing one working circle. Same centre, radius,
+    // speed and sense, evenly spaced in phase, so hulls keep a constant separation of at
+    // least 2*pi*r/count (> 200 m) and can never overlap each other.
     const count = 2 + (rnd() < 0.45 ? 1 : 0);
+    const r = 110 + rnd() * 90;
+    const turnDir: 1 | -1 = rnd() < 0.5 ? 1 : -1;
+    const d = CLASS_DIMS.trawler;
+    const speed = d.kn * KN * (0.85 + 0.3 * rnd());
+    const phase0 = rnd() * Math.PI * 2;
+    if (!clearWater(cx, cy, r + d.length)) return [];
     for (let k = 0; k < count; k++) {
-      const a = (k / count) * Math.PI * 2 + rnd() * 0.5;
-      const r = 110 + rnd() * 90;
-      const sx = cx + Math.cos(a) * r * 0.4;
-      const sy = cy + Math.sin(a) * r * 0.4;
-      if (!clearWater(sx, sy, 140)) continue;
-      const d = CLASS_DIMS.trawler;
       out.push({
         id: `trawler:${ix}:${iy}:${k}`,
         kind: 'trawler',
         pattern: 'orbit',
-        cx: sx,
-        cy: sy,
+        cx,
+        cy,
         span: r,
-        heading: a,
-        turnDir: rnd() < 0.5 ? 1 : -1,
-        speed: d.kn * KN * (0.85 + 0.3 * rnd()),
-        phase: rnd() * Math.PI * 2,
+        heading: phase0,
+        turnDir,
+        speed,
+        phase: phase0 + (k / count) * Math.PI * 2,
         length: d.length,
         beam: d.beam,
         height: d.height,
@@ -209,13 +252,15 @@ function buildTrafficCell(ix: number, iy: number): TrafficShipSpec[] {
   if (roll < 0.62) {
     // Patrol boat station round.
     const d = CLASS_DIMS.patrol;
+    const patrolSpan = 240 + rnd() * 140;
+    if (!clearWater(cx, cy, patrolSpan + d.length)) return [];
     out.push({
       id: `patrol:${ix}:${iy}`,
       kind: 'patrol',
       pattern: 'orbit',
       cx,
       cy,
-      span: 240 + rnd() * 140,
+      span: patrolSpan,
       heading: rnd() * Math.PI * 2,
       turnDir: rnd() < 0.5 ? 1 : -1,
       speed: d.kn * KN * (0.85 + 0.25 * rnd()),
@@ -231,17 +276,18 @@ function buildTrafficCell(ix: number, iy: number): TrafficShipSpec[] {
 
   // Deep-water lane: merchant cargo, cruise liner, oil tanker, or rare carrier group.
   const laneHeading = rnd() * Math.PI * 2;
-  const span = 650 + rnd() * 350;
-  const x0 = cx - Math.cos(laneHeading) * span * 0.5;
-  const y0 = cy - Math.sin(laneHeading) * span * 0.5;
-  const x1 = cx + Math.cos(laneHeading) * span * 0.5;
-  const y1 = cy + Math.sin(laneHeading) * span * 0.5;
-  if (!clearWater(x0, y0, 220) || !clearWater(x1, y1, 220)) return [];
-
+  const rawSpan = 650 + rnd() * 350;
   const laneRoll = rnd();
   const kind: TrafficKind =
     laneRoll < 0.48 ? 'cargo' : laneRoll < 0.72 ? 'liner' : laneRoll < 0.93 ? 'tanker' : 'carrier';
   const d = CLASS_DIMS[kind];
+  // The racetrack (and the carrier's escort station beside it) must stay inside this cell,
+  // clear of its edge by the hull's half length, so lanes of neighbouring cells never overlap.
+  const escortOffset = kind === 'carrier' ? 140 : 0;
+  const reach = cellEdgeDistance(cx, cy) - d.length * 0.5 - CELL_EDGE_MARGIN - escortOffset;
+  const span = Math.min(rawSpan, 2 * reach);
+  if (span * 0.5 - LANE_TURN_RADIUS < 40) return [];
+  if (!laneClear(cx, cy, laneHeading, span, 260 + escortOffset)) return [];
   out.push({
     id: `${kind}:${ix}:${iy}:0`,
     kind,
@@ -262,9 +308,9 @@ function buildTrafficCell(ix: number, iy: number): TrafficShipSpec[] {
   // Carrier flagship travels with a patrol escort.
   if (kind === 'carrier') {
     const ed = CLASS_DIMS.patrol;
-    const side = -Math.sin(laneHeading) * 140;
-    const sideY = Math.cos(laneHeading) * 140;
-    if (clearWater(cx + side, cy + sideY, 150)) {
+    const side = -Math.sin(laneHeading) * escortOffset;
+    const sideY = Math.cos(laneHeading) * escortOffset;
+    if (laneClear(cx + side, cy + sideY, laneHeading, span, 260)) {
       out.push({
         id: `escort:${ix}:${iy}:1`,
         kind: 'patrol',
@@ -274,8 +320,8 @@ function buildTrafficCell(ix: number, iy: number): TrafficShipSpec[] {
         span,
         heading: laneHeading,
         turnDir: 1,
-        speed: d.kn * KN * 0.95,
-        phase: out[0]!.phase + 0.12,
+        speed: out[0]!.speed,
+        phase: out[0]!.phase,
         length: ed.length,
         beam: ed.beam,
         height: ed.height,
@@ -288,9 +334,31 @@ function buildTrafficCell(ix: number, iy: number): TrafficShipSpec[] {
 }
 
 /**
+ * Point on a racetrack lane `path` metres along its loop (period `4H + 2*pi*R` with
+ * `H = span/2 - R`): out along +heading on the starboard-lateral leg, a half circle of radius
+ * `LANE_TURN_RADIUS` round the far end, back on the other leg and round the near end. Position,
+ * heading and turn rate are all continuous, so the ship never snaps round at the lane ends.
+ */
+function lanePoint(span: number, path: number): { u: number; v: number; dir: number; k: number } {
+  const R = LANE_TURN_RADIUS;
+  const H = Math.max(span * 0.5 - R, 1);
+  const arc = Math.PI * R;
+  const total = 4 * H + 2 * arc;
+  const s = ((path % total) + total) % total;
+  if (s < 2 * H) return { u: -H + s, v: -R, dir: 0, k: 0 };
+  if (s < 2 * H + arc) {
+    const a = -Math.PI / 2 + (s - 2 * H) / R;
+    return { u: H + R * Math.cos(a), v: R * Math.sin(a), dir: a + Math.PI / 2, k: 1 / R };
+  }
+  if (s < 4 * H + arc) return { u: H - (s - 2 * H - arc), v: R, dir: Math.PI, k: 0 };
+  const a = Math.PI / 2 + (s - 4 * H - arc) / R;
+  return { u: -H + R * Math.cos(a), v: R * Math.sin(a), dir: a + Math.PI / 2, k: 1 / R };
+}
+
+/**
  * Evaluate a background ship's kinematic pose at time `t` [s] and weather `calm` [0–1].
- * As `calm` drops below `spec.shelterCalm`, speed tapers and working vessels haul nets; in
- * heavy seas (`calm < 0.12`) merchant lanes empty (`null`).
+ * As `calm` drops below `spec.shelterCalm` working vessels haul nets, and once it falls further
+ * the ship has reached shelter and is gone (`null`); the route itself never depends on weather.
  */
 export function evaluateTrafficShip(
   spec: TrafficShipSpec,
@@ -300,7 +368,10 @@ export function evaluateTrafficShip(
 ): TrafficShipPose | null {
   const weatherGate = smoothstep(spec.shelterCalm * 0.45, spec.shelterCalm + 0.2, calm);
   if (weatherGate <= 0.02) return null;
-  const speed = spec.speed * (0.35 + 0.65 * weatherGate);
+  // Routes advance at the ship's nominal speed so a pose is a pure function of `t` and the
+  // route: calm only gates visibility and nets, it never rescales time (which would teleport
+  // every ship whenever the weather slider moves).
+  const speed = spec.speed;
   let x: number;
   let y: number;
   let heading: number;
@@ -315,18 +386,15 @@ export function evaluateTrafficShip(
     heading = wrapAngle(th + spec.turnDir * (Math.PI / 2));
     turnRate = omega;
   } else {
-    // Smooth back-and-forth along the lane with rounded end turns so it stays in clear water.
-    const cycle = (4 * spec.span) / Math.max(speed, 1);
-    const u = (((t / cycle + spec.phase / (Math.PI * 2)) % 1) + 1) % 1;
-    const s = Math.sin(u * Math.PI * 2);
-    const ds = Math.cos(u * Math.PI * 2);
+    const total =
+      4 * Math.max(spec.span * 0.5 - LANE_TURN_RADIUS, 1) + 2 * Math.PI * LANE_TURN_RADIUS;
+    const p = lanePoint(spec.span, (spec.phase / (Math.PI * 2)) * total + speed * t);
     const c = Math.cos(spec.heading);
     const sn = Math.sin(spec.heading);
-    const lat = 45 * Math.cos(u * Math.PI * 2);
-    x = spec.cx + c * spec.span * s - sn * lat;
-    y = spec.cy + sn * spec.span * s + c * lat;
-    heading = ds >= 0 ? spec.heading : wrapAngle(spec.heading + Math.PI);
-    turnRate = (-Math.sin(u * Math.PI * 2) * speed) / Math.max(spec.span, 120);
+    x = spec.cx + c * p.u - sn * p.v;
+    y = spec.cy + sn * p.u + c * p.v;
+    heading = wrapAngle(spec.heading + p.dir);
+    turnRate = p.k * speed;
   }
 
   // Kinematic wave response: scaled to hull length so big ships pitch slowly and small craft bob.
@@ -901,6 +969,25 @@ const TRAFFIC_KINDS: readonly TrafficKind[] = [
 const STRUCTURE_KINDS: readonly StructureKind[] = ['oil-rig', 'wind-turbine', 'buoy'];
 const MAX_LIGHTS = 64;
 
+/** Soft round light sprite (white, alpha falloff) so night lamps are glows, not hard squares. */
+function lightSpriteTexture(): THREE.DataTexture {
+  const n = 32;
+  const data = new Uint8Array(n * n * 4);
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      const r = Math.min(1, Math.hypot((i + 0.5) / n - 0.5, (j + 0.5) / n - 0.5) * 2);
+      const o = (j * n + i) * 4;
+      data.fill(255, o, o + 3);
+      data[o + 3] = Math.round(((1 - r) ** 2 * 0.8 + Math.max(0, 1 - r * 4) * 0.2) * 255);
+    }
+  }
+  const tex = new THREE.DataTexture(data, n, n, THREE.RGBAFormat);
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 export class TrafficLayer implements SceneryLayer {
   readonly object = new THREE.Group();
   private trafficEnabled = true;
@@ -958,6 +1045,7 @@ export class TrafficLayer implements SceneryLayer {
     lGeo.setAttribute('color', this.lightCol);
     this.lightMat = new THREE.PointsMaterial({
       size: 6,
+      map: lightSpriteTexture(),
       vertexColors: true,
       transparent: true,
       opacity: 0.9,
@@ -1178,6 +1266,7 @@ export class TrafficLayer implements SceneryLayer {
     }
     this.material.dispose();
     this.lightPoints.geometry.dispose();
+    this.lightMat.map?.dispose();
     this.lightMat.dispose();
     this.object.clear();
   }
