@@ -1,47 +1,63 @@
 /**
- * Underwater world scenery & atmosphere (Phase 4).
+ * Underwater world scenery & atmosphere.
  *
  * Kills the underwater void while keeping zero surfaced cost:
- *  - Open-water seabed: pooled radial vertex-coloured mesh that follows the submerged camera,
- *    with sandy shelves, sand ripples and deeper rock pinnacles, plus analytic wave-normal
- *    caustics on the seafloor;
- *  - Kelp forests & coral meadows: deterministic hash-grid patches around the camera and on
- *    island shelves, rendered as a single instanced mesh whose blades sway with wave orbital
- *    motion;
- *  - Shipwrecks: hash-grid sunken trawler hulks and the signature easter egg — the sunken
- *    TBM Avenger torpedo bomber on the seabed (pairing Flight 19 overhead with a seafloor
- *    story);
- *  - Marine snow, bubble vents & night bioluminescent plankton: one shared instanced point/
- *    billboard pool tinted by the current Jerlov water type.
+ *  - Seafloor that follows the experiment's still-water depth (`seafloor.ts`): on a shelf
+ *    (≤ 60 m) a world-snapped vertex-coloured grid sits at `env.depth` with sand ripples, silt
+ *    troughs and rocky rises, and the Underwater camera is clamped above it; in deep water there is
+ *    no floor ("blue water"): a depth gradient with drifting marine snow instead;
+ *  - Flora: dense kelp forests and seagrass meadows (one instanced mesh whose blades sway in the
+ *    vertex shader), coral / rock heads (a second instanced mesh), and hash-grid shipwrecks with the
+ *    signature sunken TBM Avenger torpedo bomber (pairing Flight 19 overhead with a seafloor story);
+ *  - Light: animated world-space caustics (fragment shader, shared by every material, fading with
+ *    depth by the Jerlov K_d), and — through the absorption pass — volumetric god rays and a depth
+ *    colour grade;
+ *  - Marine snow & night bioluminescent plankton: one world-wrapped `Points` draw.
  *
- * Draw-call budget per tier when submerged (`UNDERWATER_BUDGET`):
- *  - `lite`: ≤ 1 draw call (seabed mesh only);
- *  - `mid`:  ≤ 2 draw calls (seabed + kelp/coral instanced mesh);
- *  - `full`: ≤ 4 draw calls (seabed + kelp/coral + wrecks + marine snow / bioluminescence).
- * Above the surface (`!frame.underwater`), `object.visible = false` → 0 draw calls.
+ * Draw calls per tier when submerged (`UNDERWATER_BUDGET`, picked by `underwaterDraws`):
+ *  - `lite`: ≤ 1 (seabed; or particles in blue water);
+ *  - `mid`:  ≤ 3 (seabed, plants, coral/rock heads; particles in blue water);
+ *  - `full`: ≤ 6 (seabed, plants, coral/rock heads, wrecks, particles; no floor layers in blue water).
+ * Above the surface (`!frame.underwater`), `object.visible = false` → 0 draw calls and no updates.
  */
 import * as THREE from 'three';
 import { smoothstep } from '../../core/mathUtil';
 import { mulberry32 } from '../../core/rng';
 import { waterOptics } from '../../ocean/waterTypes';
 import type { WaterType } from '../../schema/experiment';
-import type { SceneryFrame, SceneryLayer, SceneryTier } from '../scenery/types';
+import type { SceneryFrame, SceneryLayer } from '../scenery/types';
+import {
+  floorDepthAt,
+  reliefNoise,
+  seafloorMode,
+  UNDERWATER_BUDGET,
+  underwaterDraws,
+} from './seafloor';
+import {
+  buildHardGeometry,
+  buildPlantGeometry,
+  buildSeabedGeometry,
+  buildWreckGeometry,
+  SEABED_STEP,
+} from './uwGeometry';
+import { createUwUniforms, patchUnderwaterMaterial } from './uwMaterials';
+import { MarineParticles } from './uwParticles';
 
-export const UW_CELL = 160;
-export const UW_VIEW_RANGE = 260;
+export { UNDERWATER_BUDGET };
+
+export const UW_CELL = 48;
+export const UW_VIEW_RANGE = 130;
+/** Flora and rocks are only instanced this close [m]: the water hides anything farther. */
+export const UW_FLORA_RANGE = 110;
 const UW_SALT = 0x4b1d902e;
-
-/** Hard cap on extra draw calls underwater per tier. */
-export const UNDERWATER_BUDGET: Record<SceneryTier, number> = {
-  full: 4,
-  mid: 2,
-  lite: 1,
-};
+/** Floor depth [m] the features assume when no experiment depth is given (a typical dive site). */
+const DEFAULT_SHELF_DEPTH = 20;
 
 /** Fixed coordinates of the signature sunken TBM Avenger easter egg near the origin [m]. */
 export const SUNKEN_AVENGER_SITE = { x: 85, y: -65 } as const;
 
-export type UnderwaterFeatureKind = 'kelp' | 'coral' | 'wreck-trawler' | 'wreck-avenger';
+export type UnderwaterFeatureKind =
+  'kelp' | 'grass' | 'coral' | 'rock' | 'wreck-trawler' | 'wreck-avenger';
 
 export interface UnderwaterFeatureSpec {
   id: string;
@@ -54,6 +70,8 @@ export interface UnderwaterFeatureSpec {
   yaw: number;
   scale: number;
   count: number;
+  /** Radius [m] the `count` items are scattered over. */
+  spread: number;
   seed: number;
 }
 
@@ -67,98 +85,176 @@ function hash2(ix: number, iy: number, salt: number): number {
 }
 
 /**
- * Procedural open-water seafloor depth [m below surface, positive] at world `(x, y)`.
- * Stays within reachable diving range (12–28 m) with sand ripples and rocky pinnacles so the
- * underwater camera (max depth 30 m) always sees authored seafloor rather than empty void.
+ * Seafloor depth [m below the surface, positive] at world `(x, y)` for a still-water depth
+ * (default: a 20 m dive site). In deep water (blue water) there is no floor: the depth returned is
+ * just the nominal `envDepth`, only used to place nothing — see {@link floorDepthAt} for the
+ * `null`-returning form.
  */
-export function seabedDepthAt(x: number, y: number): number {
-  const ripple = 0.6 * Math.sin(x * 0.14 + y * 0.09) + 0.4 * Math.cos(x * 0.07 - y * 0.12);
-  const ridge = 3.2 * Math.sin(x * 0.012) * Math.cos(y * 0.014);
-  const pinnacle = Math.max(0, Math.sin(x * 0.031 + 1.2) * Math.sin(y * 0.029 - 0.7)) ** 3 * 5.5;
-  return Math.max(8, 18 + ridge + ripple - pinnacle);
+export function seabedDepthAt(x: number, y: number, envDepth = DEFAULT_SHELF_DEPTH): number {
+  return floorDepthAt(x, y, envDepth) ?? envDepth;
+}
+
+/** Tip sway amplitude [rad] of a kelp blade for a significant wave height `hs`. */
+export function kelpSwayAmplitude(hs: number): number {
+  return 0.12 + 0.14 * Math.min(hs, 4);
 }
 
 /** Sway angle [rad] of a kelp blade at time `t` and wave height `hs`. */
 export function kelpSwayAngle(t: number, hs: number, seed: number): number {
-  const amp = 0.12 + 0.14 * Math.min(hs, 4);
-  return amp * Math.sin(t * 1.4 + (seed & 0xff) * 0.09);
+  return kelpSwayAmplitude(hs) * Math.sin(t * 1.4 + (seed & 0xff) * 0.09);
 }
 
-/** Deterministic underwater features in cell `(ix, iy)`. */
-export function underwaterFeaturesInCell(ix: number, iy: number): UnderwaterFeatureSpec[] {
+/** Smooth value noise in [0, 1] for biome patches (kelp forests, meadows, reefs). */
+export function biomeNoise(x: number, y: number): number {
+  const gx = Math.floor(x);
+  const gy = Math.floor(y);
+  const fx = x - gx;
+  const fy = y - gy;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  const h = (i: number, j: number) => hash2(gx + i, gy + j, UW_SALT ^ 0x6b) / 4294967295;
+  const top = h(0, 0) + (h(1, 0) - h(0, 0)) * sx;
+  const bot = h(0, 1) + (h(1, 1) - h(0, 1)) * sx;
+  return top + (bot - top) * sy;
+}
+
+/**
+ * Deterministic underwater features in cell `(ix, iy)` (`UW_CELL` metres square). Every cell has a
+ * seagrass meadow; a low-frequency biome noise grows kelp forests in some regions and coral reefs
+ * in others, with rocks scattered throughout. Wrecks are rare. None in blue water (no floor).
+ */
+export function underwaterFeaturesInCell(
+  ix: number,
+  iy: number,
+  envDepth = DEFAULT_SHELF_DEPTH,
+): UnderwaterFeatureSpec[] {
   const out: UnderwaterFeatureSpec[] = [];
-  // Signature easter egg in cell (0, -1): Flight 19's sunken TBM Avenger.
-  if (ix === 0 && iy === -1) {
+  if (seafloorMode(envDepth) === 'blue') return out;
+  const depthAt = (x: number, y: number) => seabedDepthAt(x, y, envDepth);
+
+  // Signature easter egg: Flight 19's sunken TBM Avenger.
+  if (
+    ix === Math.floor(SUNKEN_AVENGER_SITE.x / UW_CELL) &&
+    iy === Math.floor(SUNKEN_AVENGER_SITE.y / UW_CELL)
+  ) {
     out.push({
       id: 'wreck:avenger:flight19',
       kind: 'wreck-avenger',
       x: SUNKEN_AVENGER_SITE.x,
       y: SUNKEN_AVENGER_SITE.y,
-      depth: seabedDepthAt(SUNKEN_AVENGER_SITE.x, SUNKEN_AVENGER_SITE.y),
+      depth: depthAt(SUNKEN_AVENGER_SITE.x, SUNKEN_AVENGER_SITE.y),
       yaw: 0.72,
       scale: 1,
       count: 1,
+      spread: 0,
       seed: 0x19451205,
     });
   }
 
   const seed = hash2(ix, iy, UW_SALT);
   const rnd = mulberry32(seed);
-  // High occupancy so swimming in any direction encounters authored life within ~30 s.
-  if (rnd() > 0.82) return out;
-
-  const cx = (ix + 0.2 + 0.6 * rnd()) * UW_CELL;
-  const cy = (iy + 0.2 + 0.6 * rnd()) * UW_CELL;
-  const depth = seabedDepthAt(cx, cy);
-
-  // Kelp patch (10–20 blades).
-  const kelpCount = 10 + Math.floor(rnd() * 11);
-  out.push({
-    id: `kelp:${ix}:${iy}`,
-    kind: 'kelp',
-    x: cx,
-    y: cy,
-    depth,
-    yaw: rnd() * Math.PI * 2,
-    scale: 0.9 + 0.35 * rnd(),
-    count: kelpCount,
-    seed,
-  });
-
-  // Coral cluster on shallower banks.
-  if (rnd() < 0.65) {
-    const ox = cx + (rnd() - 0.5) * 45;
-    const oy = cy + (rnd() - 0.5) * 45;
+  const cx = (ix + 0.5) * UW_CELL;
+  const cy = (iy + 0.5) * UW_CELL;
+  const biome = biomeNoise(cx / 200, cy / 200);
+  const push = (
+    kind: UnderwaterFeatureKind,
+    tag: string,
+    x: number,
+    y: number,
+    count: number,
+    spread: number,
+    scale: number,
+    s: number,
+  ) =>
     out.push({
-      id: `coral:${ix}:${iy}`,
-      kind: 'coral',
-      x: ox,
-      y: oy,
-      depth: seabedDepthAt(ox, oy),
+      id: `${tag}:${ix}:${iy}`,
+      kind,
+      x,
+      y,
+      depth: depthAt(x, y),
       yaw: rnd() * Math.PI * 2,
-      scale: 0.85 + 0.4 * rnd(),
-      count: 6 + Math.floor(rnd() * 6),
-      seed: seed ^ 0x33,
+      scale,
+      count,
+      spread,
+      seed: s,
     });
-  }
+  const jitter = () => (rnd() - 0.5) * UW_CELL * 0.5;
 
-  // Occasional sunken trawler wreck on a sandbank (~14% of cells).
-  if (rnd() < 0.14) {
-    const wx = cx + (rnd() - 0.5) * 60;
-    const wy = cy + (rnd() - 0.5) * 60;
-    out.push({
-      id: `wreck:${ix}:${iy}`,
-      kind: rnd() < 0.25 ? 'wreck-avenger' : 'wreck-trawler',
-      x: wx,
-      y: wy,
-      depth: seabedDepthAt(wx, wy),
-      yaw: rnd() * Math.PI * 2,
-      scale: 0.9 + 0.2 * rnd(),
-      count: 1,
-      seed: seed ^ 0x77,
-    });
+  // Seagrass: everywhere.
+  push(
+    'grass',
+    'grass',
+    cx,
+    cy,
+    9 + Math.floor(rnd() * 8),
+    UW_CELL * 0.5,
+    0.8 + 0.5 * rnd(),
+    seed ^ 0x2d,
+  );
+  // Kelp: dense forests where the biome is high, a few stragglers elsewhere.
+  if (biome > 0.45) {
+    const density = Math.min(1, (biome - 0.35) * 2.2);
+    push(
+      'kelp',
+      'kelp',
+      cx + jitter(),
+      cy + jitter(),
+      8 + Math.floor(density * 22 * (0.7 + 0.3 * rnd())),
+      UW_CELL * 0.35,
+      0.9 + 0.45 * rnd(),
+      seed,
+    );
+  } else if (rnd() < 0.3) {
+    push(
+      'kelp',
+      'kelp',
+      cx + jitter(),
+      cy + jitter(),
+      3 + Math.floor(rnd() * 4),
+      8,
+      0.8 + 0.3 * rnd(),
+      seed,
+    );
   }
-
+  // Rocks.
+  if (rnd() < 0.55) {
+    push(
+      'rock',
+      'rock',
+      cx + jitter(),
+      cy + jitter(),
+      1 + Math.floor(rnd() * 3),
+      16,
+      0.8 + 0.6 * rnd(),
+      seed ^ 0x4f,
+    );
+  }
+  // Coral: reefs where the biome is low, the odd head elsewhere.
+  if (rnd() < (biome < 0.4 ? 0.55 : 0.12)) {
+    push(
+      'coral',
+      'coral',
+      cx + jitter(),
+      cy + jitter(),
+      5 + Math.floor(rnd() * 5),
+      9,
+      0.85 + 0.4 * rnd(),
+      seed ^ 0x33,
+    );
+  }
+  // Rare sunken wrecks.
+  if (rnd() < 0.02) {
+    push(
+      rnd() < 0.25 ? 'wreck-avenger' : 'wreck-trawler',
+      'wreck',
+      cx + jitter(),
+      cy + jitter(),
+      1,
+      0,
+      0.9 + 0.2 * rnd(),
+      seed ^ 0x77,
+    );
+  }
   return out;
 }
 
@@ -167,6 +263,7 @@ export function underwaterFeaturesNear(
   x: number,
   y: number,
   radius = UW_VIEW_RANGE,
+  envDepth = DEFAULT_SHELF_DEPTH,
 ): UnderwaterFeatureSpec[] {
   const reach = radius + UW_CELL;
   const ix0 = Math.floor((x - reach) / UW_CELL);
@@ -176,7 +273,7 @@ export function underwaterFeaturesNear(
   const found: { spec: UnderwaterFeatureSpec; d: number }[] = [];
   for (let iy = iy0; iy <= iy1; iy++) {
     for (let ix = ix0; ix <= ix1; ix++) {
-      for (const spec of underwaterFeaturesInCell(ix, iy)) {
+      for (const spec of underwaterFeaturesInCell(ix, iy, envDepth)) {
         const d = Math.hypot(spec.x - x, spec.y - y);
         if (d <= radius) found.push({ spec, d });
       }
@@ -206,153 +303,66 @@ export function underwaterAtmosphere(
   return { causticStrength, bioStrength, snowTint };
 }
 
-// ---------------------------------------------------------------------------------------------
-// Geometry builders
-// ---------------------------------------------------------------------------------------------
-
-function buildSeabedGeometry(radius = 220, rings = 20, segs = 36): THREE.BufferGeometry {
-  const pos: number[] = [0, -18, 0];
-  const col: number[] = [0.68, 0.62, 0.48];
-  const idx: number[] = [];
-  for (let r = 1; r <= rings; r++) {
-    const rad = (r / rings) ** 1.25 * radius;
-    for (let s = 0; s < segs; s++) {
-      const a = (s / segs) * Math.PI * 2;
-      pos.push(Math.cos(a) * rad, -18, Math.sin(a) * rad);
-      col.push(0.68, 0.62, 0.48);
-    }
-  }
-  for (let s = 0; s < segs; s++) {
-    idx.push(0, 1 + ((s + 1) % segs), 1 + s);
-  }
-  for (let r = 0; r < rings - 1; r++) {
-    const r0 = 1 + r * segs;
-    const r1 = r0 + segs;
-    for (let s = 0; s < segs; s++) {
-      const s1 = (s + 1) % segs;
-      idx.push(r0 + s, r0 + s1, r1 + s, r0 + s1, r1 + s1, r1 + s);
-    }
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  geo.setIndex(idx);
-  geo.computeVertexNormals();
-  return geo;
+/** Particle pool in use per tier, by floor mode: blue water is mostly particulate, so it gets more. */
+export function particleCount(tier: 'full' | 'mid' | 'lite', blue: boolean): number {
+  const table = blue ? { full: 900, mid: 480, lite: 240 } : { full: 420, mid: 0, lite: 0 };
+  return table[tier];
 }
 
-function buildKelpCoralGeometry(): THREE.BufferGeometry {
-  // Unit tall frond/stalk with side leaf blades + basal coral dome.
-  const pos: number[] = [];
-  const col: number[] = [];
-  const segs = 5;
-  const h = 6.5;
-  for (let i = 0; i < segs; i++) {
-    const y0 = (i / segs) * h;
-    const y1 = ((i + 1) / segs) * h;
-    const w0 = 0.28 * (1 - (i / segs) * 0.55);
-    const w1 = 0.28 * (1 - ((i + 1) / segs) * 0.55);
-    const g0 = 0.34 + 0.22 * (i / segs);
-    const g1 = 0.34 + 0.22 * ((i + 1) / segs);
-    pos.push(-w0, y0, 0, w0, y0, 0, w1, y1, 0.15, -w0, y0, 0, w1, y1, 0.15, -w1, y1, 0.15);
-    col.push(
-      0.14,
-      g0,
-      0.2,
-      0.14,
-      g0,
-      0.2,
-      0.18,
-      g1,
-      0.24,
-      0.14,
-      g0,
-      0.2,
-      0.18,
-      g1,
-      0.24,
-      0.18,
-      g1,
-      0.24,
-    );
+/** Sea-floor colour [linear RGB] from the relief value `n` (−1 high … 1 deep) and a per-vertex hash. */
+export function seabedColor(n: number, noise: number, out: [number, number, number]): void {
+  const rocky = smoothstep(-0.35, -0.85, n);
+  const silt = smoothstep(0.15, 0.95, n);
+  const patch = 0.85 + 0.3 * noise;
+  const sand: [number, number, number] = [0.72, 0.64, 0.46];
+  const siltC: [number, number, number] = [0.36, 0.34, 0.28];
+  const rockC: [number, number, number] = [0.34, 0.33, 0.35];
+  for (let c = 0; c < 3; c++) {
+    const base = sand[c]! + (siltC[c]! - sand[c]!) * silt;
+    out[c] = (base + (rockC[c]! - base) * rocky) * patch;
   }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  geo.computeVertexNormals();
-  return geo;
 }
 
-function buildWreckGeometry(): THREE.BufferGeometry {
-  // Sunken TBM Avenger / wreck silhouette: fuselage, wings, tail fin and broken ribs.
-  const parts: [number, number, number, number, number, number, number][] = [
-    [0, 0.8, 0, 11.5, 1.4, 1.6, 0x3b4d54], // fuselage
-    [0.8, 0.6, 0, 2.7, 0.35, 16.5, 0x33444c], // Avenger wingspan 16.5 m
-    [-5.4, 1.8, 0, 1.8, 2.2, 0.3, 0x475569], // tail fin
-    [1.1, 1.5, 0, 3.8, 0.8, 1.1, 0x52646e], // greenhouse canopy frame
-  ];
-  const pos: number[] = [];
-  const col: number[] = [];
-  const c = new THREE.Color();
-  for (const [cx, cy, cz, sx, sy, sz, hex] of parts) {
-    c.setHex(hex);
-    const hx = sx / 2;
-    const hy = sy / 2;
-    const hz = sz / 2;
-    const v = [
-      [cx - hx, cy - hy, cz - hz],
-      [cx + hx, cy - hy, cz - hz],
-      [cx + hx, cy + hy, cz - hz],
-      [cx - hx, cy + hy, cz - hz],
-      [cx - hx, cy - hy, cz + hz],
-      [cx + hx, cy - hy, cz + hz],
-      [cx + hx, cy + hy, cz + hz],
-      [cx - hx, cy + hy, cz + hz],
-    ] as const;
-    for (const f of [
-      [0, 1, 2, 0, 2, 3],
-      [5, 4, 7, 5, 7, 6],
-      [4, 0, 3, 4, 3, 7],
-      [1, 5, 6, 1, 6, 2],
-      [3, 2, 6, 3, 6, 7],
-    ] as const) {
-      for (const i of f) {
-        pos.push(v[i]![0], v[i]![1], v[i]![2]);
-        col.push(c.r, c.g, c.b);
-      }
-    }
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  geo.computeVertexNormals();
-  return geo;
+function vertexHash(x: number, y: number): number {
+  const s = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+  return s - Math.floor(s);
 }
 
-const MAX_FLORA = 240;
+const MAX_PLANTS = 1400;
+const MAX_HARD = 260;
 const MAX_WRECKS = 16;
-const MAX_SNOW = 180;
+const MAX_PARTICLES = 900;
 
 export class UnderwaterSceneryLayer implements SceneryLayer {
   readonly object = new THREE.Group();
   private enabled = true;
 
+  private readonly uniforms = createUwUniforms();
   private readonly seabedMesh: THREE.Mesh;
   private readonly seabedMat: THREE.MeshStandardMaterial;
-  private readonly floraMesh: THREE.InstancedMesh;
+  private readonly plantMat: THREE.MeshStandardMaterial;
+  private readonly hardMat: THREE.MeshStandardMaterial;
+  private readonly plantMesh: THREE.InstancedMesh;
+  private readonly hardMesh: THREE.InstancedMesh;
   private readonly wreckMesh: THREE.InstancedMesh;
-  private readonly snowPoints: THREE.Points;
-  private readonly snowPos: THREE.BufferAttribute;
-  private readonly snowMat: THREE.PointsMaterial;
+  private readonly particles = new MarineParticles(MAX_PARTICLES);
+  private particleCountNow = 0;
 
-  private lastSeabedX = Number.NaN;
-  private lastSeabedZ = Number.NaN;
+  /** Snapped seabed grid centre and the env depth it was built for. */
+  private seabedKey = '';
+  /** Where the flora was last instanced from. */
+  private floraX = Number.NaN;
+  private floraY = Number.NaN;
+  private floraKey = '';
+
   private readonly tmpM = new THREE.Matrix4();
   private readonly tmpP = new THREE.Vector3();
   private readonly tmpQ = new THREE.Quaternion();
   private readonly tmpE = new THREE.Euler();
   private readonly tmpS = new THREE.Vector3();
   private readonly tmpC = new THREE.Color();
+  private readonly tmpRgb: [number, number, number] = [0, 0, 0];
+  private readonly camPos = new THREE.Vector3();
 
   constructor() {
     this.object.name = 'underwater-scenery';
@@ -360,51 +370,59 @@ export class UnderwaterSceneryLayer implements SceneryLayer {
 
     this.seabedMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      flatShading: true,
-      roughness: 0.92,
+      roughness: 0.95,
       metalness: 0.02,
     });
+    this.plantMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.85,
+      metalness: 0,
+      side: THREE.DoubleSide,
+    });
+    this.hardMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      flatShading: true,
+      roughness: 0.9,
+      metalness: 0.02,
+    });
+    patchUnderwaterMaterial(this.seabedMat, this.uniforms);
+    patchUnderwaterMaterial(this.plantMat, this.uniforms, { sway: true });
+    patchUnderwaterMaterial(this.hardMat, this.uniforms);
+
     this.seabedMesh = new THREE.Mesh(buildSeabedGeometry(), this.seabedMat);
     this.seabedMesh.name = 'underwater-seabed';
     this.seabedMesh.frustumCulled = false;
     this.object.add(this.seabedMesh);
 
-    this.floraMesh = new THREE.InstancedMesh(buildKelpCoralGeometry(), this.seabedMat, MAX_FLORA);
-    this.floraMesh.name = 'underwater-flora';
-    this.floraMesh.frustumCulled = false;
-    this.floraMesh.count = 0;
-    const white = new THREE.Color(1, 1, 1);
-    for (let i = 0; i < MAX_FLORA; i++) this.floraMesh.setColorAt(i, white);
-    this.object.add(this.floraMesh);
+    this.plantMesh = this.makeInstanced(buildPlantGeometry(), this.plantMat, MAX_PLANTS, 'plants');
+    this.hardMesh = this.makeInstanced(buildHardGeometry(), this.hardMat, MAX_HARD, 'hard');
+    this.wreckMesh = this.makeInstanced(
+      buildWreckGeometry(),
+      this.seabedMat,
+      MAX_WRECKS,
+      'wrecks',
+      false,
+    );
+    this.object.add(this.particles.points);
+  }
 
-    this.wreckMesh = new THREE.InstancedMesh(buildWreckGeometry(), this.seabedMat, MAX_WRECKS);
-    this.wreckMesh.name = 'underwater-wrecks';
-    this.wreckMesh.frustumCulled = false;
-    this.wreckMesh.count = 0;
-    this.object.add(this.wreckMesh);
-
-    const snowGeo = new THREE.BufferGeometry();
-    const sArr = new Float32Array(MAX_SNOW * 3);
-    const rnd = mulberry32(0x5a0bc1);
-    for (let i = 0; i < MAX_SNOW; i++) {
-      sArr[i * 3] = (rnd() - 0.5) * 90;
-      sArr[i * 3 + 1] = -rnd() * 24;
-      sArr[i * 3 + 2] = (rnd() - 0.5) * 90;
+  private makeInstanced(
+    geo: THREE.BufferGeometry,
+    mat: THREE.Material,
+    max: number,
+    name: string,
+    colored = true,
+  ): THREE.InstancedMesh {
+    const mesh = new THREE.InstancedMesh(geo, mat, max);
+    mesh.name = `underwater-${name}`;
+    mesh.frustumCulled = false;
+    mesh.count = 0;
+    if (colored) {
+      const white = new THREE.Color(1, 1, 1);
+      for (let i = 0; i < max; i++) mesh.setColorAt(i, white);
     }
-    this.snowPos = new THREE.BufferAttribute(sArr, 3);
-    snowGeo.setAttribute('position', this.snowPos);
-    this.snowMat = new THREE.PointsMaterial({
-      size: 0.32,
-      color: 0xa5f3fc,
-      transparent: true,
-      opacity: 0.65,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    this.snowPoints = new THREE.Points(snowGeo, this.snowMat);
-    this.snowPoints.name = 'underwater-snow';
-    this.snowPoints.frustumCulled = false;
-    this.object.add(this.snowPoints);
+    this.object.add(mesh);
+    return mesh;
   }
 
   setEnabled(enabled: boolean): void {
@@ -416,9 +434,10 @@ export class UnderwaterSceneryLayer implements SceneryLayer {
   get activeDrawCalls(): number {
     if (!this.object.visible) return 0;
     let calls = this.seabedMesh.visible ? 1 : 0;
-    if (this.floraMesh.visible && this.floraMesh.count > 0) calls++;
-    if (this.wreckMesh.visible && this.wreckMesh.count > 0) calls++;
-    if (this.snowPoints.visible) calls++;
+    for (const m of [this.plantMesh, this.hardMesh, this.wreckMesh]) {
+      if (m.visible && m.count > 0) calls++;
+    }
+    if (this.particles.points.visible && this.particleCountNow > 0) calls++;
     return calls;
   }
 
@@ -429,127 +448,183 @@ export class UnderwaterSceneryLayer implements SceneryLayer {
     }
     this.object.visible = true;
     const tier = frame.tier ?? 'full';
-    const budget = UNDERWATER_BUDGET[tier];
+    const envDepth = frame.waterDepth ?? 4000;
+    const mode = seafloorMode(envDepth);
+    const draws = underwaterDraws(tier, mode);
     const camX = frame.camera.position.x;
     const camZ = frame.camera.position.z;
     const worldX = camX;
     const worldY = -camZ;
+    const waterType = frame.waterType ?? 'oceanic-ib';
+    const optics = waterOptics(waterType);
+    const atm = underwaterAtmosphere(waterType, frame.daylight, frame.cameraDepth ?? 4);
 
-    // 1. Seabed mesh (always drawn when underwater, budget >= 1).
-    if (Math.hypot(camX - this.lastSeabedX, camZ - this.lastSeabedZ) > 12) {
-      this.lastSeabedX = camX;
-      this.lastSeabedZ = camZ;
-      this.seabedMesh.position.set(camX, 0, camZ);
-      const pos = this.seabedMesh.geometry.getAttribute('position') as THREE.BufferAttribute;
-      const col = this.seabedMesh.geometry.getAttribute('color') as THREE.BufferAttribute;
-      const atm = underwaterAtmosphere(
-        frame.waterType ?? 'oceanic-ib',
-        frame.daylight,
-        frame.cameraDepth ?? 4,
-      );
-      for (let i = 0; i < pos.count; i++) {
-        const vx = camX + pos.getX(i);
-        const vz = camZ + pos.getZ(i);
-        const d = seabedDepthAt(vx, -vz);
-        pos.setY(i, -d);
-        const caustic =
-          atm.causticStrength *
-          Math.max(0, Math.sin(vx * 0.35 + frame.t * 1.8) * Math.cos(vz * 0.35 - frame.t * 1.4));
-        const sand = smoothstep(24, 10, d);
-        col.setXYZ(
-          i,
-          0.32 + 0.38 * sand + caustic * 0.25,
-          0.36 + 0.34 * sand + caustic * 0.35,
-          0.34 + 0.24 * sand + caustic * 0.4,
-        );
+    const u = this.uniforms;
+    u.uUwTime.value = frame.wallT;
+    u.uUwCaustic.value = atm.causticStrength;
+    u.uUwKd.value.fromArray(optics.attenuation);
+    u.uUwSway.value = kelpSwayAmplitude(frame.hs) * 3.2;
+
+    // 1. Seabed (shelf only).
+    this.seabedMesh.visible = draws.seabed;
+    if (draws.seabed) this.updateSeabed(camX, camZ, envDepth);
+
+    // 2. Plants, coral / rock heads, wrecks (shelf only).
+    this.plantMesh.visible = draws.plants;
+    this.hardMesh.visible = draws.hard;
+    this.wreckMesh.visible = draws.wrecks;
+    if (draws.plants || draws.hard || draws.wrecks) {
+      const moved = Math.hypot(worldX - this.floraX, worldY - this.floraY) > 10;
+      const key = `${envDepth}:${draws.plants}:${draws.hard}:${draws.wrecks}`;
+      if (moved || key !== this.floraKey || Number.isNaN(this.floraX)) {
+        this.floraX = worldX;
+        this.floraY = worldY;
+        this.floraKey = key;
+        this.rebuildInstances(worldX, worldY, envDepth, draws);
       }
-      pos.needsUpdate = true;
-      col.needsUpdate = true;
-      this.seabedMesh.geometry.computeVertexNormals();
     }
 
-    // `lite` tier stops at the seabed (1 draw call).
-    if (budget <= 1) {
-      this.floraMesh.visible = false;
-      this.wreckMesh.visible = false;
-      this.snowPoints.visible = false;
-      return;
+    // 3. Marine snow / bioluminescence (blue water on every tier, shelf on full).
+    const count = draws.particles ? particleCount(tier, mode === 'blue') : 0;
+    this.particleCountNow = count;
+    this.particles.points.visible = count > 0;
+    if (count > 0) {
+      const bio = atm.bioStrength > 0.25;
+      const gain = bio ? 2.6 : 0.5 + 1.1 * frame.daylight;
+      const rad = (frame.windDirectionDeg * Math.PI) / 180;
+      const drift = 0.05 + 0.012 * frame.windSpeed;
+      this.particles.update({
+        camera: this.camPos.copy(frame.camera.position),
+        time: frame.wallT,
+        count,
+        box: mode === 'blue' ? 90 : 60,
+        size: bio ? 0.42 : 0.3,
+        color: [atm.snowTint[0] * gain, atm.snowTint[1] * gain, atm.snowTint[2] * gain],
+        opacity: 0.9,
+        drift: [Math.sin(rad) * drift, -Math.cos(rad) * drift],
+      });
     }
+  }
 
-    // 2. Kelp & coral instanced mesh (budget >= 2).
-    const features = underwaterFeaturesNear(worldX, worldY);
-    let floraIdx = 0;
+  private updateSeabed(camX: number, camZ: number, envDepth: number): void {
+    const sx = Math.round(camX / SEABED_STEP) * SEABED_STEP;
+    const sz = Math.round(camZ / SEABED_STEP) * SEABED_STEP;
+    const key = `${sx}:${sz}:${envDepth}`;
+    if (key === this.seabedKey) return;
+    this.seabedKey = key;
+    this.seabedMesh.position.set(sx, 0, sz);
+    const geo = this.seabedMesh.geometry;
+    const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+    const col = geo.getAttribute('color') as THREE.BufferAttribute;
+    const rgb = this.tmpRgb;
+    for (let i = 0; i < pos.count; i++) {
+      const wx = sx + pos.getX(i);
+      const wz = sz + pos.getZ(i);
+      const wy = -wz;
+      const d = floorDepthAt(wx, wy, envDepth) ?? envDepth;
+      pos.setY(i, -d);
+      seabedColor(reliefNoise(wx, wy), vertexHash(wx, wy), rgb);
+      col.setXYZ(i, rgb[0], rgb[1], rgb[2]);
+    }
+    pos.needsUpdate = true;
+    col.needsUpdate = true;
+    geo.computeVertexNormals();
+  }
+
+  private rebuildInstances(
+    worldX: number,
+    worldY: number,
+    envDepth: number,
+    draws: { plants: boolean; hard: boolean; wrecks: boolean },
+  ): void {
+    const features = underwaterFeaturesNear(worldX, worldY, UW_FLORA_RANGE, envDepth);
+    let plantIdx = 0;
+    let hardIdx = 0;
     let wreckIdx = 0;
+    const up = new THREE.Vector3(0, 1, 0);
     for (const f of features) {
-      if (f.kind === 'kelp' || f.kind === 'coral') {
-        const rnd = mulberry32(f.seed);
-        const isCoral = f.kind === 'coral';
-        for (let k = 0; k < f.count && floraIdx < MAX_FLORA; k++) {
-          const ox = f.x + (rnd() - 0.5) * (isCoral ? 16 : 24);
-          const oy = f.y + (rnd() - 0.5) * (isCoral ? 16 : 24);
-          const d = seabedDepthAt(ox, oy);
-          const sway = isCoral ? 0 : kelpSwayAngle(frame.t, frame.hs, f.seed + k);
-          this.tmpP.set(ox, -d, -oy);
-          this.tmpE.set(sway, rnd() * Math.PI * 2, sway * 0.5);
-          this.tmpQ.setFromEuler(this.tmpE);
-          const sc = f.scale * (0.7 + 0.6 * rnd());
-          this.tmpS.set(isCoral ? sc * 2.2 : sc, isCoral ? sc * 0.28 : sc, isCoral ? sc * 2.2 : sc);
-          this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
-          this.floraMesh.setMatrixAt(floraIdx, this.tmpM);
-          if (isCoral) {
-            this.tmpC.setHSL(0.92 - 0.8 * (k % 3) * 0.15, 0.75, 0.52);
-          } else {
-            this.tmpC.setRGB(0.22, 0.62 + 0.2 * (k % 3), 0.3);
-          }
-          this.floraMesh.setColorAt(floraIdx, this.tmpC);
-          floraIdx++;
-        }
-      } else if (budget >= 3 && wreckIdx < MAX_WRECKS) {
+      const near = Math.hypot(f.x - worldX, f.y - worldY) <= UW_FLORA_RANGE + f.spread;
+      if (f.kind === 'wreck-trawler' || f.kind === 'wreck-avenger') {
+        if (!draws.wrecks || wreckIdx >= MAX_WRECKS) continue;
         this.tmpP.set(f.x, -f.depth + 0.3, -f.y);
         this.tmpE.set(0.18, f.yaw, -0.22);
         this.tmpQ.setFromEuler(this.tmpE);
         this.tmpS.setScalar(f.scale * (f.kind === 'wreck-trawler' ? 1.4 : 1.0));
         this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
-        this.wreckMesh.setMatrixAt(wreckIdx, this.tmpM);
-        wreckIdx++;
+        this.wreckMesh.setMatrixAt(wreckIdx++, this.tmpM);
+        continue;
+      }
+      if (!near) continue;
+      const plant = f.kind === 'kelp' || f.kind === 'grass';
+      if (plant ? !draws.plants : !draws.hard) continue;
+      const rnd = mulberry32(f.seed);
+      for (let k = 0; k < f.count; k++) {
+        if (plant ? plantIdx >= MAX_PLANTS : hardIdx >= MAX_HARD) break;
+        const r = f.spread * Math.sqrt(rnd());
+        const a = rnd() * Math.PI * 2;
+        const ox = f.x + Math.cos(a) * r;
+        const oy = f.y + Math.sin(a) * r;
+        const d = seabedDepthAt(ox, oy, envDepth);
+        const sc = f.scale * (0.7 + 0.6 * rnd());
+        this.tmpP.set(ox, -d - 0.05, -oy);
+        if (plant) {
+          this.tmpQ.setFromAxisAngle(up, rnd() * Math.PI * 2);
+          if (f.kind === 'kelp') {
+            this.tmpS.set(sc, sc * (0.8 + 0.5 * rnd()), sc);
+            this.tmpC.setHSL(0.14 + 0.1 * rnd(), 0.45 + 0.2 * rnd(), 0.3 + 0.1 * rnd());
+          } else {
+            this.tmpS.set(sc * 1.4, sc * (0.14 + 0.1 * rnd()), sc * 1.4);
+            this.tmpC.setHSL(0.24 + 0.1 * rnd(), 0.55, 0.38 + 0.1 * rnd());
+          }
+          this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
+          this.plantMesh.setMatrixAt(plantIdx, this.tmpM);
+          this.plantMesh.setColorAt(plantIdx, this.tmpC);
+          plantIdx++;
+        } else {
+          this.tmpQ.setFromAxisAngle(up, rnd() * Math.PI * 2);
+          if (f.kind === 'coral') {
+            // Columns, domes and plates in reef hues.
+            const tall = rnd() < 0.45;
+            this.tmpS.set(
+              sc * (tall ? 0.6 : 1.4),
+              sc * (tall ? 2.2 : 0.8),
+              sc * (tall ? 0.6 : 1.4),
+            );
+            const hues = [0.95, 0.03, 0.09, 0.78, 0.55, 0.62];
+            this.tmpC.setHSL(hues[Math.floor(rnd() * hues.length)]!, 0.65, 0.5);
+          } else {
+            this.tmpS.set(sc * 2.2, sc * (0.9 + 0.8 * rnd()), sc * (1.6 + 0.8 * rnd()));
+            const g = 0.3 + 0.18 * rnd();
+            this.tmpC.setRGB(g, g * 0.96, g * 0.9);
+          }
+          this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
+          this.hardMesh.setMatrixAt(hardIdx, this.tmpM);
+          this.hardMesh.setColorAt(hardIdx, this.tmpC);
+          hardIdx++;
+        }
       }
     }
+    this.commit(this.plantMesh, plantIdx, true);
+    this.commit(this.hardMesh, hardIdx, true);
+    this.commit(this.wreckMesh, wreckIdx, false);
+  }
 
-    this.floraMesh.visible = floraIdx > 0;
-    this.floraMesh.count = floraIdx;
-    if (floraIdx > 0) {
-      this.floraMesh.instanceMatrix.needsUpdate = true;
-      if (this.floraMesh.instanceColor) this.floraMesh.instanceColor.needsUpdate = true;
-    }
-
-    // 3. Wrecks + 4. Marine snow / bioluminescence (full tier, budget >= 4).
-    this.wreckMesh.visible = budget >= 3 && wreckIdx > 0;
-    this.wreckMesh.count = wreckIdx;
-    if (wreckIdx > 0) this.wreckMesh.instanceMatrix.needsUpdate = true;
-
-    this.snowPoints.visible = budget >= 4;
-    if (this.snowPoints.visible) {
-      const atm = underwaterAtmosphere(
-        frame.waterType ?? 'oceanic-ib',
-        frame.daylight,
-        frame.cameraDepth ?? 4,
-      );
-      this.snowPoints.position.set(camX, Math.sin(frame.t * 0.4) * 0.8, camZ);
-      this.snowMat.color.setRGB(atm.snowTint[0], atm.snowTint[1], atm.snowTint[2]);
-      this.snowMat.opacity = 0.45 + 0.45 * atm.bioStrength;
-      this.snowMat.size = atm.bioStrength > 0.25 ? 0.42 : 0.28;
-    }
+  private commit(mesh: THREE.InstancedMesh, count: number, colored: boolean): void {
+    mesh.count = count;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (colored && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }
 
   dispose(): void {
     this.seabedMesh.geometry.dispose();
-    this.floraMesh.geometry.dispose();
-    this.floraMesh.dispose();
-    this.wreckMesh.geometry.dispose();
-    this.wreckMesh.dispose();
+    for (const m of [this.plantMesh, this.hardMesh, this.wreckMesh]) {
+      m.geometry.dispose();
+      m.dispose();
+    }
     this.seabedMat.dispose();
-    this.snowPoints.geometry.dispose();
-    this.snowMat.dispose();
+    this.plantMat.dispose();
+    this.hardMat.dispose();
+    this.particles.dispose();
     this.object.clear();
   }
 }

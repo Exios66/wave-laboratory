@@ -29,6 +29,7 @@ function makeFrame(overrides: Partial<SceneryFrame> = {}): SceneryFrame {
     vesselPositions: [],
     underwater: true,
     cameraDepth: 6,
+    waterDepth: 20,
     waterType: 'oceanic-i',
     tier: 'full',
     ...overrides,
@@ -69,8 +70,8 @@ describe('underwater scenery placement & atmosphere', () => {
 
   it('includes sunken trawlers and avengers across cells', () => {
     let wrecks = 0;
-    for (let iy = -6; iy <= 6; iy++) {
-      for (let ix = -6; ix <= 6; ix++) {
+    for (let iy = -20; iy <= 20; iy++) {
+      for (let ix = -20; ix <= 20; ix++) {
         for (const f of underwaterFeaturesInCell(ix, iy)) {
           if (f.kind === 'wreck-trawler' || f.kind === 'wreck-avenger') wrecks++;
         }
@@ -80,17 +81,52 @@ describe('underwater scenery placement & atmosphere', () => {
   });
 });
 
+describe('flora density and depth', () => {
+  it('puts seagrass in every cell on a shelf (no empty cells)', () => {
+    for (let iy = -8; iy <= 8; iy++) {
+      for (let ix = -8; ix <= 8; ix++) {
+        const kinds = new Set(underwaterFeaturesInCell(ix, iy, 20).map((f) => f.kind));
+        expect(kinds.has('grass')).toBe(true);
+      }
+    }
+  });
+
+  it('stands every feature on the floor that follows env.depth, and none in blue water', () => {
+    for (const envDepth of [8, 20, 45]) {
+      for (const f of underwaterFeaturesNear(0, 0, 300, envDepth)) {
+        expect(f.depth).toBeCloseTo(seabedDepthAt(f.x, f.y, envDepth), 9);
+        expect(Math.abs(f.depth - envDepth)).toBeLessThanOrEqual(5.001);
+      }
+    }
+    expect(underwaterFeaturesNear(0, 0, 400, 4000)).toEqual([]);
+  });
+});
+
 describe('UnderwaterSceneryLayer', () => {
   it('costs 0 draw calls above water and respects tier draw-call caps when submerged', () => {
     const layer = new UnderwaterSceneryLayer();
     layer.update(makeFrame({ underwater: false }));
     expect(layer.activeDrawCalls).toBe(0);
 
-    for (const tier of ['lite', 'mid', 'full'] as const) {
-      layer.update(makeFrame({ underwater: true, tier }));
-      expect(layer.activeDrawCalls).toBeGreaterThanOrEqual(1);
-      expect(layer.activeDrawCalls).toBeLessThanOrEqual(UNDERWATER_BUDGET[tier]);
+    for (const waterDepth of [20, 4000]) {
+      for (const tier of ['lite', 'mid', 'full'] as const) {
+        layer.update(makeFrame({ underwater: true, tier, waterDepth }));
+        expect(layer.activeDrawCalls).toBeGreaterThanOrEqual(1);
+        expect(layer.activeDrawCalls).toBeLessThanOrEqual(UNDERWATER_BUDGET[tier]);
+      }
     }
+    // Back at the surface: nothing drawn again.
+    layer.update(makeFrame({ underwater: false }));
+    expect(layer.activeDrawCalls).toBe(0);
+    layer.dispose();
+  });
+
+  it('draws the full shelf set on full, and only particulate in blue water on lite', () => {
+    const layer = new UnderwaterSceneryLayer();
+    layer.update(makeFrame({ tier: 'full', waterDepth: 20 }));
+    expect(layer.activeDrawCalls).toBeGreaterThanOrEqual(4);
+    layer.update(makeFrame({ tier: 'lite', waterDepth: 4000 }));
+    expect(layer.activeDrawCalls).toBe(1);
     layer.dispose();
   });
 });
