@@ -117,6 +117,8 @@ export interface HydroModel {
  * draft for water density `rho` [kg/m³] and gravity `g` [m/s²]. Returns strip coefficients and
  * the inverse effective mass matrix in the body frame. Multihull heave/sway added mass and
  * hull-force derivatives sum identical demihulls; see the module header for model limits.
+ * Submarine strips span the full hull, empirical derivatives use hull diameter as draft,
+ * and the surface-ship lift contribution to roll damping is zero.
  * @throws {RangeError} If the effective mass matrix is singular during inversion.
  */
 export function buildHydroModel(def: VesselDefinition, rho: number, g: number): HydroModel {

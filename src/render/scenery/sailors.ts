@@ -330,6 +330,7 @@ const dist2 = (a: DeckSpot, b: DeckSpot): number => (a.x - b.x) ** 2 + (a.y - b.
 /**
  * Plan a vessel's crew: how many, where each one stands and the short patrol they walk. The
  * captain (on crews of two or more) keeps near the bridge; the others spread over the deck.
+ * Returns an empty crew for submarines or when no standing spots are available.
  */
 export function planCrew(def: VesselDefinition, seed = 1): CrewMember[] {
   // A submarine at periscope depth has no deck above water: the crew is below.

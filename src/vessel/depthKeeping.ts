@@ -78,7 +78,10 @@ export interface PlaneForce {
 
 /**
  * Lift and drag of one plane at deflection `delta` [rad] in a flow of speed `u` along the hull
- * with vertical plane velocity `w` (body frame, up positive), for density `rho`.
+ * [m/s] with vertical plane velocity relative to the water `w` [m/s] (body frame, up positive),
+ * for density `rho` [kg/m³]. The effective angle is capped at ±18°; both forces are zero when
+ * |u| < 1e-6 m/s. Writes body-frame forces [N] into `out` and returns that same object; drag
+ * opposes `u`, and lift reverses with `u` for a fixed effective angle.
  */
 export function planeForce(
   p: DivePlane,
@@ -139,7 +142,9 @@ export class DepthKeeper {
   private readonly pumpRate: number;
 
   /**
+   * Initialize the depth order and reference with neutral planes and zero ballast force.
    * @param spec the boat's planes (body frame)
+   * @param rho water density [kg/m³]
    * @param heaveMass mass plus heave added mass [kg]
    * @param pitchInertia pitch inertia plus added inertia [kg·m²]
    * @param depth the design (and initial commanded) CoG depth [m]
@@ -165,7 +170,10 @@ export class DepthKeeper {
     this.pumpRate = ballastLimit / PUMP_TIME;
   }
 
-  /** Forget the integral and the filter (a new depth order, or a restart). */
+  /**
+   * Reset the filter and reference to CoG `depth` [m, down positive], clear the integral and
+   * ballast force, and center both planes. Leaves `depthCmd` and `planeShare` unchanged.
+   */
   reset(depth: number): void {
     this.integral = 0;
     this.ballastForce = 0;
@@ -176,7 +184,11 @@ export class DepthKeeper {
     this.stern = 0;
   }
 
-  /** Advance the controller by `dt` seconds and move the planes and the pump toward the orders. */
+  /**
+   * Advance the depth reference, filter, plane deflections, ballast force, and plane share
+   * toward `depthCmd` over a positive `dt` [s]. At |speed| < 0.4 m/s, the planes slew
+   * toward center and ballast alone supplies the heave demand.
+   */
   update(s: DepthSample, dt: number): void {
     if (!Number.isFinite(this.filtered)) {
       this.filtered = s.depth;
@@ -254,13 +266,15 @@ export class DepthKeeper {
   }
 }
 
+/** Smooth interpolation from 0 to 1, clamped to those values outside x ∈ [0, 1]. */
 const smooth = (x: number): number => {
   const t = clamp(x, 0, 1);
   return t * t * (3 - 2 * t);
 };
 
 /**
- * Largest share ∈ [0, 1] with |base + share · extra| ≤ limit (0 when even `base` is beyond it).
+ * Available share ∈ [0, 1] of `extra` with |base + share · extra| ≤ limit. Returns 0 when
+ * |base| ≥ limit, even if `extra` would reduce it; otherwise returns 1 for |extra| < 1e-12.
  */
 export function room(base: number, extra: number, limit: number): number {
   if (Math.abs(base) >= limit) return 0;

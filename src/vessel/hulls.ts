@@ -105,7 +105,11 @@ export interface HullDesign {
   multihull?: { separation: number; tunnelRoof(u: number): number };
 }
 
-/** Loft a design's hull surface: the monohull loft, or the catamaran loft with its bridge deck. */
+/**
+ * Build a design's hull surface using its custom mesh, monohull loft, or catamaran loft.
+ * Custom meshes have no deck-edge indices; display resolution is selected only when `opts`
+ * is the same object as `d.renderLoft`. Errors from a custom mesh builder propagate.
+ */
 export function loftDesignHull(d: HullDesign, opts: LoftOptions): LoftedHull {
   if (d.mesh) return { mesh: d.mesh(opts === d.renderLoft), deckEdge: new Uint32Array(0) };
   const mh = d.multihull;
@@ -769,6 +773,7 @@ function sloopYacht(): HullDesign {
 
 // ---------------------------------------------------------------------------- submarine
 
+/** Full-scale submarine design in the keel frame, with custom hull meshes and dive planes. */
 function submarine(): HullDesign {
   const R = SUB_RADIUS;
   const z0 = SUB_AXIS_Z;

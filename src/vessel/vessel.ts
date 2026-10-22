@@ -233,6 +233,8 @@ export class Vessel {
   /**
    * Initialize at the configured position, heading, and speed, with calm-water floating trim.
    * Starts dry and deploys the configured mooring only when available at the field's depth.
+   * A submarine starts at equilibrium depth; `config.depthM`, if supplied, sets a keel-depth
+   * order through `command` for the controller to approach during subsequent steps.
    * Errors from the wind provider propagate when initializing sails under autopilot.
    * @throws {RangeError} If the effective mass matrix is singular during hydrodynamic setup.
    */
@@ -473,6 +475,9 @@ export class Vessel {
    * pumping existing water; flooding orders stop pumps, while starting pumps seals breaches.
    * If combined, repair, flood, and pump orders take effect in that order. Dropping an already
    * deployed anchor adjusts its line length when a length or scope is supplied.
+   * Submarine `depthM` orders keel depth below the mean surface [m], independently of
+   * autopilot. It is clamped between min(10 m, loaded draft) and the greater of that minimum
+   * and sea depth minus 10 m. Surface ships ignore depth orders.
    */
   command(cmd: VesselCommand): void {
     if (cmd.headingDeg !== undefined) this.headingCmdDeg = cmd.headingDeg;
@@ -806,6 +811,7 @@ export class Vessel {
   /**
    * Advance flooding and foundering over `dt` [s]; `healthLost` is this step's health decrease.
    * Accumulates slamming damage for bow breaches and constrains foundered hulls to the seabed.
+   * A submarine founders when floodwater mass exceeds 1 % of its intact mass.
    */
   private stepFlooding(dt: number, slam: boolean, healthLost: number): void {
     const fl = this.flooding;
@@ -1349,7 +1355,11 @@ export class Vessel {
     };
   }
 
-  /** Internal quantities for inspectors, plots and tests. */
+  /**
+   * Internal quantities for inspectors, plots and tests. Depth and depth order refer to the
+   * CoG below the mean surface [m], rather than the keel. For surface ships, the depth order,
+   * plane angles, and ballast are zero. Ballast [kg] is signed: negative means pumped out.
+   */
   diagnostics(): VesselDiagnostics {
     const h = this.hull;
     return {

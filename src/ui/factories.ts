@@ -75,6 +75,11 @@ export const VESSEL_TYPE_LABELS: Record<VesselType, string> = {
   catamaran: 'Catamaran (power, 15 m)',
 };
 
+/**
+ * Create default vessel settings with a fresh ID. The existing vessel `count` determines
+ * its name and starting position; the first vessel starts at the origin. Submarines start
+ * at 4 kn with autopilot on and leave the depth order at its design default.
+ */
 export function newVessel(type: VesselType, count: number): VesselConfig {
   const angle = count * 2.4;
   const r = count === 0 ? 0 : 60 + 25 * count;

@@ -522,6 +522,8 @@ export interface EffectiveGm {
  *   KB' = (∇ KB + δ A_wp (T + δ/2)) / ∇',   BM' = BM ∇ / ∇',
  *   KG' = (Δ KG + Σ m_k z_k) / Δ',          GM_eff = KB' + BM' − KG' − ρ Σ i_k / Δ'.
  * `weightMoment` is Σ m_k z_k above the keel [kg·m], `freeSurfaceMoment` is ρ Σ i_k [kg·m].
+ * For `p.submerged` or waterplane area ≤ 1e-9 m², sinkage is zero and KB and BM retain their
+ * intact values; floodwater still changes KG and the free-surface correction.
  */
 export function effectiveGm(
   p: StabilityParticulars,

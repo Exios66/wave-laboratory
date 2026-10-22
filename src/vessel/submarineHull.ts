@@ -108,6 +108,7 @@ export function sailMesh(): TriangleMesh {
   return orient({ positions: new Float32Array(p), indices: new Uint32Array(idx) });
 }
 
+/** Ensure nonnegative signed volume by reversing winding in place; return the same mesh. */
 function orient(mesh: TriangleMesh): TriangleMesh {
   if (meshVolume(mesh).volume < 0) flipOrientation(mesh);
   return mesh;

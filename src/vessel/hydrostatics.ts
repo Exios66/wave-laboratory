@@ -125,7 +125,10 @@ const acc = new Acc();
 
 /**
  * Submerged-volume properties of `mesh` placed by rotation `rot` (body → fixed) and
- * translation `offset`, cut by the plane z = 0 (water below).
+ * translation `offset`, cut by the plane z = 0 (water below). The centroid is in the fixed
+ * frame, or zero when there is no submerged volume. With no waterline crossings, all
+ * waterline extents are zero. Waterplane area, centroid, and moments are zero when its
+ * computed area is at most 1e-9 of the wetted area, including fully submerged or dry hulls.
  */
 export function submergedProperties(
   mesh: TriangleMesh,
@@ -355,6 +358,7 @@ export interface SectionProperties {
  *
  * Returns nonnegative submerged area [m²], total waterline width [m] and depth from the
  * waterline to the lowest submerged section point [m], independent of overall winding.
+ * Also returns the vertical extent of the submerged outline [m].
  * Dry or absent sections return zeros. A fully submerged section retains its area and depth
  * from the waterline, but has zero beam when the sampled level is above it.
  */

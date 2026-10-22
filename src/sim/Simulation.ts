@@ -179,7 +179,7 @@ export class Simulation {
     return out;
   }
 
-  /** Separate overlapping hulls, exchange momentum and deal impact damage. */
+  /** Separate overlapping surface hulls, exchange momentum and deal impact damage; skip submarines. */
   private collide(t: number): void {
     const bodies: { v: SimVessel; f: HullFootprint }[] = [];
     for (const v of this.vessels) {

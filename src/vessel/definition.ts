@@ -47,7 +47,9 @@ const GZ_HEELS = Array.from({ length: 37 }, (_, i) => i * 5);
  * built-in vessel, with body-frame geometry centered on the center of gravity.
  * `scale` multiplies design lengths; `kgFactor` sets KG as a fraction of the scaled depth.
  * `loadFactor` targets a multiple of the design displacement in seawater (1025 kg/m³), with
- * draft bounded between 2 % of the design draft and 98 % of the depth; 1 uses the design draft.
+ * draft bounded between 2 % of the design draft and 98 % of the depth (the mesh top for a
+ * submarine); 1 uses the design draft. Submarine draft denotes keel depth, and its stored
+ * righting arm uses GM · sin(heel).
  */
 export function createVesselDefinition(
   type: VesselType,
