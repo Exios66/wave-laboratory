@@ -940,3 +940,80 @@ void main() {
   #include <colorspace_fragment>
 }
 `;
+
+/**
+ * GPU spray: every vertex evaluates its own ballistic flight in closed form from the birth state
+ * (see scene/sprayMath.ts), so the CPU only writes a ring buffer when particles are emitted.
+ * aVel = (v0, lifetime), aMisc = (birth time, size, wind x, wind z). Dead or unborn slots are
+ * collapsed outside the clip volume.
+ */
+export const GPU_SPRAY_VERT = /* glsl */ `
+attribute vec4 aVel;
+attribute vec4 aMisc;
+uniform float uTime;
+uniform float uPixelScale;
+uniform float uAspect;
+uniform float uDrag;
+uniform float uGravity;
+uniform float uGrowth;
+uniform float uAlpha;
+uniform vec3 uSunDir;
+uniform float uSunK;
+varying float vAlpha;
+varying vec2 vDir;
+varying float vStretch;
+varying float vLit;
+void main() {
+  float age = uTime - aMisc.x;
+  float life = max(aVel.w, 1e-3);
+  float u = age / life;
+  if (age < 0.0 || u >= 1.0) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    gl_PointSize = 0.0;
+    vAlpha = 0.0;
+    vDir = vec2(1.0, 0.0);
+    vStretch = 0.0;
+    vLit = 0.0;
+    return;
+  }
+  float k = max(uDrag, 1e-4);
+  vec3 vt = vec3(aMisc.z, -uGravity / k, aMisc.w);
+  float decay = exp(-k * age);
+  vec3 p = position + vt * age + (aVel.xyz - vt) * ((1.0 - decay) / k);
+  vec3 v = vt + (aVel.xyz - vt) * decay;
+  vec4 mv = viewMatrix * vec4(p, 1.0);
+  vec4 clip = projectionMatrix * mv;
+  // Screen-space direction of travel: fast spray is drawn as a short streak along it.
+  vec4 clip2 = projectionMatrix * (mv + vec4((viewMatrix * vec4(v, 0.0)).xyz * 0.05, 0.0));
+  vec2 d = (clip2.xy / clip2.w - clip.xy / clip.w) * vec2(uAspect, 1.0);
+  vDir = dot(d, d) > 1e-12 ? normalize(d) : vec2(1.0, 0.0);
+  vStretch = clamp(length(v) * 0.05 - 0.2, 0.0, 2.5);
+  float size = aMisc.y * (1.0 + uGrowth * u) * (1.0 + 0.8 * vStretch);
+  gl_PointSize = clamp(size * uPixelScale / max(-mv.z, 0.5), 1.0, 64.0);
+  vAlpha = uAlpha * min(1.0, u * 8.0) * (1.0 - u) * (1.0 - u);
+  // Forward scattering: droplets glow when the sun is behind them, never past the bloom threshold.
+  vec3 view = normalize(p - cameraPosition);
+  float fs = pow(max(dot(view, uSunDir), 0.0), 4.0);
+  vLit = 0.82 + 0.28 * fs * uSunK;
+  gl_Position = clip;
+}
+`;
+
+export const GPU_SPRAY_FRAG = /* glsl */ `
+uniform vec3 uColor;
+varying float vAlpha;
+varying vec2 vDir;
+varying float vStretch;
+varying float vLit;
+void main() {
+  vec2 c = (gl_PointCoord - 0.5) * 2.0;
+  c.y = -c.y;
+  vec2 q = vec2(dot(c, vDir), dot(c, vec2(-vDir.y, vDir.x)));
+  q.y *= 1.0 + 0.8 * vStretch;
+  float r = dot(q, q);
+  if (r > 1.0) discard;
+  float soft = (1.0 - r) * sqrt(1.0 - r);
+  gl_FragColor = vec4(uColor * vLit, vAlpha * soft);
+  #include <colorspace_fragment>
+}
+`;

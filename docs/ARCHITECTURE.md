@@ -31,7 +31,7 @@
   queueing up work.
 - **The renderer draws the physics state.** Each `SimFrame` carries its time `t`. The GPU ocean
   is evaluated at that `t`, so the vessels sit on exactly the waves that move them. Bow spray
-  and the foam wake are visual only; they are not added back into the hull forces.
+  (GPU particles, flight evaluated in the vertex shader) and the foam wake are visual only; they are not added back into the hull forces.
 - **Edits are documents.** Every change goes through `store.updateExperiment`. It validates
   against the Zod schema, records undo history and, for structural changes, bumps the
   `revision`, which reloads the worker. Live orders (heading, speed, helm) go straight to the
