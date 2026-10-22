@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { SceneryFrame } from '../scenery/types';
 import {
   kelpSwayAngle,
+  reefsNear,
   seabedDepthAt,
   SUNKEN_AVENGER_SITE,
   UNDERWATER_BUDGET,
@@ -126,6 +127,35 @@ describe('UnderwaterSceneryLayer', () => {
     layer.update(makeFrame({ tier: 'full', waterDepth: 20 }));
     expect(layer.activeDrawCalls).toBeGreaterThanOrEqual(4);
     layer.update(makeFrame({ tier: 'lite', waterDepth: 4000 }));
+    expect(layer.activeDrawCalls).toBe(1);
+    layer.dispose();
+  });
+});
+
+describe('island reef shelves in deep water', () => {
+  it('puts flora, rocks and coral on the shelf around an island and nothing in open sea', () => {
+    const reefs = reefsNear(500, 800);
+    expect(reefs.length).toBeGreaterThan(0);
+    const here = underwaterFeaturesNear(reefs[0]!.x, reefs[0]!.y, 200, 4000, reefs);
+    expect(here.length).toBeGreaterThan(5);
+    expect(here.some((f) => f.kind === 'coral' || f.kind === 'rock')).toBe(true);
+    for (const f of here) expect(f.depth).toBeLessThanOrEqual(60);
+    // Far from every island the deep sea stays blue water.
+    expect(underwaterFeaturesNear(0, 0, 130, 4000, reefsNear(0, 0))).toEqual([]);
+    // Islands off: no reefs, so no features even beside an island.
+    expect(underwaterFeaturesNear(reefs[0]!.x, reefs[0]!.y, 200, 4000, [])).toEqual([]);
+  });
+
+  it('draws the floor layers near a reef when islands are on, and only particulate otherwise', () => {
+    const reefs = reefsNear(500, 800);
+    const r = reefs[0]!;
+    const cam = new THREE.PerspectiveCamera();
+    cam.position.set(r.x + r.radius * 1.8 + 40, -3, -r.y);
+    const layer = new UnderwaterSceneryLayer();
+    layer.update(makeFrame({ camera: cam, waterDepth: 4000, islands: true, tier: 'full' }));
+    expect(layer.activeDrawCalls).toBeGreaterThanOrEqual(4);
+    expect(layer.activeDrawCalls).toBeLessThanOrEqual(UNDERWATER_BUDGET.full);
+    layer.update(makeFrame({ camera: cam, waterDepth: 4000, islands: false, tier: 'full' }));
     expect(layer.activeDrawCalls).toBe(1);
     layer.dispose();
   });

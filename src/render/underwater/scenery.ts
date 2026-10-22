@@ -25,11 +25,15 @@ import { smoothstep } from '../../core/mathUtil';
 import { mulberry32 } from '../../core/rng';
 import { waterOptics } from '../../ocean/waterTypes';
 import type { WaterType } from '../../schema/experiment';
+import { islandsNear } from '../scenery/islands';
 import type { SceneryFrame, SceneryLayer } from '../scenery/types';
 import {
   floorDepthAt,
+  floorModeAt,
+  REEF_INFLUENCE,
+  type ReefSource,
+  SHELF_MAX_DEPTH,
   reliefNoise,
-  seafloorMode,
   UNDERWATER_BUDGET,
   underwaterDraws,
 } from './seafloor';
@@ -86,12 +90,22 @@ function hash2(ix: number, iy: number, salt: number): number {
 
 /**
  * Seafloor depth [m below the surface, positive] at world `(x, y)` for a still-water depth
- * (default: a 20 m dive site). In deep water (blue water) there is no floor: the depth returned is
- * just the nominal `envDepth`, only used to place nothing — see {@link floorDepthAt} for the
- * `null`-returning form.
+ * (default: a 20 m dive site) and the island reefs around. Where there is no floor (blue water)
+ * the nominal depth is returned, capped at 120 m (the water hides it); see {@link floorDepthAt}
+ * for the `null`-returning form.
  */
-export function seabedDepthAt(x: number, y: number, envDepth = DEFAULT_SHELF_DEPTH): number {
-  return floorDepthAt(x, y, envDepth) ?? envDepth;
+export function seabedDepthAt(
+  x: number,
+  y: number,
+  envDepth = DEFAULT_SHELF_DEPTH,
+  reefs: readonly ReefSource[] = [],
+): number {
+  return floorDepthAt(x, y, envDepth, reefs) ?? Math.min(envDepth, 120);
+}
+
+/** Island reefs near world `(x, y)`: the islands whose shelf can shape the floor in view. */
+export function reefsNear(x: number, y: number): ReefSource[] {
+  return islandsNear(x, y, REEF_INFLUENCE + 200).map((i) => ({ x: i.x, y: i.y, radius: i.radius }));
 }
 
 /** Tip sway amplitude [rad] of a kelp blade for a significant wave height `hs`. */
@@ -127,22 +141,26 @@ export function underwaterFeaturesInCell(
   ix: number,
   iy: number,
   envDepth = DEFAULT_SHELF_DEPTH,
+  reefs: readonly ReefSource[] = [],
 ): UnderwaterFeatureSpec[] {
   const out: UnderwaterFeatureSpec[] = [];
-  if (seafloorMode(envDepth) === 'blue') return out;
-  const depthAt = (x: number, y: number) => seabedDepthAt(x, y, envDepth);
+  // Features stand on floor that is in reach: none in blue water away from every reef.
+  const floorAt = (x: number, y: number) => floorDepthAt(x, y, envDepth, reefs);
+  const cellFloor = floorAt((ix + 0.5) * UW_CELL, (iy + 0.5) * UW_CELL);
+  if (cellFloor === null || cellFloor > SHELF_MAX_DEPTH + 25) return out;
 
   // Signature easter egg: Flight 19's sunken TBM Avenger.
   if (
     ix === Math.floor(SUNKEN_AVENGER_SITE.x / UW_CELL) &&
-    iy === Math.floor(SUNKEN_AVENGER_SITE.y / UW_CELL)
+    iy === Math.floor(SUNKEN_AVENGER_SITE.y / UW_CELL) &&
+    floorAt(SUNKEN_AVENGER_SITE.x, SUNKEN_AVENGER_SITE.y) !== null
   ) {
     out.push({
       id: 'wreck:avenger:flight19',
       kind: 'wreck-avenger',
       x: SUNKEN_AVENGER_SITE.x,
       y: SUNKEN_AVENGER_SITE.y,
-      depth: depthAt(SUNKEN_AVENGER_SITE.x, SUNKEN_AVENGER_SITE.y),
+      depth: floorAt(SUNKEN_AVENGER_SITE.x, SUNKEN_AVENGER_SITE.y)!,
       yaw: 0.72,
       scale: 1,
       count: 1,
@@ -155,7 +173,8 @@ export function underwaterFeaturesInCell(
   const rnd = mulberry32(seed);
   const cx = (ix + 0.5) * UW_CELL;
   const cy = (iy + 0.5) * UW_CELL;
-  const biome = biomeNoise(cx / 200, cy / 200);
+  // Shallow reef flats favour coral over kelp.
+  const biome = biomeNoise(cx / 200, cy / 200) - (cellFloor < 10 ? 0.3 : 0);
   const push = (
     kind: UnderwaterFeatureKind,
     tag: string,
@@ -165,19 +184,12 @@ export function underwaterFeaturesInCell(
     spread: number,
     scale: number,
     s: number,
-  ) =>
-    out.push({
-      id: `${tag}:${ix}:${iy}`,
-      kind,
-      x,
-      y,
-      depth: depthAt(x, y),
-      yaw: rnd() * Math.PI * 2,
-      scale,
-      count,
-      spread,
-      seed: s,
-    });
+  ) => {
+    const yaw = rnd() * Math.PI * 2; // drawn first so skipping a feature never shifts the others
+    const depth = floorAt(x, y);
+    if (depth === null || depth > SHELF_MAX_DEPTH) return;
+    out.push({ id: `${tag}:${ix}:${iy}`, kind, x, y, depth, yaw, scale, count, spread, seed: s });
+  };
   const jitter = () => (rnd() - 0.5) * UW_CELL * 0.5;
 
   // Seagrass: everywhere.
@@ -230,7 +242,7 @@ export function underwaterFeaturesInCell(
     );
   }
   // Coral: reefs where the biome is low, the odd head elsewhere.
-  if (rnd() < (biome < 0.4 ? 0.55 : 0.12)) {
+  if (rnd() < (biome < 0.4 ? (cellFloor < 10 ? 0.85 : 0.55) : 0.12)) {
     push(
       'coral',
       'coral',
@@ -264,6 +276,7 @@ export function underwaterFeaturesNear(
   y: number,
   radius = UW_VIEW_RANGE,
   envDepth = DEFAULT_SHELF_DEPTH,
+  reefs: readonly ReefSource[] = [],
 ): UnderwaterFeatureSpec[] {
   const reach = radius + UW_CELL;
   const ix0 = Math.floor((x - reach) / UW_CELL);
@@ -273,7 +286,7 @@ export function underwaterFeaturesNear(
   const found: { spec: UnderwaterFeatureSpec; d: number }[] = [];
   for (let iy = iy0; iy <= iy1; iy++) {
     for (let ix = ix0; ix <= ix1; ix++) {
-      for (const spec of underwaterFeaturesInCell(ix, iy, envDepth)) {
+      for (const spec of underwaterFeaturesInCell(ix, iy, envDepth, reefs)) {
         const d = Math.hypot(spec.x - x, spec.y - y);
         if (d <= radius) found.push({ spec, d });
       }
@@ -354,6 +367,11 @@ export class UnderwaterSceneryLayer implements SceneryLayer {
   private floraX = Number.NaN;
   private floraY = Number.NaN;
   private floraKey = '';
+  /** Island reefs near the camera, refreshed as it moves; `reefVersion` keys the rebuilds. */
+  private reefs: ReefSource[] = [];
+  private reefX = Number.NaN;
+  private reefY = Number.NaN;
+  private reefVersion = 0;
 
   private readonly tmpM = new THREE.Matrix4();
   private readonly tmpP = new THREE.Vector3();
@@ -449,12 +467,29 @@ export class UnderwaterSceneryLayer implements SceneryLayer {
     this.object.visible = true;
     const tier = frame.tier ?? 'full';
     const envDepth = frame.waterDepth ?? 4000;
-    const mode = seafloorMode(envDepth);
-    const draws = underwaterDraws(tier, mode);
     const camX = frame.camera.position.x;
     const camZ = frame.camera.position.z;
     const worldX = camX;
     const worldY = -camZ;
+    // Island reefs lift a floor out of deep water around each island (only with islands on).
+    if (!frame.islands) {
+      if (this.reefs.length > 0) {
+        this.reefs = [];
+        this.reefVersion++;
+      }
+      this.reefX = Number.NaN;
+    } else if (
+      Number.isNaN(this.reefX) ||
+      Math.hypot(worldX - this.reefX, worldY - this.reefY) > 20
+    ) {
+      this.reefX = worldX;
+      this.reefY = worldY;
+      this.reefs = reefsNear(worldX, worldY);
+      this.reefVersion++;
+    }
+    const reefs = this.reefs;
+    const mode = floorModeAt(worldX, worldY, envDepth, reefs);
+    const draws = underwaterDraws(tier, mode);
     const waterType = frame.waterType ?? 'oceanic-ib';
     const optics = waterOptics(waterType);
     const atm = underwaterAtmosphere(waterType, frame.daylight, frame.cameraDepth ?? 4);
@@ -467,7 +502,7 @@ export class UnderwaterSceneryLayer implements SceneryLayer {
 
     // 1. Seabed (shelf only).
     this.seabedMesh.visible = draws.seabed;
-    if (draws.seabed) this.updateSeabed(camX, camZ, envDepth);
+    if (draws.seabed) this.updateSeabed(camX, camZ, envDepth, reefs);
 
     // 2. Plants, coral / rock heads, wrecks (shelf only).
     this.plantMesh.visible = draws.plants;
@@ -475,12 +510,12 @@ export class UnderwaterSceneryLayer implements SceneryLayer {
     this.wreckMesh.visible = draws.wrecks;
     if (draws.plants || draws.hard || draws.wrecks) {
       const moved = Math.hypot(worldX - this.floraX, worldY - this.floraY) > 10;
-      const key = `${envDepth}:${draws.plants}:${draws.hard}:${draws.wrecks}`;
+      const key = `${envDepth}:${this.reefVersion}:${draws.plants}:${draws.hard}:${draws.wrecks}`;
       if (moved || key !== this.floraKey || Number.isNaN(this.floraX)) {
         this.floraX = worldX;
         this.floraY = worldY;
         this.floraKey = key;
-        this.rebuildInstances(worldX, worldY, envDepth, draws);
+        this.rebuildInstances(worldX, worldY, envDepth, draws, reefs);
       }
     }
 
@@ -506,10 +541,15 @@ export class UnderwaterSceneryLayer implements SceneryLayer {
     }
   }
 
-  private updateSeabed(camX: number, camZ: number, envDepth: number): void {
+  private updateSeabed(
+    camX: number,
+    camZ: number,
+    envDepth: number,
+    reefs: readonly ReefSource[],
+  ): void {
     const sx = Math.round(camX / SEABED_STEP) * SEABED_STEP;
     const sz = Math.round(camZ / SEABED_STEP) * SEABED_STEP;
-    const key = `${sx}:${sz}:${envDepth}`;
+    const key = `${sx}:${sz}:${envDepth}:${this.reefVersion}`;
     if (key === this.seabedKey) return;
     this.seabedKey = key;
     this.seabedMesh.position.set(sx, 0, sz);
@@ -521,9 +561,16 @@ export class UnderwaterSceneryLayer implements SceneryLayer {
       const wx = sx + pos.getX(i);
       const wz = sz + pos.getZ(i);
       const wy = -wz;
-      const d = floorDepthAt(wx, wy, envDepth) ?? envDepth;
+      const d = seabedDepthAt(wx, wy, envDepth, reefs);
       pos.setY(i, -d);
       seabedColor(reliefNoise(wx, wy), vertexHash(wx, wy), rgb);
+      if (d < 4) {
+        // Lagoon flats: pale, bright sand.
+        const k = 0.25 * (1 - d / 4);
+        rgb[0] += k;
+        rgb[1] += k;
+        rgb[2] += k * 0.7;
+      }
       col.setXYZ(i, rgb[0], rgb[1], rgb[2]);
     }
     pos.needsUpdate = true;
@@ -536,8 +583,9 @@ export class UnderwaterSceneryLayer implements SceneryLayer {
     worldY: number,
     envDepth: number,
     draws: { plants: boolean; hard: boolean; wrecks: boolean },
+    reefs: readonly ReefSource[],
   ): void {
-    const features = underwaterFeaturesNear(worldX, worldY, UW_FLORA_RANGE, envDepth);
+    const features = underwaterFeaturesNear(worldX, worldY, UW_FLORA_RANGE, envDepth, reefs);
     let plantIdx = 0;
     let hardIdx = 0;
     let wreckIdx = 0;
@@ -564,7 +612,7 @@ export class UnderwaterSceneryLayer implements SceneryLayer {
         const a = rnd() * Math.PI * 2;
         const ox = f.x + Math.cos(a) * r;
         const oy = f.y + Math.sin(a) * r;
-        const d = seabedDepthAt(ox, oy, envDepth);
+        const d = seabedDepthAt(ox, oy, envDepth, reefs);
         const sc = f.scale * (0.7 + 0.6 * rnd());
         this.tmpP.set(ox, -d - 0.05, -oy);
         if (plant) {

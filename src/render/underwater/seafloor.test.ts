@@ -6,7 +6,13 @@ import {
   countDraws,
   depthGrade,
   floorDepthAt,
+  floorModeAt,
   maxCameraDepth,
+  maxCameraDepthAt,
+  REEF_INFLUENCE,
+  REEF_LAGOON,
+  REEF_SLOPE,
+  reefDepthAt,
   refractedSunDirection,
   seafloorMode,
   SHELF_MAX_DEPTH,
@@ -110,5 +116,36 @@ describe('light', () => {
     expect(Math.max(...deep.tint)).toBeCloseTo(1, 9);
     expect(deep.tint[0]).toBeLessThan(deep.tint[2]);
     expect(depthGrade(kd, 0).tint).toEqual([1, 1, 1]);
+  });
+});
+
+describe('island reefs in deep water', () => {
+  const reef = { x: 1000, y: 500, radius: 40 };
+  const lagoon = reef.radius * REEF_LAGOON;
+
+  it('is shallow in the lagoon and shelves away at the reef slope', () => {
+    expect(reefDepthAt(reef.x, reef.y, reef)).toBeCloseTo(1.5, 9);
+    expect(reefDepthAt(reef.x + lagoon, reef.y, reef)).toBeCloseTo(4, 9);
+    expect(reefDepthAt(reef.x + lagoon + 100, reef.y, reef)).toBeCloseTo(4 + REEF_SLOPE * 100, 9);
+    expect(reefDepthAt(reef.x + lagoon + REEF_INFLUENCE + 1, reef.y, reef)).toBeNull();
+  });
+
+  it('keeps the open ocean blue and gives a floor only near a reef', () => {
+    expect(floorDepthAt(0, 0, 4000, [reef])).toBeNull();
+    expect(floorModeAt(0, 0, 4000, [reef])).toBe('blue');
+    const near = floorDepthAt(reef.x + lagoon + 50, reef.y, 4000, [reef])!;
+    expect(near).toBeGreaterThan(4);
+    expect(near).toBeLessThan(15);
+    expect(floorModeAt(reef.x + lagoon + 50, reef.y, 4000, [reef])).toBe('shelf');
+    // No islands (ambience off): exactly the current blue water.
+    expect(floorDepthAt(reef.x + lagoon + 50, reef.y, 4000, [])).toBeNull();
+  });
+
+  it('clamps the camera above the reef floor and leaves open water alone', () => {
+    const x = reef.x + lagoon + 20;
+    const cam = maxCameraDepthAt(x, reef.y, 4000, [reef]);
+    expect(cam).toBeGreaterThanOrEqual(CAMERA_MIN_DEPTH);
+    expect(cam).toBeLessThan(floorDepthAt(x, reef.y, 4000, [reef])!);
+    expect(maxCameraDepthAt(0, 0, 4000, [reef])).toBe(CAMERA_MAX_DEPTH);
   });
 });

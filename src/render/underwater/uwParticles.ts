@@ -18,8 +18,10 @@ uniform vec2 uDrift;
 varying float vFade;
 void main() {
   float sink = 0.05 + 0.1 * aSeed.w;
-  vec3 w = aSeed.xyz * uBox + vec3(uDrift.x * (0.6 + aSeed.w), -sink, uDrift.y * (0.6 + aSeed.w)) * uTime;
-  vec3 rel = mod(w - uCam + uBox * 0.5, uBox) - uBox * 0.5;
+  // A near layer in a tighter box gives strong parallax; the far layer fills the distance.
+  float box = aSeed.w > 0.55 ? uBox * 0.4 : uBox;
+  vec3 w = aSeed.xyz * box + vec3(uDrift.x * (0.6 + aSeed.w), -sink, uDrift.y * (0.6 + aSeed.w)) * uTime;
+  vec3 rel = mod(w - uCam + box * 0.5, box) - box * 0.5;
   vec3 world = uCam + rel;
   vec4 mv = viewMatrix * vec4(world, 1.0);
   gl_Position = projectionMatrix * mv;
@@ -27,7 +29,7 @@ void main() {
   float sz = uSize * (0.5 + aSeed.w);
   gl_PointSize = clamp(sz * 420.0 / max(0.4, -mv.z), 1.5, 16.0);
   // Fade at the edge of the box, and above the surface.
-  vFade = (1.0 - smoothstep(uBox * 0.32, uBox * 0.5, dist)) * step(world.y, -0.3);
+  vFade = (1.0 - smoothstep(box * 0.32, box * 0.5, dist)) * step(world.y, -0.3);
 }
 `;
 

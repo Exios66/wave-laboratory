@@ -53,7 +53,7 @@ import {
   type SceneryLayer,
 } from './scenery/types';
 import { DEFAULT_WILDLIFE_SEED, WildlifeLayer } from './scenery/wildlife';
-import { UnderwaterSceneryLayer } from './underwater/scenery';
+import { reefsNear, UnderwaterSceneryLayer } from './underwater/scenery';
 import { createRadialOceanGeometry, OCEAN_DENSITY, OCEAN_SLICES } from './scene/oceanMesh';
 import { RainField, SMOKE_STYLE, SprayPool } from './scene/particles';
 import { GpuSprayPool } from './scene/gpuSpray';
@@ -75,7 +75,7 @@ import {
   nextUnderwaterState,
   underwaterInscatter,
 } from './underwater/optics';
-import { maxCameraDepth, underwaterRays } from './underwater/seafloor';
+import { maxCameraDepth, maxCameraDepthAt, underwaterRays } from './underwater/seafloor';
 import { flightDeckTexture, jollyRogerTexture } from './scene/textures';
 
 export interface LabRendererOptions {
@@ -1330,6 +1330,7 @@ export class LabRenderer implements LabRendererApi {
       cameraDepth: this.stats.cameraDepth,
       waterType: this.env?.waterType ?? 'oceanic-ib',
       waterDepth: this.env?.depth,
+      islands: this.ambience.islands,
       tier: this.quality === 'low' ? 'lite' : this.quality === 'medium' ? 'mid' : 'full',
       hostiles: this.ambience.hostiles,
     };
@@ -1862,7 +1863,11 @@ export class LabRenderer implements LabRendererApi {
     );
     const sy = Math.sin(this.yaw);
     const cy = Math.cos(this.yaw);
-    const y = -Math.min(this.uwDepth, maxCameraDepth(this.env?.depth ?? 4000));
+    // Over an island reef the floor is shallower than the open-sea clamp: keep the eye above it.
+    const ex = tx + reach * sy;
+    const ez = tz + reach * cy;
+    const reefs = this.ambience.islands ? reefsNear(ex, -ez) : [];
+    const y = -Math.min(this.uwDepth, maxCameraDepthAt(ex, -ez, this.env?.depth ?? 4000, reefs));
     this.orbitCentre.set(tx, 0, tz);
     this.camera.up.set(0, 1, 0);
     this.camera.position.set(tx + reach * sy, y, tz + reach * cy);

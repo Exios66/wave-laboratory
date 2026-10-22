@@ -107,6 +107,8 @@ export interface SceneryFrame {
   cameraDepth?: number;
   /** Still-water depth of the experiment [m]: sets the seafloor depth (or blue water when deep). */
   waterDepth?: number;
+  /** Island scenery is on: islands raise reef shelves out of deep water. */
+  islands?: boolean;
   /** Current Jerlov water type, for underwater tinting and bioluminescence. */
   waterType?: WaterType;
   /** Scenery performance tier ('full' | 'mid' | 'lite'). */

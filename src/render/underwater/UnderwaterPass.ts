@@ -86,12 +86,15 @@ const UnderwaterShader = {
       float ray1 = 0.5 + 0.5 * sin(ndc.x * 11.0 + ndc.y * 4.0 + uTime * 0.7);
       float ray2 = 0.5 + 0.5 * sin(ndc.x * 19.0 - ndc.y * 5.0 - uTime * 1.1);
       float shaft = pow(ray1 * ray2, 2.5) * smoothstep(-0.3, 0.9, vUv.y) * uShafts * (1.0 - step(0.001, uRays));
-      vec3 veil = uInscatter * (1.0 + shaft * 0.85);
+      vec3 rd = normalize(uCamFwd + ndc.x * uTanHalf.x * uCamRight + ndc.y * uTanHalf.y * uCamUp);
+      // Open water has a vertical gradient: bright toward the sun-lit surface, dark toward the abyss.
+      float up = smoothstep(0.15, 0.95, rd.y);
+      float down = smoothstep(0.05, -0.75, rd.y);
+      vec3 veil = uInscatter * (1.0 + shaft * 0.85) * (1.0 + 0.7 * up - 0.6 * down);
       vec3 rays = vec3(0.0);
       if (uRays > 0.001) {
         // Volumetric shafts: march the view ray, lighting each sample by the surface patch the sun
         // reaches it through (refracted travel direction), fading with depth.
-        vec3 rd = normalize(uCamFwd + ndc.x * uTanHalf.x * uCamRight + ndc.y * uTanHalf.y * uCamUp);
         float dmax = min(d, 45.0);
         float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
         float acc = 0.0;
@@ -106,7 +109,7 @@ const UnderwaterShader = {
         acc *= dmax / 12.0;
         float towardSun = max(dot(rd, -uSunTravel), 0.0);
         float phase = 0.35 + 0.65 * towardSun * towardSun;
-        rays = uInscatter * acc * phase * uRays * 0.25;
+        rays = (uInscatter * 3.0 + vec3(0.004, 0.012, 0.016)) * acc * phase * uRays * 0.5;
       }
       vec3 outc = c.rgb * T + veil * (1.0 - T) + rays;
       float lum = dot(outc, vec3(0.2126, 0.7152, 0.0722));

@@ -36,14 +36,86 @@ export function reliefNoise(x: number, y: number): number {
   return Math.max(-1, Math.min(1, (ridge + ripple - 0.8 * pinnacle) / 4.2));
 }
 
+/** An island's reef: its centre, and nominal radius [m] (its lagoon reaches `radius * REEF_LAGOON`). */
+export interface ReefSource {
+  x: number;
+  y: number;
+  radius: number;
+}
+
+/** Outer edge of the lagoon as a multiple of the island radius (matches `ISLAND_FOOTPRINT`). */
+export const REEF_LAGOON = 1.8;
+/** Depth [m] of the lagoon floor at the island's centre and at the lagoon edge. */
+const REEF_LAGOON_DEPTH = [1.5, 4] as const;
+/** The shelf below the lagoon edge drops at this slope (1:8): 60 m deep ~430 m out. */
+export const REEF_SLOPE = 0.13;
+/** Beyond this distance past the lagoon edge the reef no longer shapes the floor [m]. */
+export const REEF_INFLUENCE = 600;
+
 /**
- * Floor depth [m below the surface, positive] at world `(x, y)` for a still-water depth, or
- * `null` in blue water (no floor). On a shelf it is `envDepth ± shelfRelief`, so the shallowest
- * point is `envDepth − shelfRelief` and the camera clamp keeps the eye above it.
+ * Floor depth contributed by one reef at world `(x, y)`, or `null` outside its influence.
+ * Inside the lagoon the floor is shallow sand (1.5 to 4 m); past the edge it shelves away at
+ * {@link REEF_SLOPE}. Relief is added by the caller.
  */
-export function floorDepthAt(x: number, y: number, envDepth: number): number | null {
-  if (seafloorMode(envDepth) === 'blue') return null;
-  return envDepth + shelfRelief(envDepth) * reliefNoise(x, y);
+export function reefDepthAt(x: number, y: number, reef: ReefSource): number | null {
+  const lagoon = reef.radius * REEF_LAGOON;
+  const d = Math.hypot(x - reef.x, y - reef.y);
+  const edge = d - lagoon;
+  if (edge > REEF_INFLUENCE) return null;
+  if (edge <= 0) {
+    const t = Math.max(0, d / lagoon);
+    return REEF_LAGOON_DEPTH[0] + (REEF_LAGOON_DEPTH[1] - REEF_LAGOON_DEPTH[0]) * t * t;
+  }
+  return REEF_LAGOON_DEPTH[1] + REEF_SLOPE * edge;
+}
+
+/** Half the vertical relief at a floor of this depth [m]. */
+function reliefAt(depth: number): number {
+  return Math.max(0.15, Math.min(2.5, 0.1 * depth));
+}
+
+/**
+ * Floor depth [m below the surface, positive] at world `(x, y)`, or `null` where there is no floor
+ * to draw (blue water). On a shelf (`envDepth` <= {@link SHELF_MAX_DEPTH}) it is `envDepth ±
+ * shelfRelief`. In deeper water the floor exists only around island reefs (`reefs`), shallowest
+ * wherever a reef is nearest. Where a reef shelves below {@link SHELF_MAX_DEPTH} the depth keeps
+ * growing (the water hides it) until the reef's influence ends.
+ */
+export function floorDepthAt(
+  x: number,
+  y: number,
+  envDepth: number,
+  reefs: readonly ReefSource[] = [],
+): number | null {
+  let depth: number | null = null;
+  if (seafloorMode(envDepth) === 'shelf') {
+    depth = envDepth + shelfRelief(envDepth) * reliefNoise(x, y);
+  }
+  let reef: number | null = null;
+  for (const r of reefs) {
+    const d = reefDepthAt(x, y, r);
+    if (d !== null && (reef === null || d < reef)) reef = d;
+  }
+  if (reef !== null) {
+    const base = Math.min(reef, envDepth);
+    const withRelief = base + reliefAt(base) * reliefNoise(x, y);
+    depth = depth === null ? withRelief : Math.min(depth, withRelief);
+  }
+  return depth;
+}
+
+/**
+ * The floor mode at world `(x, y)`: 'shelf' wherever {@link floorDepthAt} finds a floor within
+ * reach of the camera (a shallow sea, or near an island reef), otherwise 'blue' water.
+ */
+export function floorModeAt(
+  x: number,
+  y: number,
+  envDepth: number,
+  reefs: readonly ReefSource[] = [],
+): SeafloorMode {
+  const d = floorDepthAt(x, y, envDepth, reefs);
+  return d !== null && d <= SHELF_MAX_DEPTH + 40 ? 'shelf' : 'blue';
 }
 
 /** Deepest eye depth [m] of the Underwater camera: above the shallowest floor, within the view limits. */
@@ -51,6 +123,19 @@ export function maxCameraDepth(envDepth: number): number {
   const shallowestFloor =
     seafloorMode(envDepth) === 'shelf' ? envDepth - shelfRelief(envDepth) : Infinity;
   return Math.max(CAMERA_MIN_DEPTH, Math.min(CAMERA_MAX_DEPTH, shallowestFloor - FLOOR_CLEARANCE));
+}
+
+/** Like {@link maxCameraDepth} for an eye at world `(x, y)`, which may hang over an island reef. */
+export function maxCameraDepthAt(
+  x: number,
+  y: number,
+  envDepth: number,
+  reefs: readonly ReefSource[] = [],
+): number {
+  const floor = floorDepthAt(x, y, envDepth, reefs);
+  if (floor === null) return maxCameraDepth(envDepth);
+  const base = Math.min(maxCameraDepth(envDepth), floor - reliefAt(floor) - FLOOR_CLEARANCE);
+  return Math.max(CAMERA_MIN_DEPTH, base);
 }
 
 // ---------------------------------------------------------------------------------------------
