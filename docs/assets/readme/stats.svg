@@ -5,19 +5,19 @@
 <rect width="1200" height="176" rx="24" fill="url(#bg)"/>
 <rect x=".5" y=".5" width="1199" height="175" rx="24" fill="none" stroke="#334155"/>
 <rect x="24" y="24" width="270" height="128" rx="18" fill="#0d1a2b" stroke="#334155"/>
-<text x="46" y="76" font-size="30" fill="#38bdf8" font-weight="800" text-anchor="start">11 hulls</text>
+<text x="46" y="76" fill="#38bdf8" font-weight="800"><tspan font-size="30">11</tspan><tspan font-size="20" dx="7">hulls</tspan></text>
 <text x="46" y="107" font-size="18" fill="#e2e8f0" font-weight="600" text-anchor="start">parametric designs</text>
 <text x="46" y="132" font-size="14" fill="#94a3b8" font-weight="400" text-anchor="start">lifeboat → Nimitz-class</text>
 <rect x="318" y="24" width="270" height="128" rx="18" fill="#0d1a2b" stroke="#334155"/>
-<text x="340" y="76" font-size="30" fill="#2dd4bf" font-weight="800" text-anchor="start">280 water columns</text>
+<text x="340" y="76" fill="#2dd4bf" font-weight="800"><tspan font-size="30">280</tspan><tspan font-size="19" dx="7">water columns</tspan></text>
 <text x="340" y="107" font-size="18" fill="#e2e8f0" font-weight="600" text-anchor="start">hull pressure integration</text>
 <text x="340" y="132" font-size="14" fill="#94a3b8" font-weight="400" text-anchor="start">hydrostatics + Froude–Krylov</text>
 <rect x="612" y="24" width="270" height="128" rx="18" fill="#0d1a2b" stroke="#334155"/>
-<text x="634" y="76" font-size="30" fill="#f59e0b" font-weight="800" text-anchor="start">4 FFT cascades</text>
+<text x="634" y="76" fill="#f59e0b" font-weight="800"><tspan font-size="30">4</tspan><tspan font-size="20" dx="7">FFT cascades</tspan></text>
 <text x="634" y="107" font-size="18" fill="#e2e8f0" font-weight="600" text-anchor="start">surface synthesis</text>
 <text x="634" y="132" font-size="14" fill="#94a3b8" font-weight="400" text-anchor="start">1 km swell → cm ripples</text>
 <rect x="906" y="24" width="270" height="128" rx="18" fill="#0d1a2b" stroke="#334155"/>
-<text x="928" y="76" font-size="30" fill="#f472b6" font-weight="800" text-anchor="start">632 tests</text>
+<text x="928" y="76" fill="#f472b6" font-weight="800"><tspan font-size="30">632</tspan><tspan font-size="20" dx="7">tests</tspan></text>
 <text x="928" y="107" font-size="18" fill="#e2e8f0" font-weight="600" text-anchor="start">physics validation</text>
 <text x="928" y="132" font-size="14" fill="#94a3b8" font-weight="400" text-anchor="start">unit + statistical suites</text>
 </svg>

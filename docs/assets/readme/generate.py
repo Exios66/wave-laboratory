@@ -181,13 +181,31 @@ def hero(mobile=False):
     return '\n'.join(bits)
 
 
+def stat_value(x, y, value, color, big=30, small=20, avail=226):
+    """Draw a stat headline that always fits its 270px card.
+
+    A leading number is set large and the unit after it smaller, so long
+    units ("280 water columns") cannot spill into the neighbouring card.
+    The width estimate (average bold glyph = 0.62 em) is deliberately
+    pessimistic; if even the split layout would not fit, shrink the unit.
+    """
+    head, _, unit = value.partition(' ')
+    if not unit or not head[0].isdigit():
+        return text(x, y, value, big, color, 800)
+    while len(head)*big*0.62 + (len(unit)+1)*small*0.62 > avail and small > 14:
+        small -= 1
+    return (f'<text x="{x}" y="{y}" fill="{color}" font-weight="800">'
+            f'<tspan font-size="{big}">{escape(head)}</tspan>'
+            f'<tspan font-size="{small}" dx="7">{escape(unit)}</tspan></text>')
+
+
 def stats():
     """Render static capability cards; repeat the facts as prose in the README."""
     bits = frame(1200, 176, CONFIG['title']+' at a glance', '; '.join(' — '.join(s for s in (v, l) if l) for v, l, _ in CONFIG['stats']))
     for i, (value, label, detail) in enumerate(CONFIG['stats']):
         x = 24+i*294
         bits += [f'<rect x="{x}" y="24" width="270" height="128" rx="18" fill="#0d1a2b" stroke="#334155"/>',
-                 text(x+22, 76, value, 30, COLORS[i], 800),
+                 stat_value(x+22, 76, value, COLORS[i]),
                  text(x+22, 107, label, 18, '#e2e8f0', 600),
                  text(x+22, 132, detail, 14, '#94a3b8')]
     bits.append('</svg>\n')
