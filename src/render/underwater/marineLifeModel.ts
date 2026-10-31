@@ -237,7 +237,8 @@ export interface MarinePlan {
 /**
  * Choose the schools to draw: candidates within `MARINE_RANGE` of the camera, nearest first,
  * each species filled up to its cap for the tier. Reef sites are supplied by the caller (the
- * scenery layer owns the site list); open-water schools come from the hash grid.
+ * scenery layer owns the site list); open-water schools come from the hash grid. Camera
+ * coordinates are in meters, with x east and y north. Schools exactly at the range are included.
  */
 export function planMarineLife(
   camX: number,
@@ -295,18 +296,23 @@ export interface FishPose {
   scale: number;
 }
 
+/** Create a pose initialized at the origin with zero heading and unit scale. */
 export function makeFishPose(): FishPose {
   return { x: 0, y: 0, depth: 0, yaw: 0, scale: 1 };
 }
 
-/** Shallowest depth fish use under a sea of significant wave height `hs` [m]. */
+/** Shallowest depth [m] for significant wave height `hs` [m]; `hs` is clamped to 0–4 m. */
 export function marineMinDepth(hs: number): number {
   return MIN_DEPTH + 0.6 * Math.min(Math.max(hs, 0), 4);
 }
 
 /**
  * Pose of fish `i` of `school` at time `t` [s]. `seabed(x, y)` is the seafloor depth [m below the
- * surface]; `hs` is the significant wave height [m]. Allocation-free; writes into `out`.
+ * mean sea level]; `hs` is the significant wave height [m]. Allocation-free; writes into `out`.
+ * Depth is clamped between the minimum swim depth and 0.8 m above the seabed or 60 m, whichever
+ * is shallower. If that upper limit is shallower than the minimum swim depth, the minimum takes
+ * precedence.
+ * Errors from `seabed` propagate to the caller.
  */
 export function fishPose(
   school: SchoolSpec,

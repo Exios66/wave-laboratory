@@ -246,6 +246,7 @@ export class MarineLifeLayer implements SceneryLayer {
     }
   }
 
+  /** Disabling hides the layer immediately; enabling takes effect on the next update. */
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
     if (!enabled) this.object.visible = false;
@@ -312,6 +313,10 @@ export class MarineLifeLayer implements SceneryLayer {
     }
   }
 
+  /**
+   * Hide the layer when disabled or above water; otherwise update the visible instances.
+   * Replans when the tier changes or the camera moves more than 20 m horizontally.
+   */
   update(frame: SceneryFrame): void {
     if (!this.enabled || !frame.underwater) {
       this.object.visible = false;
@@ -373,6 +378,7 @@ export class MarineLifeLayer implements SceneryLayer {
     }
   }
 
+  /** Dispose the meshes, materials and geometries and remove the meshes from the group. */
   dispose(): void {
     for (const m of this.meshes) {
       m.mesh.dispose();
