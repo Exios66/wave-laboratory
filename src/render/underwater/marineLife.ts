@@ -20,6 +20,7 @@ import {
   fishPose,
   makeFishPose,
   MARINE_BUDGET,
+  MARINE_RANGE,
   planMarineLife,
   unitHash,
   type MarinePlan,
@@ -27,7 +28,7 @@ import {
   type ReefSite,
   type SchoolSpec,
 } from './marineLifeModel';
-import { seabedDepthAt, underwaterFeaturesInCell, UW_CELL } from './scenery';
+import { seabedDepthAt, underwaterFeaturesNear } from './scenery';
 
 /** The plan is rebuilt once the camera is this far [m] from where it was last made. */
 const REPLAN_DISTANCE = 20;
@@ -270,14 +271,8 @@ export class MarineLifeLayer implements SceneryLayer {
 
   private gatherSites(wx: number, wy: number): void {
     this.sites.length = 0;
-    const ix = Math.floor(wx / UW_CELL);
-    const iy = Math.floor(wy / UW_CELL);
-    for (let j = iy - 1; j <= iy + 1; j++) {
-      for (let i = ix - 1; i <= ix + 1; i++) {
-        for (const f of underwaterFeaturesInCell(i, j)) {
-          this.sites.push({ id: f.id, x: f.x, y: f.y, seed: f.seed });
-        }
-      }
+    for (const f of underwaterFeaturesNear(wx, wy, MARINE_RANGE)) {
+      this.sites.push({ id: f.id, x: f.x, y: f.y, seed: f.seed });
     }
   }
 

@@ -2,7 +2,15 @@ import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import type { SceneryFrame } from '../scenery/types';
 import { MarineLifeLayer } from './marineLife';
-import { marineInstanceCap, MARINE_BUDGET } from './marineLifeModel';
+import {
+  fishPose,
+  makeFishPose,
+  marineInstanceCap,
+  MARINE_BUDGET,
+  MARINE_RANGE,
+  planMarineLife,
+} from './marineLifeModel';
+import { seabedDepthAt, underwaterFeaturesNear } from './scenery';
 
 function frame(over: Partial<SceneryFrame> = {}): SceneryFrame {
   const camera = new THREE.PerspectiveCamera();
@@ -39,6 +47,39 @@ describe('MarineLifeLayer', () => {
     layer.setEnabled(false);
     layer.update(frame());
     expect(layer.object.visible).toBe(false);
+    layer.dispose();
+  });
+
+  it('renders a reef school at an in-range site outside the adjacent cells', () => {
+    const current = frame();
+    current.camera.position.set(-4, -8, 320); // World (-4, -320).
+    const sites = underwaterFeaturesNear(-4, -320, MARINE_RANGE).map(({ id, x, y, seed }) => ({
+      id,
+      x,
+      y,
+      seed,
+    }));
+    const schools = planMarineLife(-4, -320, 'full', sites).schools.filter(
+      (school) => school.species === 'reef',
+    );
+    // The camera is in cell (-1, -2); this coral is in cell (1, -2).
+    const edge = schools.find((school) => school.id === 'reef:coral:1:-2');
+    expect(edge).toBeDefined();
+    const slot = schools
+      .slice(0, schools.indexOf(edge!))
+      .reduce((sum, school) => sum + school.count, 0);
+    const expected = makeFishPose();
+    fishPose(edge!, 0, current.t, seabedDepthAt, current.hs, expected);
+
+    const layer = new MarineLifeLayer();
+    layer.update(current);
+    const mesh = layer.object.getObjectByName('marine-reef') as THREE.InstancedMesh;
+    expect(mesh.count).toBeGreaterThan(slot);
+    const matrix = new THREE.Matrix4();
+    mesh.getMatrixAt(slot, matrix);
+    expect(matrix.elements[12]).toBeCloseTo(expected.x, 3);
+    expect(matrix.elements[13]).toBeCloseTo(-expected.depth, 3);
+    expect(matrix.elements[14]).toBeCloseTo(-expected.y, 3);
     layer.dispose();
   });
 
