@@ -3,6 +3,7 @@
  * anything from a phone or a laptop with integrated graphics (or a software renderer) up to a
  * desktop GPU. Physics is unaffected: only visual resolution changes.
  */
+import { gfxForcedFull } from '../core/gfxOverride';
 import type { PostSettings } from '../render/api';
 import type { OceanQuality } from '../schema/experiment';
 
@@ -76,8 +77,9 @@ export function detectDeviceProfile(): DeviceProfile {
   if (cached) return cached;
   const gpu = gpuName();
   const g = gpu.toLowerCase();
-  const software = /swiftshader|llvmpipe|softpipe|software|basic render/.test(g);
-  const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  const forced = gfxForcedFull();
+  const software = !forced && /swiftshader|llvmpipe|softpipe|software|basic render/.test(g);
+  const coarse = !forced && (window.matchMedia?.('(pointer: coarse)').matches ?? false);
   const smallScreen = Math.min(window.screen?.width ?? 1920, window.screen?.height ?? 1080) < 820;
   const mobile = coarse && smallScreen;
   const cores = navigator.hardwareConcurrency || 4;
@@ -103,7 +105,7 @@ export function detectDeviceProfile(): DeviceProfile {
       software: true,
       mobile,
     };
-  } else if (mobile || memory <= 4 || cores <= 4) {
+  } else if (!forced && (mobile || memory <= 4 || cores <= 4)) {
     profile = {
       maxQuality: 'medium',
       maxPixelRatio: 1.5,
@@ -112,7 +114,7 @@ export function detectDeviceProfile(): DeviceProfile {
       software: false,
       mobile,
     };
-  } else if (integrated) {
+  } else if (!forced && integrated) {
     profile = {
       maxQuality: 'high',
       maxPixelRatio: 1.5,

@@ -2,6 +2,7 @@
  * WebGL 2 view of the lab: GPU FFT ocean, vessels, gauges and cameras.
  * World space is z-up; the Three.js scene is y-up via (x, y, z) → (x, z, −y).
  */
+import { gfxForcedFull } from '../core/gfxOverride';
 import * as THREE from 'three';
 import { smoothstep } from '../core/mathUtil';
 import { rotate, type Quat, type Vec3 } from '../core/vec';
@@ -200,6 +201,7 @@ function attitudeToThree(q: Quat, out: THREE.Quaternion): THREE.Quaternion {
 }
 
 function rendererTier(gl: WebGL2RenderingContext): 'light' | 'full' {
+  if (gfxForcedFull()) return 'full';
   const ext = gl.getExtension('WEBGL_debug_renderer_info');
   const name = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
   const software = /swiftshader|llvmpipe|softpipe|software/i.test(name);
