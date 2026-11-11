@@ -10,6 +10,10 @@
  *     A_wp       = −∫_S n_z dA                   (closed surface: ∮ n dA = 0)
  *     ∫_wp x dA  = −∫_S x n_z dA,   ∫_wp x² dA = −∫_S x² n_z dA, …  (divergence-free fields)
  *
+ * A body with no waterline (fully submerged, e.g. a submarine below its sail) has A_wp = 0 and
+ * empty waterline extents; every quotient by the waterplane is guarded, so the volume, centroid
+ * and wetted area remain valid and the waterplane moments are zero.
+ *
  * All integrands are polynomials of degree ≤ 2 on each (clipped) triangle, so the 3-point
  * edge-midpoint rule is exact: results are exact for the polyhedral hull up to round-off.
  */
@@ -121,7 +125,10 @@ const acc = new Acc();
 
 /**
  * Submerged-volume properties of `mesh` placed by rotation `rot` (body → fixed) and
- * translation `offset`, cut by the plane z = 0 (water below).
+ * translation `offset`, cut by the plane z = 0 (water below). The centroid is in the fixed
+ * frame, or zero when there is no submerged volume. With no waterline crossings, all
+ * waterline extents are zero. Waterplane area, centroid, and moments are zero when its
+ * computed area is at most 1e-9 of the wetted area, including fully submerged or dry hulls.
  */
 export function submergedProperties(
   mesh: TriangleMesh,
@@ -189,18 +196,24 @@ export function submergedProperties(
       acc.tri(px, py, 0, wx[i2]!, wy[i2]!, z2, qx, qy, 0);
     }
   }
+  // A fully submerged (or fully emerged) hull has no waterline: report an empty one instead of
+  // the ±Infinity extremes, so lengths, beams and waterplane moments stay finite (zero).
+  if (wlMinX > wlMaxX) wlMinX = wlMaxX = wlMinY = wlMaxY = 0;
   const v = acc.v;
-  const awp = acc.awp;
-  const xc = awp > 0 ? acc.ax / awp : 0;
-  const yc = awp > 0 ? acc.ay / awp : 0;
+  // Round-off in a closed submerged surface leaves A_wp ≈ 1e-13 instead of 0: treat anything
+  // below a part per billion of the wetted area as no waterplane at all.
+  const hasWp = acc.awp > 1e-9 * acc.wet;
+  const awp = hasWp ? acc.awp : 0;
+  const xc = hasWp ? acc.ax / awp : 0;
+  const yc = hasWp ? acc.ay / awp : 0;
   return {
     volume: v,
     centroid: v > 0 ? { x: acc.mx / v, y: acc.my / v, z: acc.mz / v } : { x: 0, y: 0, z: 0 },
     waterplaneArea: awp,
     wpCentroidX: xc,
     wpCentroidY: yc,
-    wpIxx: acc.ixx - awp * xc * xc,
-    wpIyy: acc.iyy - awp * yc * yc,
+    wpIxx: hasWp ? acc.ixx - awp * xc * xc : 0,
+    wpIyy: hasWp ? acc.iyy - awp * yc * yc : 0,
     wettedArea: acc.wet,
     wlMinX,
     wlMaxX,
@@ -330,6 +343,8 @@ export interface SectionProperties {
   beam: number;
   draft: number;
   area: number;
+  /** Vertical extent of the submerged outline, lowest to highest point under the water [m]. */
+  height: number;
 }
 
 /**
@@ -343,6 +358,7 @@ export interface SectionProperties {
  *
  * Returns nonnegative submerged area [m²], total waterline width [m] and depth from the
  * waterline to the lowest submerged section point [m], independent of overall winding.
+ * Also returns the vertical extent of the submerged outline [m].
  * Dry or absent sections return zeros. A fully submerged section retains its area and depth
  * from the waterline, but has zero beam when the sampled level is above it.
  */
@@ -350,6 +366,7 @@ export function sectionAt(mesh: TriangleMesh, x: number, zWl: number): SectionPr
   const p = mesh.positions;
   const ix = mesh.indices;
   let zMin = Infinity;
+  let zMax = -Infinity;
   let area = 0;
   let beam = 0;
   const pt = [0, 0, 0, 0];
@@ -394,6 +411,7 @@ export function sectionAt(mesh: TriangleMesh, x: number, zWl: number): SectionPr
       y2 = y1 + (y2 - y1) * s;
       z2 = zWl;
     }
+    zMax = Math.max(zMax, z1, z2);
     area += 0.5 * (y1 + y2) * (z2 - z1);
   }
   // ∮ y dz is +A for a counter-clockwise (y right, z up) outline and −A for a clockwise one;
@@ -403,5 +421,6 @@ export function sectionAt(mesh: TriangleMesh, x: number, zWl: number): SectionPr
     beam: Math.max(0, ccw ? beam : -beam),
     draft: Number.isFinite(zMin) ? zWl - zMin : 0,
     area: Math.abs(area),
+    height: Number.isFinite(zMin) ? zMax - zMin : 0,
   };
 }

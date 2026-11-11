@@ -71,9 +71,15 @@ export const VESSEL_TYPE_LABELS: Record<VesselType, string> = {
   'aircraft-carrier': 'Aircraft carrier',
   'pirate-ship': 'Pirate ship (square-rigged)',
   'sloop-yacht': 'Sloop yacht (Bermuda-rigged)',
+  submarine: 'Submarine (periscope depth)',
   catamaran: 'Catamaran (power, 15 m)',
 };
 
+/**
+ * Create default vessel settings with a fresh ID. The existing vessel `count` determines
+ * its name and starting position; the first vessel starts at the origin. Submarines start
+ * at 4 kn with autopilot on and leave the depth order at its design default.
+ */
 export function newVessel(type: VesselType, count: number): VesselConfig {
   const angle = count * 2.4;
   const r = count === 0 ? 0 : 60 + 25 * count;
@@ -85,7 +91,7 @@ export function newVessel(type: VesselType, count: number): VesselConfig {
     x: Math.round(r * Math.cos(angle)),
     y: Math.round(r * Math.sin(angle)),
     headingDeg: 0,
-    speedKn: type === 'box-barge' ? 0 : type === 'pirate-ship' ? 5 : 6,
+    speedKn: type === 'box-barge' ? 0 : type === 'pirate-ship' ? 5 : type === 'submarine' ? 4 : 6,
     autopilot: type !== 'box-barge',
     kgFactor: 0.6,
     loadFactor: 1,

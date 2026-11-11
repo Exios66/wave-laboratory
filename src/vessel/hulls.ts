@@ -19,13 +19,34 @@
  *  - 31 m square-rigged pirate ship in the style of an early-18th-century frigate (Queen
  *    Anne's Revenge proportions): tumblehome, high sterncastle, three masts, no engine;
  *  - 10 m fin-keel cruising sloop with a Bermuda rig and an auxiliary inboard;
+ *  - 70 m diesel-electric submarine at periscope depth: a body of revolution (6.6 m hull) merged
+ *    with a sail, keel 15 m below the surface, only the sail top and masts piercing it.
  *  - 15 m power catamaran: two slender round-bilge demihulls joined by a bridge deck, lofted as
  *    one closed mesh (very high GM/B, righting arm peaking at small heel).
  */
 import type { Vec3 } from '../core/vec';
 import type { VesselType } from '../schema/experiment';
-import type { HullPaint, LateralFoil, VisualBox, VisualMaterial, ForeAftRig } from './api';
+import type {
+  HullPaint,
+  LateralFoil,
+  SubmarineSpec,
+  TriangleMesh,
+  VisualBox,
+  VisualMaterial,
+  ForeAftRig,
+} from './api';
 import { loftCatamaran, loftHull, type HullShape, type LoftedHull, type LoftOptions } from './mesh';
+import {
+  SAIL_TOP_Z,
+  SUB_AXIS_Z,
+  SUB_DRAFT,
+  SUB_LENGTH,
+  SUB_RADIUS,
+  SUB_X_AFT,
+  SUB_X_FWD,
+  hullRadius,
+  submarineMesh,
+} from './submarineHull';
 
 export interface HullDesign {
   displayName: string;
@@ -70,6 +91,13 @@ export interface HullDesign {
   /** Lateral foils (fin keel) in the keel frame; areas/spans scale with the vessel. */
   foils?: LateralFoil[];
   /**
+   * Hand-built closed hull meshes in the keel frame (physics, display) replacing the lofted
+   * `shape`, which then only serves the windage and reference-point estimates.
+   */
+  mesh?: (fine: boolean) => TriangleMesh;
+  /** Fully submerged hull held at depth by hydroplanes (keel frame; scaled like the hull). */
+  submarine?: SubmarineSpec;
+  /**
    * Catamaran: `shape` describes ONE demihull about its own centreline; two copies at
    * y = ±separation/2 are joined by a bridge deck whose underside is `tunnelRoof(u)` above the
    * keel. `beam` is then the overall beam.
@@ -77,8 +105,13 @@ export interface HullDesign {
   multihull?: { separation: number; tunnelRoof(u: number): number };
 }
 
-/** Loft a design's hull surface: the monohull loft, or the catamaran loft with its bridge deck. */
+/**
+ * Build a design's hull surface using its custom mesh, monohull loft, or catamaran loft.
+ * Custom meshes have no deck-edge indices; display resolution is selected only when `opts`
+ * is the same object as `d.renderLoft`. Errors from a custom mesh builder propagate.
+ */
 export function loftDesignHull(d: HullDesign, opts: LoftOptions): LoftedHull {
+  if (d.mesh) return { mesh: d.mesh(opts === d.renderLoft), deckEdge: new Uint32Array(0) };
   const mh = d.multihull;
   if (!mh) return loftHull(d.shape, opts);
   return loftCatamaran(d.shape, opts, {
@@ -738,6 +771,75 @@ function sloopYacht(): HullDesign {
   };
 }
 
+// ---------------------------------------------------------------------------- submarine
+
+/** Full-scale submarine design in the keel frame, with custom hull meshes and dive planes. */
+function submarine(): HullDesign {
+  const R = SUB_RADIUS;
+  const z0 = SUB_AXIS_Z;
+  const T = SUB_DRAFT;
+  const top = SAIL_TOP_Z;
+  const wing = (x: number, y: number, z: number, sx: number, sy: number, sz: number): VisualBox =>
+    box(x, y, z, sx, sy, sz, 'accent');
+  return {
+    displayName: 'Submarine',
+    description:
+      '70 m diesel-electric submarine at periscope depth: a fully submerged, neutrally buoyant ' +
+      'pressure hull (keel 15 m down) with only the sail and masts piercing the surface. Bow ' +
+      'and stern hydroplanes hold the depth, so she rides the swell as a long, slow heave and ' +
+      'pitch and is almost untouched by the surface chop. She has no deck: hold the ' +
+      'periscope depth and keep out of the shipping lanes.',
+    beam: 2 * R,
+    // Reference depth for KG = kgFactor · depth: the default 0.6 puts G 0.3 m below the centre of
+    // buoyancy, the usual submarine BG (a submerged hull is stable only while B is above G).
+    depth: 5,
+    draft: T,
+    shape: {
+      xAft: () => SUB_X_AFT,
+      xFwd: () => SUB_X_FWD,
+      deckHeight: () => z0 + R,
+      halfBreadth: (u, z) => {
+        const r = hullRadius(SUB_X_AFT + u * SUB_LENGTH);
+        return Math.sqrt(Math.max(0, r * r - (z - z0) ** 2));
+      },
+      flatBottom: false,
+      draft: T,
+    },
+    physicsLoft: { stations: 2, levelsBelow: 1, levelsAbove: 1 },
+    renderLoft: { stations: 2, levelsBelow: 1, levelsAbove: 1 },
+    mesh: submarineMesh,
+    maxSpeedKn: 10,
+    superstructure: [
+      // Attack periscope, induction mast and radar/ESM mast (the only parts above the sail).
+      box(12.4, 0.2, top + 2.2, 0.22, 0.22, 4.6, 'glass'),
+      box(10.6, -0.25, top + 1.7, 0.32, 0.32, 3.6, 'superstructure'),
+      box(14.2, 0.2, top + 2.0, 0.12, 0.12, 4.0, 'accent'),
+      // Sail planes (bow planes) and cruciform stern planes with the rudders.
+      wing(24, 4.05, z0, 2.0, 1.5, 0.14),
+      wing(24, -4.05, z0, 2.0, 1.5, 0.14),
+      wing(-31, 3.2, z0, 3.0, 3.2, 0.16),
+      wing(-31, -3.2, z0, 3.0, 3.2, 0.16),
+      wing(-31, 0, z0 + 3.2, 3.0, 0.16, 3.2),
+      wing(-31, 0, z0 - 3.2, 3.0, 0.16, 3.2),
+    ],
+    bridge: { x: 12.4, y: 0, z: top + 0.4 },
+    propeller: { x: -34, z: z0, diameter: 4, wake: 0.3, timeConstant: 4 },
+    rudder: { x: -33.2, z: z0, area: 9, aspect: 1.2, rateDeg: 3 },
+    paint: { bottom: 0x1a2128, boot: 0x0e1317, topside: 0x242d36 },
+    palette: { superstructure: 0x1c2229, accent: 0x161b21, glass: 0x4a5a66 },
+    keelFin: { areaFraction: 0.02, xFraction: -0.4 },
+    submarine: {
+      axisZ: z0,
+      hullDiameter: 2 * R,
+      hullLength: SUB_LENGTH,
+      bowPlanes: { x: 24, z: z0, area: 6, aspect: 1.6 },
+      sternPlanes: { x: -31, z: z0, area: 14, aspect: 1.4 },
+      maxPlaneDeg: 25,
+      planeRateDeg: 6,
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------- catamaran
 
 /** Full-scale power-catamaran design in the keel frame; `shape` describes one demihull. */
@@ -805,6 +907,7 @@ const BUILDERS: Record<VesselType, () => HullDesign> = {
   'aircraft-carrier': aircraftCarrier,
   'pirate-ship': pirateShip,
   'sloop-yacht': sloopYacht,
+  submarine,
   catamaran,
 };
 

@@ -7,6 +7,8 @@
  *  - KG = kgFactor · D (depth amidships);
  *  - radii of gyration k_xx = 0.38 B and k_yy = k_zz = 0.25 L_wl, the usual design values for
  *    merchant ships (ITTC 7.5-02-07-04.1 suggests 0.35–0.40 B and 0.24–0.26 L).
+ * A submarine's draft is its keel depth: mass is the volume displaced up to the waterline, so
+ * the hull is neutrally buoyant with its sail just piercing the surface.
  * All body-frame geometry is translated so that the CoG is the origin.
  */
 import { KNOT } from '../core/units';
@@ -23,6 +25,7 @@ import type {
   HullPaint,
   LateralFoil,
   SailPlan,
+  SubmarineSpec,
   VesselDefinition,
   VisualBox,
   WindageSpec,
@@ -44,7 +47,9 @@ const GZ_HEELS = Array.from({ length: 37 }, (_, i) => i * 5);
  * built-in vessel, with body-frame geometry centered on the center of gravity.
  * `scale` multiplies design lengths; `kgFactor` sets KG as a fraction of the scaled depth.
  * `loadFactor` targets a multiple of the design displacement in seawater (1025 kg/m³), with
- * draft bounded between 2 % of the design draft and 98 % of the depth; 1 uses the design draft.
+ * draft bounded between 2 % of the design draft and 98 % of the depth (the mesh top for a
+ * submarine); 1 uses the design draft. Submarine draft denotes keel depth, and its stored
+ * righting arm uses GM · sin(heel).
  */
 export function createVesselDefinition(
   type: VesselType,
@@ -66,7 +71,9 @@ export function createVesselDefinition(
   const scaledKeel = transformMesh(physicsKeel.mesh, s, zero);
   const ident = quatToMat3(quatIdentity());
   // Loading condition: the draft at which the hull displaces loadFactor × the design volume.
-  const T = loadedDraft(scaledKeel, ident, designDraft, D, loadFactor);
+  // A submerged hull can sit deeper than its reference depth: let the loading search reach the top.
+  const topZ = d.submarine ? meshBounds(scaledKeel).max.z : D;
+  const T = loadedDraft(scaledKeel, ident, designDraft, topZ, loadFactor);
 
   // Hydrostatics at the loaded draft in the keel frame (water plane at z = T).
   const keelProps = submergedProperties(scaledKeel, ident, { x: 0, y: 0, z: -T });
@@ -79,23 +86,30 @@ export function createVesselDefinition(
   const props = submergedProperties(physicsHull, ident, { x: 0, y: 0, z: kg - T });
   const volume = props.volume;
   const mass = rho * volume;
-  const lwl = props.wlMaxX - props.wlMinX;
-  const bwl = props.wlMaxY - props.wlMinY;
+  const bounds = meshBounds(physicsHull);
+  const length = bounds.max.x - bounds.min.x;
+  // A submerged hull has (almost) no waterline: its length and beam are the hull's own, and the
+  // block coefficient refers to the hull envelope, not to the sail that pierces the surface.
+  const sub = d.submarine;
+  const lwl = sub ? length : props.wlMaxX - props.wlMinX;
+  const bwl = sub ? B : props.wlMaxY - props.wlMinY;
   const kb = props.centroid.z + T; // centroid z is measured from the water plane; keel at −T
-  const bm = props.wpIyy / volume;
-  const bmL = props.wpIxx / volume;
+  const wpDiv = props.waterplaneArea > 0 ? 1 : 0; // guard: no waterplane, no BM
+  const bm = volume > 0 ? (wpDiv * props.wpIyy) / volume : 0;
+  const bmL = volume > 0 ? (wpDiv * props.wpIxx) / volume : 0;
   const gm = kb + bm - kg;
   // Multihull: block coefficient and slenderness refer to one demihull (overall beam minus the
   // hull spacing), the way resistance data for catamarans are quoted.
   const nHulls = d.multihull ? 2 : 1;
   const bHull = d.multihull ? bwl - d.multihull.separation * s : bwl;
-  const cb = volume / (nHulls * lwl * bHull * T);
+  const cb = volume / (nHulls * lwl * bHull * (sub ? B : T));
 
-  const gz = gzCurve(physicsHull, volume, GZ_HEELS, lwl);
+  // A fully submerged body's righting arm is exactly BG sin φ (B is fixed in the hull while the
+  // sail stays clear of trim); the free-floating solve is ill-posed without a waterplane.
+  const gz = sub
+    ? GZ_HEELS.map((h) => (kb + bm - kg) * Math.sin((h * Math.PI) / 180))
+    : gzCurve(physicsHull, volume, GZ_HEELS, lwl);
   const avsDeg = vanishingStabilityAngle(GZ_HEELS, gz);
-
-  const bounds = meshBounds(physicsHull);
-  const length = bounds.max.x - bounds.min.x;
 
   const inertia: Vec3 = {
     x: mass * (ROLL_GYRADIUS * B) ** 2,
@@ -184,6 +198,7 @@ export function createVesselDefinition(
     },
     hydrostatics,
     deckEdgeVertices: physicsKeel.deckEdge,
+    submarine: sub ? scaledSubmarine(sub, s, toBody) : null,
     windage: scaleWindage(designWindage(d), s, toBody),
     sails: d.rig ? sailPlan(d.rig, s, toBody) : null,
     foreAft: d.foreAft ? foreAftRig(d.foreAft, s, toBody) : null,
@@ -197,6 +212,23 @@ export function createVesselDefinition(
       : null,
     palette: { ...d.palette },
     ...(d.multihull ? { multihull: { count: 2, separation: d.multihull.separation * s } } : {}),
+  };
+}
+
+/** Hydroplane and hull data of a submarine, converted from the keel frame to the CoG frame. */
+function scaledSubmarine(sub: SubmarineSpec, s: number, toBody: (p: Vec3) => Vec3): SubmarineSpec {
+  const plane = (p: SubmarineSpec['bowPlanes']): SubmarineSpec['bowPlanes'] => {
+    const b = toBody({ x: p.x, y: 0, z: p.z });
+    return { x: b.x, z: b.z, area: p.area * s * s, aspect: p.aspect };
+  };
+  return {
+    axisZ: toBody({ x: 0, y: 0, z: sub.axisZ }).z,
+    hullDiameter: sub.hullDiameter * s,
+    hullLength: sub.hullLength * s,
+    bowPlanes: plane(sub.bowPlanes),
+    sternPlanes: plane(sub.sternPlanes),
+    maxPlaneDeg: sub.maxPlaneDeg,
+    planeRateDeg: sub.planeRateDeg,
   };
 }
 
