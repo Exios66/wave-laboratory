@@ -117,10 +117,10 @@ export.
 <details>
 <summary><b>Underwater view — Snell's window, depth-graded light</b></summary>
 
-| | |
-|---|---|
-| ![Looking up into Snell's window](docs/screenshots/underwater-snells-window.jpg) | ![A hull from below](docs/screenshots/underwater-hull.jpg) |
-| ![Oceanic I water](docs/screenshots/underwater-oceanic-i.jpg) | ![Coastal 9 water](docs/screenshots/underwater-coastal-9.jpg) |
+|                                                                                  |                                                               |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| ![Looking up into Snell's window](docs/screenshots/underwater-snells-window.jpg) | ![A hull from below](docs/screenshots/underwater-hull.jpg)    |
+| ![Oceanic I water](docs/screenshots/underwater-oceanic-i.jpg)                    | ![Coastal 9 water](docs/screenshots/underwater-coastal-9.jpg) |
 
 The Underwater camera hangs a few metres below the surface (scroll to change
 the depth, drag up to look into Snell's window) and works with or without
@@ -189,16 +189,16 @@ pnpm install
 pnpm dev          # http://localhost:5173
 ```
 
-| Command | What it does |
-| --- | --- |
-| `pnpm dev` | Development server with hot reload |
-| `pnpm build` | Type-check and build to `dist/` |
-| `pnpm test` | Unit tests (physics, analysis, schema, simulation) |
-| `pnpm validate` | Longer statistical physics validation suite |
-| `pnpm test:e2e` | Browser tests on desktop, Pixel 7 and iPhone 14 viewports (run `pnpm build` first) |
-| `pnpm lint` / `pnpm typecheck` / `pnpm format` | Code quality |
-| `pnpm check` | Format, lint, typecheck, unit tests and build in one go |
-| `pnpm deploy:pages` | Build the site into `docs/` and commit it (Pages serves `main` / `docs`) |
+| Command                                        | What it does                                                                       |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `pnpm dev`                                     | Development server with hot reload                                                 |
+| `pnpm build`                                   | Type-check and build to `dist/`                                                    |
+| `pnpm test`                                    | Unit tests (physics, analysis, schema, simulation)                                 |
+| `pnpm validate`                                | Longer statistical physics validation suite                                        |
+| `pnpm test:e2e`                                | Browser tests on desktop, Pixel 7 and iPhone 14 viewports (run `pnpm build` first) |
+| `pnpm lint` / `pnpm typecheck` / `pnpm format` | Code quality                                                                       |
+| `pnpm check`                                   | Format, lint, typecheck, unit tests and build in one go                            |
+| `pnpm deploy:pages`                            | Build the site into `docs/` and commit it (Pages serves `main` / `docs`)           |
 
 > [!TIP]
 > There are no GitHub Actions workflows. Quality checks run locally
