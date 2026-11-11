@@ -53,7 +53,7 @@ export const DEPTH_INTEGRAL_TAU = 200;
  * with a gentle acceleration limit, so no order is ever a step to the loops.
  */
 export const REF_SPEED_HOVER = 0.04;
-export const REF_SPEED_MAX = 0.4;
+export const REF_SPEED_MAX = 0.2;
 export const REF_ACCEL = 0.01;
 export const REF_GAIN = 0.08;
 /** Time for the pump to move the ballast tank from empty-to-full capacity [s]. */

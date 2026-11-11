@@ -71,13 +71,13 @@ describe('sectionAt on analytic meshes', () => {
       expect(deep.draft).toBeCloseTo(3, 5);
       // Dry: nothing.
       const dry = sectionAt(mesh, 0, -0.5);
-      expect(dry).toEqual({ beam: 0, draft: 0, area: 0 });
+      expect(dry).toEqual({ beam: 0, draft: 0, area: 0, height: 0 });
     });
   }
 
   it('a section outside the mesh is empty', () => {
     const s = sectionAt(twin(), 5, 0.5);
-    expect(s).toEqual({ beam: 0, draft: 0, area: 0 });
+    expect(s).toEqual({ beam: 0, draft: 0, area: 0, height: 0 });
   });
 
   it('a single box off the centre line (monohull closed form)', () => {

@@ -76,7 +76,9 @@ describe('DepthKeeper', () => {
     for (let i = 0; i < 600; i++) k.update(at(12, 0), 0.5);
     expect(k.ballastForce).toBeGreaterThan(0); // too shallow: take on water
     expect(k.ballastForce).toBeLessThanOrEqual(2.5e5);
-    k.depthCmd = 5;
+    // Within the integral's anti-windup window (|error| < INTEGRAL_WINDOW), so a boat that will
+    // not rise winds the integral up until the tank is empty.
+    k.depthCmd = 9;
     for (let i = 0; i < 4000; i++) k.update(at(12, 0), 0.5);
     expect(k.ballastForce).toBeCloseTo(-2.5e5, 3); // saturated, pumped out
   });

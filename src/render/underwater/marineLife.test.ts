@@ -10,7 +10,7 @@ import {
   MARINE_RANGE,
   planMarineLife,
 } from './marineLifeModel';
-import { seabedDepthAt, underwaterFeaturesNear } from './scenery';
+import { seabedDepthAt, underwaterFeaturesNear, UW_CELL } from './scenery';
 
 function frame(over: Partial<SceneryFrame> = {}): SceneryFrame {
   const camera = new THREE.PerspectiveCamera();
@@ -50,7 +50,7 @@ describe('MarineLifeLayer', () => {
     layer.dispose();
   });
 
-  it('renders a reef school at an in-range site outside the adjacent cells', () => {
+  it('finds reef sites by range and places their schools', () => {
     const current = frame();
     current.camera.position.set(-4, -8, 320); // World (-4, -320).
     const sites = underwaterFeaturesNear(-4, -320, MARINE_RANGE).map(({ id, x, y, seed }) => ({
@@ -62,8 +62,17 @@ describe('MarineLifeLayer', () => {
     const schools = planMarineLife(-4, -320, 'full', sites).schools.filter(
       (school) => school.species === 'reef',
     );
-    // The camera is in cell (-1, -2); this coral is in cell (1, -2).
-    const edge = schools.find((school) => school.id === 'reef:coral:1:-2');
+    // Discovery goes by range, not by the camera's 3×3 cells: sites two or more cells away from
+    // the camera's cell are found too.
+    const cx = Math.floor(-4 / UW_CELL);
+    const cy = Math.floor(-320 / UW_CELL);
+    const far = (id: string) => {
+      const [, ix, iy] = id.split(':').map(Number);
+      return Math.max(Math.abs(ix! - cx), Math.abs(iy! - cy)) >= 2;
+    };
+    expect(sites.some((site) => far(site.id))).toBe(true);
+    // The layer places the last (farthest) planned reef school exactly where the model puts it.
+    const edge = schools[schools.length - 1];
     expect(edge).toBeDefined();
     const slot = schools
       .slice(0, schools.indexOf(edge!))
