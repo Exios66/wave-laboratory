@@ -103,15 +103,18 @@ const HULL_COLORS: Record<VisualMaterial, number> = {
   flag: 0x0b0b0b,
 };
 
-/** Per-quality budgets for the effects. */
+/**
+ * Per-quality budgets for the effects: rain streaks, spray particles, cloud octaves, cascades
+ * in the water's normals, and cascades with persistent foam maps (0 = instantaneous whitecaps).
+ */
 const BUDGET: Record<
   OceanQuality,
-  { rain: number; spray: number; octaves: number; detail: number }
+  { rain: number; spray: number; octaves: number; detail: number; foam: number }
 > = {
-  low: { rain: 1200, spray: 500, octaves: 3, detail: 3 },
-  medium: { rain: 3500, spray: 1400, octaves: 4, detail: 4 },
-  high: { rain: 7000, spray: 2600, octaves: 5, detail: 4 },
-  ultra: { rain: 11000, spray: 4000, octaves: 6, detail: 4 },
+  low: { rain: 1200, spray: 500, octaves: 3, detail: 3, foam: 0 },
+  medium: { rain: 3500, spray: 1400, octaves: 4, detail: 4, foam: 1 },
+  high: { rain: 7000, spray: 2600, octaves: 5, detail: 4, foam: 2 },
+  ultra: { rain: 11000, spray: 4000, octaves: 6, detail: 4, foam: 3 },
 };
 
 /** Brightness multiplier of the sharp sun glint and sun disc while bloom is on (HDR, > threshold). */
@@ -689,6 +692,7 @@ export class LabRenderer implements LabRendererApi {
     const b = BUDGET[this.quality];
     this.ocean.uniforms.uCloudOctaves!.value = b.octaves;
     this.ocean.uniforms.uDetailCascades!.value = b.detail;
+    this.ocean.setFoamCascades(b.foam);
   }
 
   /** Gust modes for the water's cat's paws (same Fourier modes the vessels feel). */
