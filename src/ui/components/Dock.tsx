@@ -171,7 +171,28 @@ function Transport() {
       <span className="field__hint" title="Physics cost of the last update">
         {stepMs.toFixed(1)} ms
       </span>
+      <RenderCost />
     </div>
+  );
+}
+
+/** Frame rate and, where the browser can measure it, GPU time per frame. */
+function RenderCost() {
+  const [text, setText] = useState('');
+  useEffect(() => {
+    const read = () => {
+      const stats = getRuntime().rendererApi?.stats;
+      if (!stats || stats.fps <= 0) return setText('');
+      const gpu = stats.gpuMs === null ? '' : ` · GPU ${stats.gpuMs.toFixed(1)} ms`;
+      setText(`${Math.round(stats.fps)} fps${gpu}`);
+    };
+    const id = window.setInterval(read, 500);
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <span className="field__hint" title="Frames drawn per second and GPU time per frame">
+      {text}
+    </span>
   );
 }
 

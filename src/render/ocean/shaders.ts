@@ -832,12 +832,21 @@ void main() {
   vec3 scatter = uScatter;
   vec3 kd = max(uAtten, vec3(1.0e-4));
   vec3 body = scatter * ed * 1.1;
+  // Toward sunset the light going into the sea is weak and warm: the body greys instead of
+  // holding its midday blue.
+  body = mix(body, vec3(dot(body, vec3(0.2126, 0.7152, 0.0722))) * vec3(1.0, 0.95, 0.92), 0.45 * uDusk);
   float height = smoothstep(-0.1, 0.65, vEta / max(uHs, 0.3));
   // Upwelling light escapes more easily through the thin upper part of a wave than from under
   // its trough: crests read a little lighter.
   body *= (0.6 + 0.9 * height) * (1.0 - 0.25 * squall);
   // Slopes tilted toward the sun take in more of its light.
   body *= 1.0 + 0.45 * sunVis * clamp(dot(N.xz, normalize(L.xz + vec2(1.0e-5))) * 2.5, -0.5, 1.0);
+  // Under cloud there is no sun to model the waves: the diffuse sky still lights the faces
+  // turned toward the viewer more than those turned away, and a grey sea scatters back more
+  // of it than the same sea under a blue sky.
+  float overcast = smoothstep(0.4, 1.0, uCloud);
+  body *= 1.0 + 0.6 * overcast;
+  body *= 1.0 + 0.7 * overcast * clamp(dot(N.xz, normalize(V.xz + vec2(1.0e-5))) * 3.0, -0.5, 1.0);
   // Subsurface: sunlight that enters the back of a wave, travels through it bent toward the
   // horizon, and leaves through the face toward the viewer. Strongest looking toward a low sun,
   // high on steep faces, tinted by what the water transmits over the path.

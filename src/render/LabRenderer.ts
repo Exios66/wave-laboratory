@@ -4,6 +4,7 @@
  */
 import { gfxForcedFull } from '../core/gfxOverride';
 import * as THREE from 'three';
+import { GpuTimer } from './gpuTimer';
 import { smoothstep } from '../core/mathUtil';
 import { rotate, type Quat, type Vec3 } from '../core/vec';
 import type { GpuOceanData } from '../ocean/gpuData';
@@ -253,6 +254,7 @@ export class LabRenderer implements LabRendererApi {
   readonly stats: RendererStats = {
     fps: 0,
     frameMs: 0,
+    gpuMs: null,
     drawCalls: 0,
     triangles: 0,
     underwater: false,
@@ -385,6 +387,7 @@ export class LabRenderer implements LabRendererApi {
   private fpsFrames = 0;
   private fpsElapsed = 0;
   private lastFrameAt = 0;
+  private readonly gpuTimer: GpuTimer;
   private disposed = false;
   private hs = 1;
   private hasOcean = false;
@@ -419,6 +422,7 @@ export class LabRenderer implements LabRendererApi {
     });
     if (!gl) throw new Error('WebGL 2 is not available in this browser.');
     const texType = oceanTextureType(gl);
+    this.gpuTimer = new GpuTimer(gl);
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       context: gl,
@@ -532,6 +536,7 @@ export class LabRenderer implements LabRendererApi {
     this.onRestored = () => {
       this.ocean.restore();
       this.post.restore();
+      this.gpuTimer.reset();
       opts.onContextRestored?.();
     };
     this.onPointerDown = (ev: PointerEvent) => {
@@ -1198,6 +1203,7 @@ export class LabRenderer implements LabRendererApi {
     const gl = this.renderer.getContext();
     if (gl.isContextLost()) return;
     const t0 = performance.now();
+    this.gpuTimer.begin();
     const t = this.shownT || this.frame?.t || 0;
     this.poseAt(t);
     this.updateWakes(t);
@@ -1223,6 +1229,8 @@ export class LabRenderer implements LabRendererApi {
     this.applyUnderwater();
     if (this.post.active) this.post.render();
     else this.renderer.render(this.scene, this.camera);
+    this.gpuTimer.end();
+    this.stats.gpuMs = this.gpuTimer.ms;
     const now = performance.now();
     this.stats.frameMs = now - t0;
     this.stats.drawCalls = this.renderer.info.render.calls;

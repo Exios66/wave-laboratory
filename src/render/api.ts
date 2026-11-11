@@ -63,6 +63,8 @@ export interface RendererStats {
   fps: number;
   /** CPU time spent in render() [ms]. */
   frameMs: number;
+  /** GPU time of a frame [ms], smoothed; null where the browser cannot measure it. */
+  gpuMs: number | null;
   drawCalls: number;
   triangles: number;
   /** True while the camera is under the sea surface (any camera mode). */
