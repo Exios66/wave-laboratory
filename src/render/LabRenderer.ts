@@ -6,6 +6,7 @@ import { gfxForcedFull } from '../core/gfxOverride';
 import * as THREE from 'three';
 import { GpuTimer } from './gpuTimer';
 import { ScenePrepass } from './water/ScenePrepass';
+import { SkyEnvironment } from './sky/SkyEnvironment';
 import { smoothstep } from '../core/mathUtil';
 import { rotate, type Quat, type Vec3 } from '../core/vec';
 import type { GpuOceanData } from '../ocean/gpuData';
@@ -45,7 +46,7 @@ import { cameraNavigation, chartIslands } from './navigation';
 import { calmFromConditions, ease } from './scenery/ambience';
 import { SeabirdLayer, SHIP_VESSELS } from './scenery/birds';
 import { IslandLayer } from './scenery/islands';
-import { SkyLighting, type LightingState } from './scenery/lighting';
+import { clearHorizonToward, SkyLighting, type LightingState } from './scenery/lighting';
 import { PlaneLayer, type PlanePose } from './scenery/planes';
 import { SailorLayer } from './scenery/sailors';
 import { TrafficLayer } from './scenery/traffic';
@@ -111,17 +112,63 @@ const HULL_COLORS: Record<VisualMaterial, number> = {
 /**
  * Per-quality budgets for the effects: rain streaks, spray particles, cloud octaves, cascades
  * in the water's normals, cascades with persistent foam maps (0 = instantaneous whitecaps), and
- * how much of the scene the water shows (0 nothing, 1 refraction and depth, 2 reflections too).
+ * how much of the scene the water shows (0 nothing, 1 refraction and depth, 2 reflections too),
+ * whether the sky lights the scene's materials (image-based lighting), and the sun's shadow-map
+ * size (0 = no shadows).
  */
 const BUDGET: Record<
   OceanQuality,
-  { rain: number; spray: number; octaves: number; detail: number; foam: number; scene: number }
+  {
+    rain: number;
+    spray: number;
+    octaves: number;
+    detail: number;
+    foam: number;
+    scene: number;
+    ibl: boolean;
+    shadow: number;
+  }
 > = {
-  low: { rain: 1200, spray: 500, octaves: 3, detail: 3, foam: 0, scene: 0 },
-  medium: { rain: 3500, spray: 1400, octaves: 4, detail: 4, foam: 1, scene: 1 },
-  high: { rain: 7000, spray: 2600, octaves: 5, detail: 4, foam: 2, scene: 2 },
-  ultra: { rain: 11000, spray: 4000, octaves: 6, detail: 4, foam: 3, scene: 2 },
+  low: { rain: 1200, spray: 500, octaves: 3, detail: 3, foam: 0, scene: 0, ibl: false, shadow: 0 },
+  medium: {
+    rain: 3500,
+    spray: 1400,
+    octaves: 4,
+    detail: 4,
+    foam: 1,
+    scene: 1,
+    ibl: true,
+    shadow: 0,
+  },
+  high: {
+    rain: 7000,
+    spray: 2600,
+    octaves: 5,
+    detail: 4,
+    foam: 2,
+    scene: 2,
+    ibl: true,
+    shadow: 2048,
+  },
+  ultra: {
+    rain: 11000,
+    spray: 4000,
+    octaves: 6,
+    detail: 4,
+    foam: 3,
+    scene: 2,
+    ibl: true,
+    shadow: 4096,
+  },
 };
+
+/** Width of the square the sun's shadow map covers, centred on the camera's focus [m]. */
+const SHADOW_SPAN = 260;
+/** Distance of the shadow camera from the focus, toward the sun [m]. */
+const SHADOW_DISTANCE = 800;
+
+/** Hemisphere fill kept when the sky's environment map lights the scene (it carries the rest). */
+const HEMI_WITH_IBL = 0.3;
 
 /** Brightness multiplier of the sharp sun glint and sun disc while bloom is on (HDR, > threshold). */
 const SUN_HDR = 3.5;
@@ -179,8 +226,10 @@ const OVERCAST_STORM = [0.36, 0.39, 0.42].map(srgbToLinear);
 const FLASH_RGB = [0.55, 0.6, 0.75];
 
 /**
- * Horizon colour (linear RGB): a direct port of `horizonColor()` / `overcastBase()` in the sky
- * shader, so fogged vessels and the clear colour fade to the same grey as the sky and water.
+ * Horizon colour (linear RGB): a direct port of `horizonColorDir()` / `overcastBase()` in the sky
+ * shader, so fogged vessels and the clear colour fade to the same colour as the sky and water.
+ * `clear` is the clear-sky horizon in the view direction from the sky table (see
+ * sky/atmosphere.ts); without it the old hand-tuned clear horizon is used.
  */
 function horizonColor(
   cloud: number,
@@ -189,14 +238,17 @@ function horizonColor(
   out: THREE.Color,
   night = 0,
   dusk = 0,
+  clear: readonly number[] | null = null,
 ) {
   const mix = (a: number, b: number, t: number) => a + (b - a) * t;
   const overcast = smoothstep(0.2, 0.85, cloud);
   const storm = smoothstep(0.75, 1, cloud);
   const ch = (i: number) => {
     const base = mix(OVERCAST_GREY[i]!, OVERCAST_STORM[i]!, storm);
-    const clear = mix(HORIZON_CLEAR[i]!, HORIZON_DUSK[i]!, dusk * 0.45);
-    const day = mix(clear, base * 0.62, overcast) * daylight;
+    const day = clear
+      ? mix(clear[i]!, base * 0.62 * daylight, overcast)
+      : mix(mix(HORIZON_CLEAR[i]!, HORIZON_DUSK[i]!, dusk * 0.45), base * 0.62, overcast) *
+        daylight;
     return mix(day, HORIZON_NIGHT[i]! * (1 - 0.5 * overcast), night) + FLASH_RGB[i]! * flash * 0.6;
   };
   return out.setRGB(ch(0), ch(1), ch(2));
@@ -277,6 +329,9 @@ export class LabRenderer implements LabRendererApi {
   private readonly sun: THREE.DirectionalLight;
   private readonly hemi: THREE.HemisphereLight;
   private readonly lighting: SkyLighting;
+  private readonly skyEnv: SkyEnvironment;
+  /** Lightning flash this frame (0 … 1). */
+  private flash = 0;
   private readonly islands = new IslandLayer();
   private readonly traffic = new TrafficLayer();
   private readonly underwaterScenery = new UnderwaterSceneryLayer();
@@ -397,6 +452,24 @@ export class LabRenderer implements LabRendererApi {
   private lastFrameAt = 0;
   private readonly gpuTimer: GpuTimer;
   private readonly prepass = new ScenePrepass();
+  private readonly fogLook = new THREE.Vector3();
+  private shadowSize = 0;
+  /** When casters were last marked [ms] and how many top-level objects the scene had then. */
+  private shadowMarkedAt = -Infinity;
+  private shadowMarkedChildren = -1;
+  private readonly shadowDir = new THREE.Vector3();
+  private readonly shadowZero = new THREE.Vector3();
+  private readonly shadowFocus = new THREE.Vector3();
+  private readonly shadowBasis = new THREE.Matrix4();
+  private readonly shadowInv = new THREE.Matrix4();
+  /**
+   * A cleared 1×1 depth target bound to the ocean's shadow sampler while there is no shadow map:
+   * three's own fallback for a missing texture is a colour texture, which a shadow sampler rejects.
+   */
+  private readonly shadowFallback = new THREE.WebGLRenderTarget(1, 1, {
+    depthTexture: new THREE.DepthTexture(1, 1),
+  });
+  private readonly fogClear = [0, 0, 0];
   /** Phones and software GPUs: the scene prepass (refraction, reflections) stays off. */
   private readonly lightTier: boolean;
   private readonly bufferSize = new THREE.Vector2();
@@ -459,6 +532,9 @@ export class LabRenderer implements LabRendererApi {
     Object.assign(this.ocean.uniforms, {
       uMeshScale: { value: 1 },
       uScene: { value: 0 },
+      uShadowMap: { value: null as THREE.Texture | null },
+      uShadowMatrix: { value: new THREE.Matrix4() },
+      uShadowParams: { value: new THREE.Vector3(0, 0, 0) },
       uReflOn: { value: 0 },
       uRefrTex: { value: this.prepass.refraction.texture },
       uRefrDepth: { value: this.prepass.refraction.depthTexture },
@@ -532,7 +608,23 @@ export class LabRenderer implements LabRendererApi {
     this.scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(0xfff4e0, 2.4);
     this.sun.position.set(400, 800, 200);
-    this.scene.add(this.sun);
+    this.scene.add(this.sun, this.sun.target);
+    // The shadow map follows the camera's focus (updateShadows); its matrix is refreshed by the
+    // shadow pass inside each render, so the ocean holds the live object.
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.04;
+    this.sun.shadow.camera.near = 1;
+    this.sun.shadow.camera.far = 2 * SHADOW_DISTANCE;
+    this.ocean.uniforms.uShadowMatrix!.value = this.sun.shadow.matrix;
+    this.renderer.shadowMap.enabled = tier === 'full';
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.autoUpdate = false;
+    this.clearShadowFallback();
+    this.skyEnv = new SkyEnvironment(
+      this.renderer,
+      this.sky.geometry,
+      this.sky.material as THREE.ShaderMaterial,
+    );
     this.lighting = new SkyLighting({
       renderer: this.renderer,
       scene: this.scene,
@@ -559,6 +651,8 @@ export class LabRenderer implements LabRendererApi {
       this.ocean.restore();
       this.post.restore();
       this.gpuTimer.reset();
+      this.skyEnv.invalidate();
+      this.clearShadowFallback();
       opts.onContextRestored?.();
     };
     this.onPointerDown = (ev: PointerEvent) => {
@@ -798,7 +892,24 @@ export class LabRenderer implements LabRendererApi {
       this.windSample.squall,
     );
     const ls = this.lightState;
-    horizonColor(cloud, this.daylight, flash, this.fogColor, ls?.night ?? 0, ls?.dusk ?? 0);
+    this.flash = flash;
+    const clearDir = ls
+      ? clearHorizonToward(
+          ls.skyTable,
+          this.camera.getWorldDirection(this.fogLook),
+          ls.sunDir,
+          this.fogClear,
+        )
+      : null;
+    horizonColor(
+      cloud,
+      this.daylight,
+      flash,
+      this.fogColor,
+      ls?.night ?? 0,
+      ls?.dusk ?? 0,
+      clearDir,
+    );
     this.fog.color.copy(this.fogColor);
     this.renderer.setClearColor(this.fogColor, 1);
     this.sun.intensity = this.sunBase * (1 - 0.85 * smoothstep(0.3, 1, cloud));
@@ -1251,6 +1362,8 @@ export class LabRenderer implements LabRendererApi {
     this.lastRenderT = t;
     this.updateWeather(t, dt);
     this.applyUnderwater();
+    this.updateEnvironment(dt);
+    this.updateShadows();
     this.drawPrepass();
     if (this.post.active) this.post.render();
     else this.renderer.render(this.scene, this.camera);
@@ -1270,6 +1383,124 @@ export class LabRenderer implements LabRendererApi {
       this.stats.fps = (this.fpsFrames / this.fpsElapsed) * 1000;
       this.fpsFrames = 0;
       this.fpsElapsed = 0;
+    }
+  }
+
+  /**
+   * Fit the sun's shadow map to a square round the camera's focus, snapped to whole texels in the
+   * light's frame so it does not crawl as the camera moves, and ask for one shadow pass this
+   * frame (the prepass draws reuse it). Ships, rigs, islands and traffic cast and receive; the
+   * ocean samples the map itself to take the sun off the water in a hull's shadow.
+   */
+  /** Clear the fallback shadow target to "nothing in shadow" and bind it to the ocean. */
+  private clearShadowFallback(): void {
+    const r = this.renderer;
+    const depth = this.shadowFallback.depthTexture!;
+    depth.compareFunction = r.state.buffers.depth.getReversed()
+      ? THREE.GreaterEqualCompare
+      : THREE.LessEqualCompare;
+    const prev = r.getRenderTarget();
+    r.setRenderTarget(this.shadowFallback);
+    r.clear(false, true, false);
+    r.setRenderTarget(prev);
+    const u = this.ocean.uniforms.uShadowMap!;
+    if (!u.value || u.value === depth) u.value = depth;
+  }
+
+  private updateShadows(): void {
+    const size = this.lightTier || this.underwater ? 0 : BUDGET[this.quality].shadow;
+    const u = this.ocean.uniforms;
+    const sun = this.sun;
+    const lit = size > 0 && sun.intensity > 0.05 && sun.position.y > 0;
+    sun.castShadow = lit;
+    if (!lit) {
+      (u.uShadowParams!.value as THREE.Vector3).set(0, 0, 0);
+      // SkyLighting places the light relative to the origin.
+      sun.target.position.set(0, 0, 0);
+      sun.target.updateMatrixWorld();
+      return;
+    }
+    if (this.shadowSize !== size) {
+      this.shadowSize = size;
+      sun.shadow.mapSize.set(size, size);
+      sun.shadow.map?.dispose();
+      sun.shadow.map = null;
+    }
+    const now = performance.now();
+    if (
+      this.scene.children.length !== this.shadowMarkedChildren ||
+      now - this.shadowMarkedAt > 2000
+    ) {
+      // Vessels and scenery instances come and go: re-mark casters when the scene's contents
+      // change and every couple of seconds, rather than tracking every creation site.
+      this.shadowMarkedAt = now;
+      this.shadowMarkedChildren = this.scene.children.length;
+      this.scene.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh || o === this.oceanMesh || o === this.sky) return;
+        // The seabed and what lives on it sit below the water the sun lights.
+        if (o.name.startsWith('underwater-') || o.name.startsWith('marine-')) return;
+        const mat = m.material as THREE.Material;
+        if ((mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
+          m.castShadow = true;
+          m.receiveShadow = true;
+        }
+      });
+    }
+    const cam = sun.shadow.camera;
+    const half = SHADOW_SPAN / 2;
+    cam.left = -half;
+    cam.right = half;
+    cam.top = half;
+    cam.bottom = -half;
+    cam.updateProjectionMatrix();
+    // Snap the focus to the shadow map's texel grid in the light's frame.
+    const dir = this.shadowDir.copy(sun.position).normalize();
+    const basis = this.shadowBasis.lookAt(dir, this.shadowZero, THREE.Object3D.DEFAULT_UP);
+    const focus = this.shadowFocus.copy(this.orbitCentre).setY(0);
+    const local = focus.applyMatrix4(this.shadowInv.copy(basis).invert());
+    const texel = SHADOW_SPAN / size;
+    local.x = Math.round(local.x / texel) * texel;
+    local.y = Math.round(local.y / texel) * texel;
+    focus.copy(local).applyMatrix4(basis);
+    sun.target.position.copy(focus);
+    sun.position.copy(dir).multiplyScalar(SHADOW_DISTANCE).add(focus);
+    sun.target.updateMatrixWorld();
+    sun.updateMatrixWorld();
+    this.renderer.shadowMap.needsUpdate = true;
+    u.uShadowMap!.value = sun.shadow.map?.depthTexture ?? this.shadowFallback.depthTexture;
+    (u.uShadowParams!.value as THREE.Vector3).set(
+      sun.shadow.map ? 1 : 0,
+      sun.shadow.bias,
+      0.75 / size,
+    );
+  }
+
+  /**
+   * Light the scene's standard materials from the sky (see sky/SkyEnvironment.ts) and turn the
+   * hemisphere fill down to match. Off at quality low, on phones and software GPUs, and under the
+   * sea, where the sky above is not what lights a hull.
+   */
+  private updateEnvironment(dt: number): void {
+    const on = !this.lightTier && !this.underwater && BUDGET[this.quality].ibl;
+    if (!on) {
+      this.scene.environment = null;
+      return;
+    }
+    const ls = this.lightState;
+    const u = this.ocean.uniforms;
+    this.skyEnv.update(Number.isFinite(dt) ? Math.max(0, dt) : 0, {
+      sunDir: ls?.sunDir ?? (u.uSunDir!.value as THREE.Vector3),
+      cloud: u.uCloud!.value as number,
+      night: ls?.night ?? 0,
+      dusk: ls?.dusk ?? 0,
+      level: this.daylight,
+    });
+    this.scene.environment = this.skyEnv.texture;
+    if (this.scene.environment) {
+      // Keep the flash at full strength: the environment is not redrawn for a lightning stroke.
+      const flashPart = this.flash * 2.5;
+      this.hemi.intensity = (this.hemi.intensity - flashPart) * HEMI_WITH_IBL + flashPart;
     }
   }
 
@@ -1535,6 +1766,8 @@ export class LabRenderer implements LabRendererApi {
     this.setProbes([]);
     this.ocean.dispose();
     this.prepass.dispose();
+    this.skyEnv.dispose();
+    this.shadowFallback.dispose();
     this.oceanMesh.geometry.dispose();
     (this.oceanMesh.material as THREE.Material).dispose();
     this.sky.geometry.dispose();

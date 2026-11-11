@@ -190,6 +190,12 @@ uniform float uCloudOctaves;
 uniform float uNight;
 uniform float uDusk;
 uniform vec3 uMoonDir;
+// Clear sky from single scattering (sky/atmosphere.ts): the sky-view table, its mean horizon
+// and zenith, and the sunlight's colour after the air (1 at noon).
+uniform sampler2D uSkyLut;
+uniform vec3 uSkyHorizon;
+uniform vec3 uSkyZenith;
+uniform vec3 uSunTint;
 ${NOISE}
 vec3 srgbToLinear(vec3 c) {
   vec3 lo = c / 12.92;
@@ -212,12 +218,27 @@ float overcastAmount() {
   return smoothstep(0.2, 0.85, uCloud);
 }
 // Mirrored by horizonColor() in LabRenderer.ts (fog and clear colour).
+// Clear-sky radiance along nd, read from the sky-view table (see sky/atmosphere.ts for the
+// layout). Directions below the horizon read the horizon row.
+const float SKY_LUT_N = 32.0;
+vec3 clearSky(vec3 nd, vec3 sun) {
+  vec2 hd = normalize(nd.xz + vec2(1e-5));
+  vec2 hs = normalize(sun.xz + vec2(1e-5));
+  float a = acos(clamp(dot(hd, hs), -1.0, 1.0)) / 3.14159265;
+  float v = sqrt(clamp(nd.y, 0.0, 1.0) > 0.0 ? asin(clamp(nd.y, 0.0, 1.0)) / 1.5707963 : 0.0);
+  vec2 uv = (vec2(a, v) * (SKY_LUT_N - 1.0) + 0.5) / SKY_LUT_N;
+  return texture2D(uSkyLut, uv).rgb;
+}
 vec3 horizonColor() {
-  vec3 clear = srgbToLinear(vec3(0.78, 0.84, 0.90));
-  clear = mix(clear, srgbToLinear(vec3(0.95, 0.66, 0.46)), uDusk * 0.45);
-  vec3 c = mix(clear, overcastBase() * 0.62, overcastAmount()) * daylight();
+  vec3 c = mix(uSkyHorizon, overcastBase() * 0.62 * daylight(), overcastAmount());
   c = mix(c, srgbToLinear(vec3(0.15, 0.20, 0.30)) * (1.0 - 0.5 * overcastAmount()), uNight);
   return c + vec3(0.55, 0.6, 0.75) * uFlash * 0.6;
+}
+// The horizon in direction nd: the clear part varies with the azimuth from the sun (warm toward
+// it, cool away), the overcast, night and lightning parts do not.
+vec3 horizonColorDir(vec3 nd, vec3 sun) {
+  float clearPart = (1.0 - overcastAmount()) * (1.0 - uNight);
+  return horizonColor() + (clearSky(vec3(nd.x, 0.0, nd.z), sun) - uSkyHorizon) * clearPart;
 }
 float cloudDensity(vec3 dir) {
   if (dir.y <= 0.0 || uCloud < 0.02) return 0.0;
@@ -236,8 +257,7 @@ float cloudDensity(vec3 dir) {
   return d * smoothstep(0.0, 0.12, dir.y);
 }
 vec3 zenithColor() {
-  vec3 zenithClear = srgbToLinear(vec3(0.16, 0.38, 0.72));
-  vec3 zenith = mix(zenithClear, overcastBase() * 1.6, overcastAmount()) * daylight();
+  vec3 zenith = mix(uSkyZenith, overcastBase() * 1.6 * daylight(), overcastAmount());
   return mix(zenith, srgbToLinear(vec3(0.04, 0.07, 0.15)) * (1.0 - 0.5 * overcastAmount()), uNight);
 }
 // Cloud: bright tops toward the sun, dark bases when the deck is thick.
@@ -256,16 +276,12 @@ vec3 skyColorExt(vec3 dir, vec3 sun, float discs) {
   vec3 col = dir.y >= 0.0 ? mix(horizon, zenith, up) : mix(horizon, below, clamp(-dir.y, 0.0, 1.0));
   vec3 nd = normalize(dir);
   float clear = 1.0 - overcastAmount();
-  if (uDusk > 0.001) {
-    // Golden hour: a warm band low in the sky, strongest toward the sun, violet-blue above.
-    vec2 hd = normalize(nd.xz + vec2(1e-5));
-    vec2 hs = normalize(sun.xz + vec2(1e-5));
-    float toward = 0.5 + 0.5 * dot(hd, hs);
-    float low = 1.0 - smoothstep(-0.05, 0.45, abs(nd.y));
-    vec3 warm = mix(srgbToLinear(vec3(0.98, 0.72, 0.52)), srgbToLinear(vec3(1.0, 0.52, 0.26)), toward);
-    col = mix(col, warm * daylight(), uDusk * clear * low * mix(0.45, 0.95, toward * toward));
-    col = mix(col, srgbToLinear(vec3(0.30, 0.34, 0.62)) * daylight(), uDusk * clear * up * 0.35);
-  }
+  // Clear sky: the table adds what the zenith-horizon gradient lacks (glow round the sun, a warm
+  // horizon toward it at golden hour, a cooler one away from it).
+  float clearPart = clear * (1.0 - uNight);
+  vec3 lut = clearSky(nd, sun);
+  col += (lut - mix(uSkyHorizon, uSkyZenith, dir.y >= 0.0 ? up : 0.0)) * clearPart
+    * (dir.y >= 0.0 ? 1.0 : 1.0 - clamp(-dir.y * 4.0, 0.0, 1.0));
   if (uNight > 0.001) {
     float md = max(dot(nd, uMoonDir), 0.0);
     float moonUp = smoothstep(-0.04, 0.02, uMoonDir.y) * uNight * (1.0 - cloudDensity(dir)) * (1.0 - 0.8 * overcastAmount());
@@ -275,9 +291,10 @@ vec3 skyColorExt(vec3 dir, vec3 sun, float discs) {
   float clearSun = 1.0 - smoothstep(0.55, 0.95, uCloud);
   float sunGate = 1.0 - uNight * (1.0 - smoothstep(-0.06, 0.0, sun.y));
   float sunDisc = pow(max(dot(nd, sun), 0.0), 1400.0) * (1.0 - d) * clearSun * sunGate * discs;
-  float glow = pow(max(dot(nd, sun), 0.0), 8.0) * (1.0 - 0.7 * uCloud);
+  // The clear-sky glow round the sun is in the table; thin cloud keeps a diffuse aureole.
+  float glow = pow(max(dot(nd, sun), 0.0), 8.0) * overcastAmount() * (1.0 - 0.7 * uCloud);
   vec3 glowCol = mix(srgbToLinear(vec3(1.0, 0.85, 0.65)), srgbToLinear(vec3(1.0, 0.55, 0.25)), uDusk);
-  col += srgbToLinear(vec3(1.0, 0.96, 0.88)) * sunDisc * 1.6 * uSunHdr;
+  col += srgbToLinear(vec3(1.0, 0.96, 0.88)) * uSunTint * sunDisc * 1.6 * uSunHdr;
   col += glowCol * glow * (0.28 + 0.35 * uDusk) * daylight() * (1.0 - uNight * (1.0 - smoothstep(-0.2, 0.0, sun.y)));
   col = mix(col, cloudColor(nd, sun, d), d * 0.92);
   col += vec3(0.6, 0.65, 0.85) * uFlash * 0.25;
@@ -292,7 +309,8 @@ vec3 skyBlurred(vec3 dir, vec3 sun) {
   vec3 nd = normalize(dir);
   float up = pow(clamp(nd.y, 0.0, 1.0), 0.55);
   vec3 col = mix(horizonColor(), zenithColor(), up * 0.85);
-  float glow = pow(max(dot(nd, sun), 0.0), 4.0) * (1.0 - 0.7 * uCloud);
+  col += (clearSky(nd, sun) - mix(uSkyHorizon, uSkyZenith, up)) * (1.0 - overcastAmount()) * (1.0 - uNight) * 0.85;
+  float glow = pow(max(dot(nd, sun), 0.0), 4.0) * overcastAmount() * (1.0 - 0.7 * uCloud);
   vec3 glowCol = mix(srgbToLinear(vec3(1.0, 0.85, 0.65)), srgbToLinear(vec3(1.0, 0.55, 0.25)), uDusk);
   col += glowCol * glow * (0.2 + 0.3 * uDusk) * daylight() * (1.0 - uNight * (1.0 - smoothstep(-0.2, 0.0, sun.y)));
   float cover = uCloud * smoothstep(0.0, 0.15, nd.y);
@@ -733,6 +751,28 @@ float softCap(float x, float cap) {
   return x / (1.0 + x / cap);
 }
 
+// The sun's shadow map (LabRenderer.updateShadows): 1 = in sunlight, 0 = in a hull's shadow.
+// The water keeps a little of the sun even in shadow: light scattered in from the sunlit sea round
+// about.
+uniform sampler2DShadow uShadowMap;
+uniform mat4 uShadowMatrix;
+uniform vec3 uShadowParams; // (on, bias, texel size in shadow-map uv)
+float oceanShadow(vec3 p) {
+  if (uShadowParams.x < 0.5) return 1.0;
+  vec4 c = uShadowMatrix * vec4(p, 1.0);
+  c.xyz /= c.w;
+  if (c.x < 0.0 || c.x > 1.0 || c.y < 0.0 || c.y > 1.0 || c.z > 1.0) return 1.0;
+  float z = c.z + uShadowParams.y;
+  float t = uShadowParams.z;
+  float s = texture(uShadowMap, vec3(c.xy + vec2(-t, -t), z))
+    + texture(uShadowMap, vec3(c.xy + vec2(t, -t), z))
+    + texture(uShadowMap, vec3(c.xy + vec2(-t, t), z))
+    + texture(uShadowMap, vec3(c.xy + vec2(t, t), z));
+  // Fade out toward the edge of the shadow box, so a long low-sun shadow never ends in a cut.
+  float edge = smoothstep(0.0, 0.08, min(min(c.x, 1.0 - c.x), min(c.y, 1.0 - c.y)));
+  return mix(1.0, s * 0.25, 0.85 * edge);
+}
+
 // Distance from the camera to whatever the prepass drew at screen position uv [m].
 float sceneDistance(vec2 uv) {
   float z = texture(uRefrDepth, uv).x;
@@ -838,8 +878,12 @@ void main() {
   float cloudDim = 1.0 - 0.85 * smoothstep(0.3, 1.0, uCloud);
   float sunElev = degrees(asin(clamp(L.y, -1.0, 1.0)));
   float sunE = clamp(0.35 + sunElev / 28.0, 0.25, 2.6) * smoothstep(-4.0, 3.0, sunElev) * cloudDim;
+  // In a hull's shadow the sun is gone and the hull also hides part of the sky beside it.
+  float shade = oceanShadow(vThreePos);
+  sunE *= shade;
+  float skyShade = mix(0.6, 1.0, shade);
   float sunVis = (1.0 - smoothstep(0.5, 0.95, uCloud)) * smoothstep(-0.02, 0.04, L.y);
-  vec3 sunCol = mix(vec3(1.0, 0.97, 0.92), srgbToLinear(vec3(1.0, 0.70, 0.45)), uDusk);
+  vec3 sunCol = vec3(1.0, 0.97, 0.92) * uSunTint;
   float moonElev = degrees(asin(clamp(uMoonDir.y, -1.0, 1.0)));
   float moonE = (0.7 * smoothstep(2.0, 20.0, moonElev) + 0.25) * smoothstep(-2.0, 2.0, moonElev)
     * uNight * (1.0 - smoothstep(-4.0, 3.0, sunElev)) * cloudDim;
@@ -847,7 +891,7 @@ void main() {
   vec3 ambient = skyAmbient();
   // Downwelling irradiance below the surface: direct sun and moon, the sky dome, lightning.
   vec3 ed = sunE * max(L.y, 0.0) * sunCol + moonE * max(uMoonDir.y, 0.0) * moonCol
-    + PI * ambient + vec3(uFlash * 0.5);
+    + PI * ambient * skyShade + vec3(uFlash * 0.5);
 
   // Refracted / body light: what comes up out of the water. Jerlov in-scatter and light
   // through the wave faces here; further down, whatever lies behind the surface.
@@ -1014,7 +1058,7 @@ void main() {
 
   // Sun and moon glitter: GGX on the unresolved slope variance, so the glitter path widens with
   // distance instead of sparkling, energy-capped below a bloomable ceiling.
-  vec3 glint = mix(srgbToLinear(vec3(1.0, 0.97, 0.90)), srgbToLinear(vec3(1.0, 0.68, 0.40)), uDusk);
+  vec3 glint = srgbToLinear(vec3(1.0, 0.97, 0.90)) * uSunTint;
   // Only tight, sharp glints get the HDR headroom that blooms; a broad, rough glitter path
   // stays just under the bloom threshold.
   float sharpGlint = 1.0 - smoothstep(0.05, 0.18, alpha);
@@ -1061,7 +1105,7 @@ void main() {
     col = underwaterSurface(V, dot(N, V) < 0.0 ? -N : N, foam);
   } else {
     float fogAmount = 1.0 - exp(-pow(dist * uFogDensity, 2.0));
-    col = mix(col, horizonColor(), clamp(fogAmount, 0.0, 1.0));
+    col = mix(col, horizonColorDir(-V, uSunDir), clamp(fogAmount, 0.0, 1.0));
   }
   gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
@@ -1198,7 +1242,7 @@ void main() {
   }
   // Low visibility (rain, fog) hides the horizon and the lower sky.
   float haze = clamp(uFogDensity * 4000.0, 0.0, 1.0);
-  col = mix(col, horizonColor(), haze * (1.0 - smoothstep(0.0, 0.35, dir.y)));
+  col = mix(col, horizonColorDir(dir, uSunDir), haze * (1.0 - smoothstep(0.0, 0.35, dir.y)));
   gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
