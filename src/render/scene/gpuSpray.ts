@@ -60,6 +60,10 @@ export class GpuSprayPool {
         uColor: { value: new THREE.Color(0.92, 0.95, 0.97) },
         uSunDir: { value: new THREE.Vector3(0, 1, 0) },
         uSunK: { value: 0 },
+        uSoft: { value: 0 },
+        uSceneDepth: { value: null as THREE.Texture | null },
+        uResolution: { value: new THREE.Vector2(1, 1) },
+        uDepthParams: { value: new THREE.Vector3(0.2, 40000, 1) },
       },
       vertexShader: GPU_SPRAY_VERT,
       fragmentShader: GPU_SPRAY_FRAG,
@@ -111,6 +115,22 @@ export class GpuSprayPool {
     (this.material.uniforms.uSunDir!.value as THREE.Vector3).copy(sunDir);
     this.material.uniforms.uSunK!.value = sunK;
     this.skyTint.copy(sky);
+  }
+
+  /**
+   * Fade the droplets out just in front of solid scenery, using the depth the water prepass drew
+   * (null turns it off). depthParams = (near, far, 1 for a reversed depth buffer).
+   */
+  setSceneDepth(
+    depth: THREE.Texture | null,
+    resolution: THREE.Vector2,
+    depthParams: THREE.Vector4,
+  ): void {
+    const u = this.material.uniforms;
+    u.uSoft!.value = depth ? 1 : 0;
+    u.uSceneDepth!.value = depth;
+    (u.uResolution!.value as THREE.Vector2).copy(resolution);
+    (u.uDepthParams!.value as THREE.Vector3).set(depthParams.x, depthParams.y, depthParams.z);
   }
 
   /** Advance the clock and upload what was emitted (the wind is baked into each particle). */

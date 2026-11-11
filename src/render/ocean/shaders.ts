@@ -482,6 +482,17 @@ uniform sampler2D uF0;
 uniform sampler2D uF1;
 uniform sampler2D uF2;
 uniform float uFoamCascades;
+// The rest of the scene as the water sees it (water/ScenePrepass.ts): colour and depth behind
+// the surface, and the mirrored view above it. uDepthParams = (near, far, reversed depth, -).
+uniform float uScene;
+uniform float uReflOn;
+uniform sampler2D uRefrTex;
+uniform sampler2D uRefrDepth;
+uniform sampler2D uReflTex;
+uniform mat4 uReflMatrix;
+uniform vec2 uResolution;
+uniform vec4 uDepthParams;
+uniform vec2 uTanHalf;
 uniform vec4 uFoamShare;
 uniform vec4 uFoamMargin;
 // Mean-square slope of each cascade [-] (GpuCascade.slopeVariance).
@@ -722,6 +733,17 @@ float softCap(float x, float cap) {
   return x / (1.0 + x / cap);
 }
 
+// Distance from the camera to whatever the prepass drew at screen position uv [m].
+float sceneDistance(vec2 uv) {
+  float z = texture(uRefrDepth, uv).x;
+  float near = uDepthParams.x;
+  float far = uDepthParams.y;
+  float viewZ = uDepthParams.z > 0.5
+    ? (near * far) / (near + z * (far - near))
+    : (2.0 * near * far) / (far + near - (2.0 * z - 1.0) * (far - near));
+  return viewZ * length(vec3((uv * 2.0 - 1.0) * uTanHalf, 1.0));
+}
+
 vec2 foamSample(sampler2D tex, float size, vec2 p) {
   return texture(tex, p / size + (0.5 / uN)).rg;
 }
@@ -827,8 +849,8 @@ void main() {
   vec3 ed = sunE * max(L.y, 0.0) * sunCol + moonE * max(uMoonDir.y, 0.0) * moonCol
     + PI * ambient + vec3(uFlash * 0.5);
 
-  // Refracted / body light: what comes up out of the water (Stage 2 replaces this block with
-  // the refracted scene). Jerlov in-scatter, light through the wave faces, the seabed.
+  // Refracted / body light: what comes up out of the water. Jerlov in-scatter and light
+  // through the wave faces here; further down, whatever lies behind the surface.
   vec3 scatter = uScatter;
   vec3 kd = max(uAtten, vec3(1.0e-4));
   vec3 body = scatter * ed * 1.1;
@@ -860,14 +882,36 @@ void main() {
   vec3 sssTint = scatter * 8.0 + trans * vec3(0.03, 0.12, 0.10);
   float sssSun = (0.15 + 1.6 * toward) * height * facing * sunE * sunVis;
   vec3 refracted = body + sssTint * (sssSun * sunCol + PI * ambient * 0.4 * height * (0.4 + 0.6 * facing)) * 0.35;
-  // Optically shallow water: the bottom shows through where K_d · depth is small.
-  vec3 transCrest = exp(-kd * mix(1.6, 0.22, crest));
-  vec3 bottom = srgbToLinear(vec3(0.30, 0.26, 0.16));
-  float kdMean = dot(kd, vec3(0.3, 0.45, 0.25));
-  float seeBottom = exp(-kdMean * uWaterDepth) * (1.0 - smoothstep(20.0, 70.0, uWaterDepth));
-  refracted = mix(refracted, mix(refracted, bottom * transCrest * ed * 0.18, 0.6), seeBottom);
+  // What lies behind the surface. With the scene prepass: the refracted picture of hulls, shores
+  // and the seabed, absorbed along the real path through the water, and a line of foam where
+  // the sea meets them. Without it: a flat bottom showing through optically shallow water.
+  float contact = 0.0;
+  if (uScene > 0.5) {
+    vec2 suv = gl_FragCoord.xy / uResolution;
+    float d0 = sceneDistance(suv);
+    float path0 = max(d0 - dist, 0.0);
+    vec2 bend = (viewMatrix * vec4(N, 0.0)).xy * 0.05 * clamp(path0 * 0.4, 0.0, 1.0) / (1.0 + dist * 0.01);
+    vec2 suv2 = clamp(suv + bend, vec2(0.002), vec2(0.998));
+    float d1 = sceneDistance(suv2);
+    // Never bend the ray onto something in front of the water.
+    if (d1 < dist) {
+      suv2 = suv;
+      d1 = d0;
+    }
+    float path = max(d1 - dist, 0.0);
+    float hit = 1.0 - step(uDepthParams.y * 0.8, d1);
+    vec3 through = exp(-kd * path * 1.5) * hit;
+    refracted = mix(refracted, texture(uRefrTex, suv2).rgb, through);
+    contact = (1.0 - smoothstep(0.0, 0.9, path0)) * step(dist - 0.5, d0) * (1.0 - step(uDepthParams.y * 0.8, d0));
+  } else {
+    vec3 transCrest = exp(-kd * mix(1.6, 0.22, crest));
+    vec3 bottom = srgbToLinear(vec3(0.30, 0.26, 0.16));
+    float kdMean = dot(kd, vec3(0.3, 0.45, 0.25));
+    float seeBottom = exp(-kdMean * uWaterDepth) * (1.0 - smoothstep(20.0, 70.0, uWaterDepth));
+    refracted = mix(refracted, mix(refracted, bottom * transCrest * ed * 0.18, 0.6), seeBottom);
+  }
 
-  // Reflected light (Stage 2 may replace the sky lookup with a planar reflection). Rough water
+  // Reflected light. Rough water
   // reflects a wider cone of sky: the lookup is lifted (the facets turned toward the viewer
   // see higher sky) and blurred. A ray reflected downward meets another wave: it sees that
   // wave's mix of low sky and water.
@@ -879,6 +923,16 @@ void main() {
   skyR = mix(skyR, skyBlurred(Rs, uSunDir), smoothstep(0.08, 0.45, alpha));
   vec3 lowSea = mix(horizonColor() * 0.85, refracted, 0.55);
   vec3 reflection = mix(skyR, lowSea, smoothstep(0.0, 0.25, -R.y));
+  // Ships, islands and structures mirrored in the mean sea level, displaced by the wave normal
+  // and fading out as the water gets too rough to hold an image.
+  if (uReflOn > 0.5) {
+    vec4 rc = uReflMatrix * vec4(vThreePos.x, 0.0, vThreePos.z, 1.0);
+    if (rc.w > 0.0) {
+      vec2 ruv = rc.xy / rc.w + N.xz * vec2(0.06, 0.12);
+      vec4 mirrored = texture(uReflTex, clamp(ruv, vec2(0.002), vec2(0.998)));
+      reflection = mix(reflection, mirrored.rgb, clamp(mirrored.a, 0.0, 1.0) * (1.0 - smoothstep(0.3, 0.55, alpha)));
+    }
+  }
 
   vec3 col = mix(refracted, reflection, fresnel);
 
@@ -944,7 +998,7 @@ void main() {
   float lace = max(fa1.b, fa2.b * 0.85);
   float pattern = clamp(lace * 0.7 + (fa1.a * 0.6 + fa2.a * 0.4) * 0.4, 0.0, 1.0);
   float wake = wakeFoam(label, foot);
-  float coverage = clamp(foamAcc + streaks * (0.6 + 0.4 * fa1.a) + wake, 0.0, 1.0);
+  float coverage = clamp(foamAcc + streaks * (0.6 + 0.4 * fa1.a) + wake + contact * 0.55, 0.0, 1.0);
   // As foam ages its sheet breaks up into lace: erode the texture by the coverage. Where the
   // texture is filtered away (distance), the coverage itself is the mean.
   // Fresh breaking and the churned water of a wake are denser than residual foam.
@@ -1232,7 +1286,9 @@ varying float vAlpha;
 varying vec2 vDir;
 varying float vStretch;
 varying float vLit;
+varying float vViewZ;
 void main() {
+  vViewZ = 1.0;
   float age = uTime - aMisc.x;
   float life = max(aVel.w, 1e-3);
   float u = age / life;
@@ -1252,6 +1308,7 @@ void main() {
   vec3 v = vt + (aVel.xyz - vt) * decay;
   vec4 mv = viewMatrix * vec4(p, 1.0);
   vec4 clip = projectionMatrix * mv;
+  vViewZ = -mv.z;
   // Screen-space direction of travel: fast spray is drawn as a short streak along it.
   vec4 clip2 = projectionMatrix * (mv + vec4((viewMatrix * vec4(v, 0.0)).xyz * 0.05, 0.0));
   vec2 d = (clip2.xy / clip2.w - clip.xy / clip.w) * vec2(uAspect, 1.0);
@@ -1270,10 +1327,15 @@ void main() {
 
 export const GPU_SPRAY_FRAG = /* glsl */ `
 uniform vec3 uColor;
+uniform float uSoft;
+uniform sampler2D uSceneDepth;
+uniform vec2 uResolution;
+uniform vec3 uDepthParams;
 varying float vAlpha;
 varying vec2 vDir;
 varying float vStretch;
 varying float vLit;
+varying float vViewZ;
 void main() {
   vec2 c = (gl_PointCoord - 0.5) * 2.0;
   c.y = -c.y;
@@ -1282,6 +1344,17 @@ void main() {
   float r = dot(q, q);
   if (r > 1.0) discard;
   float soft = (1.0 - r) * sqrt(1.0 - r);
+  // Soft particles: fade out over the last 0.8 m in front of whatever the prepass drew (hulls,
+  // islands) instead of being cut off along a hard line.
+  if (uSoft > 0.5) {
+    float z = texture2D(uSceneDepth, gl_FragCoord.xy / uResolution).x;
+    float near = uDepthParams.x;
+    float far = uDepthParams.y;
+    float sceneZ = uDepthParams.z > 0.5
+      ? (near * far) / (near + z * (far - near))
+      : (2.0 * near * far) / (far + near - (2.0 * z - 1.0) * (far - near));
+    soft *= clamp((sceneZ - vViewZ) / 0.8, 0.0, 1.0);
+  }
   gl_FragColor = vec4(uColor * vLit, vAlpha * soft);
   #include <colorspace_fragment>
 }
