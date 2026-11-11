@@ -796,7 +796,8 @@ void main() {
   float lodA = log2(footAniso * 256.0 / DETAIL_TILE_A);
   float lodB = log2(footAniso * 256.0 / DETAIL_TILE_B);
   mss += 2.0 * (ampA * ampA * smoothstep(0.8, 5.9, lodA) + ampB * ampB * smoothstep(0.8, 5.9, lodB));
-  float a2 = clamp(mss, 2.0e-4, 0.6);
+  // Capped near the largest slope variance measured at sea (Cox and Munk at storm winds).
+  float a2 = clamp(mss, 2.0e-4, 0.14);
   float alpha = sqrt(a2);
 
   // Lagrangian normal: tangents (1 + Dxx, 0, ηx) and (0, 1 + Dyy, ηy) in world (x, y, z).
@@ -830,11 +831,13 @@ void main() {
   // the refracted scene). Jerlov in-scatter, light through the wave faces, the seabed.
   vec3 scatter = uScatter;
   vec3 kd = max(uAtten, vec3(1.0e-4));
-  vec3 body = scatter * ed * 0.7;
+  vec3 body = scatter * ed * 1.1;
   float height = smoothstep(-0.1, 0.65, vEta / max(uHs, 0.3));
   // Upwelling light escapes more easily through the thin upper part of a wave than from under
   // its trough: crests read a little lighter.
-  body *= (0.8 + 0.45 * height) * (1.0 - 0.25 * squall);
+  body *= (0.6 + 0.9 * height) * (1.0 - 0.25 * squall);
+  // Slopes tilted toward the sun take in more of its light.
+  body *= 1.0 + 0.45 * sunVis * clamp(dot(N.xz, normalize(L.xz + vec2(1.0e-5))) * 2.5, -0.5, 1.0);
   // Subsurface: sunlight that enters the back of a wave, travels through it bent toward the
   // horizon, and leaves through the face toward the viewer. Strongest looking toward a low sun,
   // high on steep faces, tinted by what the water transmits over the path.
@@ -847,7 +850,7 @@ void main() {
   vec3 trans = exp(-kd * path);
   vec3 sssTint = scatter * 8.0 + trans * vec3(0.03, 0.12, 0.10);
   float sssSun = (0.15 + 1.6 * toward) * height * facing * sunE * sunVis;
-  vec3 refracted = body + sssTint * (sssSun * sunCol + PI * ambient * 0.12 * height) * 0.35;
+  vec3 refracted = body + sssTint * (sssSun * sunCol + PI * ambient * 0.4 * height * (0.4 + 0.6 * facing)) * 0.35;
   // Optically shallow water: the bottom shows through where K_d · depth is small.
   vec3 transCrest = exp(-kd * mix(1.6, 0.22, crest));
   vec3 bottom = srgbToLinear(vec3(0.30, 0.26, 0.16));
@@ -905,6 +908,13 @@ void main() {
       foamAcc = 1.0 - (1.0 - foamAcc) * (1.0 - inst);
       fresh = max(fresh, inst);
     }
+    // Left-behind foam thins where the surface is stretching again and stays dense where the
+    // fine waves still compress it, which gives a 4 m foam texel its metre-scale structure.
+    foamAcc *= mix(0.4, 1.0, 1.0 - smoothstep(0.8, 1.15, jacobian));
+    // Crests breaking this instant show at once, before the maps have built up their trails.
+    float instAll = foamInject(jacobian, foamGate(uWhitecap, squall, 1.0, 0.0), 1.0, onCrest);
+    foamAcc = max(foamAcc, instAll);
+    fresh = max(fresh, instAll);
     // Squall lines whip up more of it.
     foamAcc = clamp(foamAcc * (1.0 + 0.8 * squall), 0.0, 1.0);
   } else {
@@ -929,10 +939,12 @@ void main() {
   // As foam ages its sheet breaks up into lace: erode the texture by the coverage. Where the
   // texture is filtered away (distance), the coverage itself is the mean.
   // Fresh breaking and the churned water of a wake are denser than residual foam.
-  float solid = clamp(coverage * 0.8 + 0.3 * fresh + 0.4 * wake, 0.0, 0.95);
-  float eroded = smoothstep(1.0 - solid, 1.0 - solid + 0.35, pattern) * (0.55 + 0.45 * solid);
+  float solid = clamp(coverage * 0.7 + 0.2 * fresh + 0.4 * wake, 0.0, 0.9);
+  float eroded = smoothstep(1.0 - solid, 1.0 - solid + 0.45, pattern) * (0.55 + 0.45 * solid);
   float texFar = smoothstep(3.0, 6.0, log2(footAniso * 256.0 / FOAM_TILE_A));
   float foam = clamp(mix(eroded, coverage, texFar), 0.0, 1.0);
+  // Wind streaks are thin already: they keep their own shape instead of eroding away.
+  foam = max(foam, streaks * (0.5 + 0.5 * fa1.a));
   // Bubbles below the surface: decaying foam leaves a pale blue-green cloud under the water.
   float bubbles = clamp(foamAcc - fresh, 0.0, 1.0) * (1.0 - foam);
   col = mix(col, (scatter * 6.0 + vec3(0.02, 0.07, 0.065)) * ed * 0.45, bubbles * 0.4);
@@ -955,7 +967,7 @@ void main() {
   float wrap = clamp((dot(N, L) + 0.3) / 1.3, 0.0, 1.0);
   vec3 foamCol = srgbToLinear(vec3(0.90, 0.94, 0.96))
     * ((sunE * sunCol * wrap + moonE * moonCol * clamp((dot(N, uMoonDir) + 0.3) / 1.3, 0.0, 1.0)) / PI
-      + ambient * (0.75 + 0.25 * N.y) + vec3(uFlash * 0.5));
+      + ambient * (1.3 + 0.4 * N.y) + vec3(uFlash * 0.5));
   col = mix(col, foamCol, foam * 0.95);
 
   if (uOverlay > 0.5 && uOverlay < 1.5) {
