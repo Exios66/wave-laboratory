@@ -25,6 +25,28 @@ async function simulationSeconds(time: ReturnType<Page['locator']>): Promise<num
   return Number(m![1]);
 }
 
+/**
+ * The playback clock passes `from` without ever dropping below it (a restart would reset it to 0).
+ * Polls instead of sleeping because software rendering can take seconds to advance one step.
+ */
+async function expectClockContinues(
+  time: ReturnType<Page['locator']>,
+  from: number,
+): Promise<void> {
+  let lowest = Infinity;
+  await expect
+    .poll(
+      async () => {
+        const t = await simulationSeconds(time);
+        lowest = Math.min(lowest, t);
+        return t;
+      },
+      { timeout: 30_000 },
+    )
+    .toBeGreaterThan(from);
+  expect(lowest).toBeGreaterThanOrEqual(from);
+}
+
 test.describe('Wave Laboratory app', () => {
   test('boots, simulates and renders without errors', async ({ page }) => {
     const errors = trackErrors(page);
@@ -139,20 +161,19 @@ test.describe('Wave Laboratory app', () => {
   });
 
   test('records data and shows statistics', async ({ page }) => {
+    test.setTimeout(150_000);
     await page.goto('/');
     await waitForSimulation(page);
     await page.getByRole('combobox', { name: 'Simulation speed' }).selectOption('4');
-    // At 4× speed the simulation outruns the wall clock: poll until it has.
-    // Compare elapsed intervals so setup progress before the timer starts can't satisfy it.
+    // The recorder needs >= 128 gauge samples before it reports spectral parameters. Wait for
+    // enough *simulated* time to elapse rather than racing the wall clock: the frame loop caps
+    // each frame at 0.1 s of wall time, so under software rendering (a few fps) the simulation
+    // legitimately runs slower than real time even at 4x.
     const time = page.locator('.transport__time');
     const startTime = await simulationSeconds(time);
-    const started = Date.now();
     await expect
-      .poll(
-        async () => (await simulationSeconds(time)) - startTime - (Date.now() - started) / 1000,
-        { timeout: 30_000 },
-      )
-      .toBeGreaterThan(0);
+      .poll(async () => (await simulationSeconds(time)) - startTime, { timeout: 120_000 })
+      .toBeGreaterThan(30);
     await page.getByRole('tab', { name: 'Statistics' }).click();
     const table = page.getByRole('table', { name: 'Wave gauges' });
     await expect(table).toBeVisible();
@@ -178,7 +199,7 @@ test.describe('Wave Laboratory app', () => {
   });
 
   test('picks a Jerlov water type without restarting the sea', async ({ page }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(180_000);
     const errors = trackErrors(page);
     await page.goto('/');
     await waitForSimulation(page);
@@ -197,17 +218,16 @@ test.describe('Wave Laboratory app', () => {
     const t0 = await simulationSeconds(time);
     await water.selectOption('coastal-9');
     await expect(water).toHaveValue('coastal-9');
-    await page.waitForTimeout(800);
+    // No restart: the clock keeps counting up from where it was and never falls back toward 0.
+    await expectClockContinues(time, t0);
     const t1 = await simulationSeconds(time);
-    expect(t1).toBeGreaterThan(t0);
     await page.screenshot({ path: 'test-results/water-type-coastal-9.png' });
 
     await expect.poll(() => simulationSeconds(time), { timeout: 30_000 }).toBeGreaterThan(t1 + 1);
     const t2 = await simulationSeconds(time);
     await water.selectOption('oceanic-i');
     await expect(water).toHaveValue('oceanic-i');
-    await page.waitForTimeout(800);
-    expect(await simulationSeconds(time)).toBeGreaterThan(t2);
+    await expectClockContinues(time, t2);
     await page.screenshot({ path: 'test-results/water-type-oceanic-i.png' });
     expect(errors).toEqual([]);
   });
@@ -328,6 +348,54 @@ test.describe('Wave Laboratory app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('top, follow and bridge cameras engage without errors and return to orbit', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    for (const name of ['Top', 'Follow', 'Bridge']) {
+      const radio = page.getByRole('radio', { name, exact: true });
+      await radio.click();
+      await expect(radio).toHaveAttribute('aria-checked', 'true');
+      // Let a few frames render in the new mode (and the bridge hide its own glass).
+      await page.waitForTimeout(600);
+    }
+    await page.screenshot({ path: 'test-results/bridge-view.png' });
+    await page.getByRole('radio', { name: 'Orbit', exact: true }).click();
+    await expect(page.getByRole('radio', { name: 'Orbit', exact: true })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(errors).toEqual([]);
+  });
+
+  test('adds a sloop yacht and rides it with the follow and bridge cameras', async ({ page }) => {
+    test.setTimeout(90_000);
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    const scene = page.getByRole('navigation', { name: 'Scene' });
+    await scene.getByRole('button', { name: 'Add vessel' }).click();
+    await page.getByRole('menuitem', { name: /Sloop yacht/ }).click();
+    await waitForSimulation(page);
+    const yacht = scene.getByRole('button', { name: /^Sloop yacht \d/ });
+    await expect(yacht).toBeVisible();
+    await yacht.click();
+    await expect(page.getByRole('heading', { name: 'Vessel', exact: true })).toBeVisible();
+    await page
+      .getByRole('button', { name: /^Follow/ })
+      .first()
+      .click();
+    await page.waitForTimeout(1500);
+    await page.screenshot({ path: 'test-results/sloop-follow.png' });
+    const bridge = page.getByRole('radio', { name: 'Bridge', exact: true });
+    await bridge.click();
+    await expect(bridge).toHaveAttribute('aria-checked', 'true');
+    await page.waitForTimeout(1000);
+    expect(errors).toEqual([]);
+  });
+
   test('underwater camera shows a live depth badge and returns to orbit', async ({ page }) => {
     const errors = trackErrors(page);
     await page.goto('/');
@@ -438,7 +506,8 @@ test.describe('Wave Laboratory app', () => {
     await expect(bay.locator('option')).toHaveCount(6);
     await bay.selectOption('5');
     await hull.selectOption('patrol-boat');
-    await expect(bay.locator('option')).toHaveCount(4);
+    // A hull change reloads the whole simulation (new ocean, new vessel); allow for software GL.
+    await expect(bay.locator('option')).toHaveCount(4, { timeout: 30_000 });
     await expect(bay).toHaveValue('3');
     await page.getByRole('button', { name: 'Flood compartment' }).click();
     await expect(page.getByText('1 breach(es) open.', { exact: true })).toBeVisible();

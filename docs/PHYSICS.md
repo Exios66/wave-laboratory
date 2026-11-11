@@ -204,6 +204,14 @@ Wind acts on every vessel at the air velocity relative to the ship, V_a, in the 
   reproduces a square-rigger's inability to point higher than about 60° off the wind. With the
   autopilot on, the crew reefs above 13 m/s apparent wind (about Beaufort 6).
 
+- **Bermuda rig and fin keel (sloop yacht):** a main and a jib, each a lifting surface with
+  its own aspect ratio, take lift and drag from the apparent wind; the sheets are trimmed every
+  step for maximum drive and eased together once the heeling moment passes what the hull can
+  carry. The fin keel is a lateral foil with a Helmbold lift slope that resists the side force
+  (leeway), and telemetry reports jib sheet angle, main angle of attack, leeway and VMG. The
+  boat points about 40° off the true wind (`vessel.upwind.test.ts`). Its auxiliary engine is
+  driven by the same throttle as the sail plan.
+
 ## Damage and flooding (`src/vessel/damage.ts`, `src/vessel/flooding.ts`)
 
 A breach lets sea water into one of 4–7 transverse watertight compartments (one per ~20 m of
