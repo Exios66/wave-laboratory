@@ -19,6 +19,14 @@ import * as THREE from 'three';
 import { smoothstep } from '../../core/mathUtil';
 import { GALACTIC_CENTRE, GALACTIC_POLE, skyToStars } from './celestial';
 import type { Environment } from '../../schema/experiment';
+import {
+  buildSkyTable,
+  sampleSkyTable,
+  SKY_LUT_H,
+  SKY_LUT_W,
+  type SkyTable,
+  sunTransmittance,
+} from '../sky/atmosphere';
 
 export interface LightingParts {
   renderer: THREE.WebGLRenderer;
@@ -57,7 +65,39 @@ export interface LightingState {
   /** Hemisphere light colours for the time of day (the weather sets the intensity). */
   hemiSky: THREE.Color;
   hemiGround: THREE.Color;
+  /** The clear-sky table the sky dome and the ocean read (see sky/atmosphere.ts). */
+  skyTable: SkyTable;
 }
+
+/**
+ * Clear horizon colour (linear RGB, the table's units) looking along the three.js direction
+ * `dir`, for a sun along `sunDir`: what the fog fades to in that direction.
+ */
+export function clearHorizonToward(
+  table: SkyTable,
+  dir: THREE.Vector3,
+  sunDir: THREE.Vector3,
+  out: number[] = [0, 0, 0],
+): number[] {
+  const a = Math.atan2(dir.z, dir.x) - Math.atan2(sunDir.z, sunDir.x);
+  return sampleSkyTable(table, 0, a, out);
+}
+
+/**
+ * Sunlight colour after the air, relative to noon and normalised to a peak channel of 1, eased a
+ * little toward white (a sun just above the sea is orange-red, not pure red).
+ */
+export function sunTint(elevationRad: number, out: THREE.Color): THREE.Color {
+  const t = sunTransmittance(Math.max(elevationRad, 0.2 * (Math.PI / 180)), 1, tintScratch);
+  const r = t[0]! / NOON_T[0]!;
+  const g = t[1]! / NOON_T[1]!;
+  const b = t[2]! / NOON_T[2]!;
+  const m = Math.max(r, g, b, 1e-6);
+  const ease = 0.8;
+  return out.setRGB(1 + (r / m - 1) * ease, 1 + (g / m - 1) * ease, 1 + (b / m - 1) * ease);
+}
+const tintScratch = [0, 0, 0];
+const NOON_T = sunTransmittance((60 * Math.PI) / 180);
 
 /** Peak solar elevation at noon [deg] (a mid-latitude summer-ish day). */
 export const NOON_ELEVATION_DEG = 60;
@@ -140,7 +180,6 @@ export function skyLightLevel(sunY: number, night: number, dusk: number): number
 
 const lin = (hex: number) => new THREE.Color(hex);
 const SUN_WHITE = lin(0xfff4e0);
-const SUN_LOW = lin(0xffb27a);
 const MOON_LIGHT = lin(0x9db4e0);
 const HEMI_SKY_DAY = lin(0xc5ddf2);
 const HEMI_SKY_DUSK = lin(0xf2c9a8);
@@ -151,6 +190,7 @@ const NIGHT_EXPOSURE_SCALE = 1.7;
 
 export class SkyLighting {
   private readonly state: LightingState = {
+    skyTable: undefined as unknown as SkyTable,
     sunDir: new THREE.Vector3(0, 1, 0),
     daylight: 1,
     skyLight: 1,
@@ -162,12 +202,37 @@ export class SkyLighting {
     hemiGround: HEMI_GROUND_DAY.clone(),
   };
   private readonly moonDir = new THREE.Vector3(0, -1, 0);
+  private readonly lut: THREE.DataTexture;
+  private readonly tint = new THREE.Color(1, 1, 1);
+  /** Sun elevation [rad] and sky level the table was last built for. */
+  private builtFor = { el: Number.NaN, level: Number.NaN };
   private readonly u: Record<'uNight' | 'uDusk' | 'uStars', THREE.IUniform<number>>;
   private readonly celestial = new THREE.Matrix3();
 
   constructor(private readonly parts: LightingParts) {
     this.u = { uNight: { value: 0 }, uDusk: { value: 0 }, uStars: { value: 0 } };
-    const shared: Record<string, THREE.IUniform> = { ...this.u, uMoonDir: { value: this.moonDir } };
+    this.state.skyTable = buildSkyTable(Math.PI / 3, 1);
+    this.lut = new THREE.DataTexture(
+      new Uint16Array(SKY_LUT_W * SKY_LUT_H * 4),
+      SKY_LUT_W,
+      SKY_LUT_H,
+      THREE.RGBAFormat,
+      THREE.HalfFloatType,
+    );
+    this.lut.magFilter = THREE.LinearFilter;
+    this.lut.minFilter = THREE.LinearFilter;
+    this.lut.wrapS = THREE.ClampToEdgeWrapping;
+    this.lut.wrapT = THREE.ClampToEdgeWrapping;
+    this.lut.colorSpace = THREE.NoColorSpace;
+    this.upload();
+    const shared: Record<string, THREE.IUniform> = {
+      ...this.u,
+      uMoonDir: { value: this.moonDir },
+      uSkyLut: { value: this.lut },
+      uSkyHorizon: { value: new THREE.Vector3() },
+      uSkyZenith: { value: new THREE.Vector3() },
+      uSunTint: { value: new THREE.Vector3(1, 1, 1) },
+    };
     // The ocean ShaderMaterial uses `oceanUniforms` directly, so adding keys here reaches it.
     Object.assign(parts.oceanUniforms, shared);
     Object.assign(parts.skyMaterial.uniforms, shared, {
@@ -182,13 +247,15 @@ export class SkyLighting {
     const sunLight = this.parts.sun;
     const st = this.state;
     const sun = st.sunDir;
+    // Whether the directional light is the sun (else the moon); the sun takes the air's tint.
+    let lightIsSun = false;
 
     if (input.timeOfDay === null) {
       // Fixed sun from the experiment: the original behaviour.
       directionFromAngles(env.sunElevationDeg, env.sunAzimuthDeg, sun);
       sunLight.position.copy(sun).multiplyScalar(2000);
       sunLight.intensity = THREE.MathUtils.clamp(0.35 + env.sunElevationDeg / 28, 0.25, 2.6);
-      sunLight.color.copy(env.sunElevationDeg < 8 ? SUN_LOW : SUN_WHITE);
+      lightIsSun = true;
       this.moonDir.set(0, -1, 0);
       st.night = 0;
       st.dusk = 0;
@@ -221,7 +288,7 @@ export class SkyLighting {
         sunLight.intensity =
           THREE.MathUtils.clamp(0.35 + sp.elevationDeg / 28, 0.25, 2.6) * sunUp +
           (1 - sunUp) * 0.25;
-        sunLight.color.copy(SUN_WHITE).lerp(SUN_LOW, 1 - smoothstep(2, 24, sp.elevationDeg));
+        lightIsSun = true;
       } else {
         sunLight.position.copy(this.moonDir).multiplyScalar(2000);
         sunLight.intensity = 0.7 * smoothstep(2, 20, mp.elevationDeg) + 0.25;
@@ -238,8 +305,36 @@ export class SkyLighting {
     this.u.uNight.value = st.night;
     this.u.uDusk.value = st.dusk;
     (this.parts.oceanUniforms.uSunDir!.value as THREE.Vector3).copy(sun);
+
+    // Clear-sky table: rebuilt only when the sun has moved a quarter degree or the level changed.
+    const el = Math.asin(THREE.MathUtils.clamp(sun.y, -1, 1));
+    if (
+      !(Math.abs(el - this.builtFor.el) < 0.25 * (Math.PI / 180)) ||
+      !(Math.abs(st.skyLight - this.builtFor.level) < 0.01)
+    ) {
+      buildSkyTable(el, st.skyLight, 1, st.skyTable);
+      this.builtFor.el = el;
+      this.builtFor.level = st.skyLight;
+      this.upload();
+      const u = this.parts.oceanUniforms;
+      (u.uSkyHorizon!.value as THREE.Vector3).fromArray(st.skyTable.horizonMean);
+      (u.uSkyZenith!.value as THREE.Vector3).fromArray(st.skyTable.zenith);
+      sunTint(el, this.tint);
+      (u.uSunTint!.value as THREE.Vector3).set(this.tint.r, this.tint.g, this.tint.b);
+    }
+    // Sunlight on the scene carries the same colour as the sun's glint on the water.
+    if (lightIsSun) sunLight.color.copy(SUN_WHITE).multiply(this.tint);
     return st;
   }
 
-  dispose(): void {}
+  private upload(): void {
+    const src = this.state.skyTable.data;
+    const dst = this.lut.image.data as Uint16Array;
+    for (let i = 0; i < src.length; i++) dst[i] = THREE.DataUtils.toHalfFloat(src[i]!);
+    this.lut.needsUpdate = true;
+  }
+
+  dispose(): void {
+    this.lut.dispose();
+  }
 }
