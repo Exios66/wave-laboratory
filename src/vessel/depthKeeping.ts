@@ -97,7 +97,8 @@ export interface PlaneForce {
  * [m/s] with vertical plane velocity relative to the water `w` [m/s] (body frame, up positive),
  * for density `rho` [kg/m³]. The effective angle is capped at ±18°; both forces are zero when
  * |u| < 1e-6 m/s. Writes body-frame forces [N] into `out` and returns that same object; drag
- * opposes `u`, and lift reverses with `u` for a fixed effective angle.
+ * opposes `u`, the lift from a deflection reverses with `u` (astern, the flow meets the plane
+ * from its trailing edge), and the heave damping opposes `w` in either direction.
  */
 export function planeForce(
   p: DivePlane,
@@ -113,9 +114,9 @@ export function planeForce(
     out.fx = 0;
     return out;
   }
-  const alpha = clamp(delta - Math.atan2(w, speed), -PLANE_STALL, PLANE_STALL);
+  const alpha = clamp(Math.sign(u) * delta - Math.atan2(w, speed), -PLANE_STALL, PLANE_STALL);
   const cl = planeLiftSlope(p.aspect) * alpha;
-  const q = 0.5 * rho * p.area * u * Math.abs(u);
+  const q = 0.5 * rho * p.area * u * u;
   const cd = PLANE_CD0 + (cl * cl) / (Math.PI * p.aspect * PLANE_EFFICIENCY);
   out.fz = q * cl;
   out.fx = -0.5 * rho * p.area * cd * u * Math.abs(u);
