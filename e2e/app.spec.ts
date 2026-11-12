@@ -156,22 +156,18 @@ test.describe('Wave Laboratory app', () => {
     await page.goto('/');
     await waitForSimulation(page);
     await page.getByRole('combobox', { name: 'Simulation speed' }).selectOption('4');
-    // The recorder needs >= 128 gauge samples before it reports spectral parameters. Wait for
-    // enough *simulated* time to elapse rather than racing the wall clock: the frame loop caps
-    // each frame at 0.1 s of wall time, so under software rendering (a few fps) the simulation
-    // legitimately runs slower than real time even at 4x.
-    const time = page.locator('.transport__time');
-    const startTime = await simulationSeconds(time);
-    await expect
-      .poll(async () => (await simulationSeconds(time)) - startTime, { timeout: 120_000 })
-      .toBeGreaterThan(30);
+    // The recorder needs >= 128 gauge samples (12.8 s simulated at 10 Hz) before it reports
+    // spectral parameters. Watch the Hm0 cell fill in rather than waiting out a fixed span of
+    // simulated time: under software rendering the simulation runs slower than real time.
     await page.getByRole('tab', { name: 'Statistics' }).click();
     const table = page.getByRole('table', { name: 'Wave gauges' });
     await expect(table).toBeVisible();
     await expect(table.getByRole('row')).toHaveCount(2);
     // Hm0 cell of the first gauge row: 'x.xx m' once the recorder has real data,
     // '—' before it — unlike the wave count, which shows digits even at 0.
-    await expect(table.getByRole('row').nth(1).locator('td').nth(0)).toContainText(/\d\.\d/);
+    await expect(table.getByRole('row').nth(1).locator('td').nth(0)).toContainText(/\d\.\d/, {
+      timeout: 120_000,
+    });
     await page.getByRole('tab', { name: 'Vessel motions' }).click();
     await expect(page.getByRole('figure').first()).toBeVisible();
   });
