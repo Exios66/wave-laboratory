@@ -70,6 +70,15 @@ describe('experiment schema', () => {
     if (!r.ok) expect(r.errors[0]).toMatch(/waves\.0\.hs/);
   });
 
+  it('rejects a submarine loading other than neutral', () => {
+    const exp = presetExperiment();
+    const sub = { ...exp.vessels[0]!, type: 'submarine' as const };
+    expect(parseExperiment({ ...exp, vessels: [sub] }).ok).toBe(true);
+    const r = parseExperiment({ ...exp, vessels: [{ ...sub, loadFactor: 0.8 }] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors[0]).toMatch(/vessels\.0\.loadFactor/);
+  });
+
   it('rejects duplicate ids', () => {
     const exp = presetExperiment();
     const r = parseExperiment({ ...exp, probes: [{ ...exp.probes[0]!, id: exp.vessels[0]!.id }] });

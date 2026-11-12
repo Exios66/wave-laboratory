@@ -39,6 +39,14 @@ import {
   type ResistanceParams,
 } from './coefficients';
 import { Autopilot, rateLimit } from './control';
+import { trimSubmarine } from './definition';
+import {
+  BOTTOM_CLEARANCE,
+  DepthKeeper,
+  keelDepthRange,
+  planeForce,
+  type PlaneForce,
+} from './depthKeeping';
 import { DamageModel, steeringFactor, thrustFactor, type DamageCause } from './damage';
 import {
   buildCompartments,
@@ -54,7 +62,7 @@ import {
   type FloodLoads,
 } from './flooding';
 import { HullForces, type RigidState } from './hullForces';
-import { buildHydroModel, CROSS_FLOW_CD, type HydroModel } from './hydroModel';
+import { buildHydroModel, CROSS_FLOW_CD, stripImmersion, type HydroModel } from './hydroModel';
 import { quatToMat3, solveFloating } from './hydrostatics';
 import { meshBounds, meshVolume } from './mesh';
 import { Mooring, mooringGear, type MooringForce } from './mooring';
@@ -88,6 +96,10 @@ const RUDDER_CD0 = 0.013;
 const RUDDER_SPAN_EFFICIENCY = 0.9;
 /** Drag coefficient of a sinking hull falling flat on its waterplane area. */
 const SINK_DRAG_CD = 1.1;
+/** Floodwater mass (fraction of displacement) beyond which a submarine can no longer hold depth. */
+const SUB_FOUNDER_FRACTION = 0.01;
+/** Variable-ballast capacity of a submarine as a fraction of her displacement. */
+const BALLAST_FRACTION = 0.012;
 
 export interface VesselOptions {
   /** Max columns of the local water patch. */
@@ -115,6 +127,13 @@ export interface VesselDiagnostics {
   throttle: number;
   /** Ocean `column` calls made by this vessel's water patch so far. */
   waterColumnCalls: number;
+  /** Submarines: hydroplane deflections [deg, + lifts up], CoG depth and commanded depth [m]. */
+  bowPlaneDeg: number;
+  sternPlaneDeg: number;
+  depth: number;
+  depthCmd: number;
+  /** Variable-ballast water aboard [kg]. */
+  ballastKg: number;
 }
 
 export interface VesselOffset {
@@ -136,6 +155,9 @@ export class Vessel {
 
   private readonly water: LocalWater;
   private readonly hull: HullForces;
+  /** Depth-keeping hydroplane controller (submarines only). */
+  private readonly diver: DepthKeeper | null;
+  private readonly planeOut: PlaneForce = { fz: 0, fx: 0 };
   private readonly autopilot = new Autopilot();
   /** Structural health (see `damage.ts`). */
   readonly damage: DamageModel;
@@ -218,21 +240,41 @@ export class Vessel {
   /**
    * Initialize at the configured position, heading, and speed, with calm-water floating trim.
    * Starts dry and deploys the configured mooring only when available at the field's depth.
+   * A submarine starts at equilibrium depth; `config.depthM`, if supplied, sets a keel-depth
+   * order through `command` for the controller to approach during subsequent steps.
+   * A submarine's trim tanks are set for the water she is in: her mass is scaled by the ratio
+   * of the environment's water density to the design density, so she is neutrally buoyant at her
+   * design keel depth in any water the schema allows.
    * Errors from the wind provider propagate when initializing sails under autopilot.
-   * @throws {RangeError} If the effective mass matrix is singular during hydrodynamic setup.
+   * @throws {RangeError} If the effective mass matrix is singular during hydrodynamic setup, or
+   *   if a submarine is placed in water too shallow for her minimum keel depth plus the bottom
+   *   clearance.
    */
   constructor(
     id: string,
-    definition: VesselDefinition,
-    config: Pick<VesselConfig, 'x' | 'y' | 'headingDeg' | 'speedKn' | 'autopilot' | 'mooring'>,
+    baseDefinition: VesselDefinition,
+    config: Pick<
+      VesselConfig,
+      'x' | 'y' | 'headingDeg' | 'speedKn' | 'autopilot' | 'mooring' | 'depthM'
+    >,
     field: OceanField,
     options: VesselOptions = {},
   ) {
     this.id = id;
+    const rho = field.env.waterDensity;
+    const definition = baseDefinition.submarine
+      ? trimSubmarine(baseDefinition, rho)
+      : baseDefinition;
+    if (definition.submarine && !keelDepthRange(definition.draft, field.env.depth)) {
+      throw new RangeError(
+        `Water ${field.env.depth} m deep is too shallow for submarine "${id}": she needs ` +
+          `${keelDepthRange(definition.draft, Infinity)!.min.toFixed(0)} m of keel depth and ` +
+          '10 m of clearance under the keel.',
+      );
+    }
     this.definition = definition;
     this.wind = options.wind;
     this.damage = new DamageModel(definition.length, options.damage ?? true);
-    const rho = field.env.waterDensity;
     const g = field.env.gravity;
     const hydro = buildHydroModel(definition, rho, g);
     this.hydro = hydro;
@@ -279,11 +321,27 @@ export class Vessel {
     });
     this.equilibriumZ = eq.z;
     this.equilibriumTrim = eq.trim;
+    this.diver = def.submarine
+      ? new DepthKeeper(
+          def.submarine,
+          rho,
+          hydro.mass + hydro.addedMass[14]!,
+          hydro.iyy + hydro.addedMass[28]!,
+          -eq.z,
+          BALLAST_FRACTION * def.mass * g,
+        )
+      : null;
 
     // Depth levels of the water patch: stretched towards the surface, down to the deepest a
     // hull point can reach when heeled or pitched.
     const H = 1.1 * Math.max(def.depth, def.beam / 2, def.draft * 1.5);
     const levels = [0, -0.06, -0.15, -0.3, -0.55, -1].map((f) => f * H);
+    // A submarine can be ordered far deeper: extend the levels (doubling) to its deepest keel.
+    const deepest = def.submarine ? 1.1 * (keelDepthRange(def.draft, this.seaDepth)?.max ?? 0) : 0;
+    for (let z = H; z < deepest;) {
+      z = Math.min(2 * z, deepest);
+      levels.push(-z);
+    }
     this.water = new LocalWater(
       field,
       levels,
@@ -359,6 +417,12 @@ export class Vessel {
       const m = config.mooring;
       const hawse = this.hawse();
       this.dropAnchor(m.x ?? hawse.x, m.y ?? hawse.y, m.scope, m.length);
+    }
+    // With no order, hold the design keel depth, clamped like any order (the Inspector shows the
+    // same clamped value), so shallow water never leaves the boat below its clearance.
+    if (config.depthM !== undefined) this.command({ depthM: config.depthM });
+    else if (def.submarine && this.seaDepth - BOTTOM_CLEARANCE < def.draft) {
+      this.command({ depthM: def.draft });
     }
     this.autopilotOn = config.autopilot;
     this.headingCmdDeg = config.headingDeg;
@@ -444,12 +508,23 @@ export class Vessel {
    * pumping existing water; flooding orders stop pumps, while starting pumps seals breaches.
    * If combined, repair, flood, and pump orders take effect in that order. Dropping an already
    * deployed anchor adjusts its line length when a length or scope is supplied.
+   * Submarine `depthM` orders keel depth below the mean surface [m], independently of
+   * autopilot. It is clamped to `keelDepthRange`: between min(10 m, loaded draft) and sea depth
+   * minus 10 m. Surface ships ignore depth orders.
    */
   command(cmd: VesselCommand): void {
     if (cmd.headingDeg !== undefined) this.headingCmdDeg = cmd.headingDeg;
     if (cmd.speedKn !== undefined) this.speedCmdKn = cmd.speedKn;
     if (cmd.rudderDeg !== undefined) this.rudderCmdDeg = cmd.rudderDeg;
     if (cmd.throttle !== undefined) this.throttleCmd = Math.max(-1, Math.min(1, cmd.throttle));
+    if (cmd.depthM !== undefined && this.diver) {
+      // Keel depth → CoG depth, within the physical limits: never shallower than the minimum
+      // keel depth (crown clear of the swell), and the keel 10 m clear of the bottom.
+      const d = this.definition;
+      // The constructor rejects water too shallow for any order, so the range exists.
+      const r = keelDepthRange(d.draft, this.seaDepth)!;
+      this.diver.depthCmd = Math.max(r.min, Math.min(r.max, cmd.depthM)) - d.kg;
+    }
     if (cmd.autopilot !== undefined && cmd.autopilot !== this.autopilotOn) {
       this.autopilotOn = cmd.autopilot;
       this.autopilot.reset();
@@ -572,6 +647,17 @@ export class Vessel {
     const R = s.rot;
     const def = this.definition;
     const fl = Math.hypot(R[0]!, R[3]!) || 1;
+    // Vertical extent of the rotated body box: a pitched submarine reaches above and below its
+    // level-trim range.
+    const b = this.bodyBox;
+    const zc =
+      s.pz +
+      (R[6]! * (b.min.x + b.max.x) + R[7]! * (b.min.y + b.max.y) + R[8]! * (b.min.z + b.max.z)) / 2;
+    const zh =
+      (Math.abs(R[6]!) * (b.max.x - b.min.x) +
+        Math.abs(R[7]!) * (b.max.y - b.min.y) +
+        Math.abs(R[8]!) * (b.max.z - b.min.z)) /
+      2;
     return {
       x: s.px,
       y: s.py,
@@ -579,6 +665,8 @@ export class Vessel {
       fy: R[3]! / fl,
       halfLength: def.length / 2,
       halfBeam: def.beam / 2,
+      zMin: zc - zh,
+      zMax: zc + zh,
       mass: def.mass,
       vx: R[0]! * s.u + R[1]! * s.v + R[2]! * s.w,
       vy: R[3]! * s.u + R[4]! * s.v + R[5]! * s.w,
@@ -636,6 +724,20 @@ export class Vessel {
     } else {
       rudderTarget = this.rudderCmdDeg * DEG;
       throttleTarget = this.throttleCmd;
+    }
+    // Submarine: hydroplanes follow the depth and pitch controller (once per step).
+    if (this.diver) {
+      const R0 = s.rot;
+      this.diver.update(
+        {
+          depth: -s.pz,
+          rise: R0[6]! * s.u + R0[7]! * s.v + R0[8]! * s.w,
+          pitch: quatToEuler(this.q).pitch,
+          pitchRate: s.q,
+          speed: uThroughWater,
+        },
+        dt,
+      );
     }
     // ---- weather: true wind at the CoG for this step
     if (this.wind) {
@@ -755,6 +857,7 @@ export class Vessel {
   /**
    * Advance flooding and foundering over `dt` [s]; `healthLost` is this step's health decrease.
    * Accumulates slamming damage for bow breaches and constrains foundered hulls to the seabed.
+   * A submarine founders when floodwater mass exceeds 1 % of its intact mass.
    */
   private stepFlooding(dt: number, slam: boolean, healthLost: number): void {
     const fl = this.flooding;
@@ -779,8 +882,13 @@ export class Vessel {
       fl.step(dt, inp);
     }
     // Fully under with water aboard: foundered (health 0 through the usual path).
+    // A submarine is always under: she founders once the floodwater outweighs what her planes
+    // can hold (1 % of her displacement).
+    const sunk = d.submarine
+      ? fl.totalMass > SUB_FOUNDER_FRACTION * d.mass
+      : this.hull.volume >= FOUNDER_FRACTION * this.hullVolume;
     if (!fl.hasWater) this.foundered = false;
-    else if (!this.foundered && this.hull.volume >= FOUNDER_FRACTION * this.hullVolume) {
+    else if (!this.foundered && sunk) {
       this.foundered = true;
       this.damage.damage(this.damage.health, 'flooding');
     }
@@ -858,11 +966,9 @@ export class Vessel {
       const wy = s.py + R[3]! * x + R[5]! * z;
       const wz = s.pz + R[6]! * x + R[8]! * z;
       const eta = water.surface(wx, wy);
-      // Immersion ratio of the strip: 1 at the design waterline, 0 when the keel emerges.
       const depthBelow = eta - wz; // depth of the sample point
       const draft = hy.stripDraft[i]!;
-      const keelDepth = depthBelow + (z - (hy.waterlineZ - draft));
-      const imm = Math.max(0, Math.min(1, keelDepth / draft));
+      const imm = stripImmersion(hy, z, draft, depthBelow);
       if (imm <= 0) continue;
       water.fluidBelow(wx, wy, Math.min(wz, eta - 0.01 * draft), eta, true);
       // Water velocity/acceleration → body frame.
@@ -975,6 +1081,23 @@ export class Vessel {
       mz += rp.x * rfy - rp.y * rfx;
     }
 
+    // 7b. Submarine hydroplanes: lift and drag at the bow and stern plane centres, with the
+    // plane's own heave/pitch damping from the vertical velocity of the water relative to it.
+    const diver = this.diver;
+    if (diver && def.submarine) {
+      const planes = [
+        [def.submarine.bowPlanes, diver.bow],
+        [def.submarine.sternPlanes, diver.stern],
+      ] as const;
+      for (const [p, delta] of planes) {
+        const w = s.w - s.q * p.x + s.p * 0 - hull.waterW;
+        const pf = planeForce(p, delta, ur + s.q * p.z, w, rho, this.planeOut);
+        fx += pf.fx;
+        fz += pf.fz;
+        my += p.z * pf.fx - p.x * pf.fz;
+      }
+    }
+
     // 8. Wind on the windage and the sails (relative air velocity in the body frame).
     if (this.wind) {
       const shipX = R[0]! * s.u + R[1]! * s.v + R[2]! * s.w;
@@ -1066,8 +1189,8 @@ export class Vessel {
       this.windForce = Math.hypot(tx, ty);
     }
 
-    // 9. Gravity (world −z) in the body frame.
-    const mg = hy.mass * g;
+    // 9. Gravity (world −z) in the body frame; a submarine adds her variable-ballast weight.
+    const mg = hy.mass * g + (diver ? diver.ballastForce : 0);
     fx -= mg * R[6]!;
     fy -= mg * R[7]!;
     fz -= mg * R[8]!;
@@ -1108,8 +1231,13 @@ export class Vessel {
     }
 
     // 9c. A sunken hull falls at a terminal speed set by its plan area (bluff-body drag).
-    if (this.foundered)
-      fz -= 0.5 * rho * SINK_DRAG_CD * def.hydrostatics.waterplaneArea * s.w * Math.abs(s.w);
+    if (this.foundered) {
+      // Falls flat on its plan area (a submarine's waterplane is just its sail).
+      const plan = def.submarine
+        ? def.submarine.hullDiameter * def.submarine.hullLength * 0.7
+        : def.hydrostatics.waterplaneArea;
+      fz -= 0.5 * rho * SINK_DRAG_CD * plan * s.w * Math.abs(s.w);
+    }
 
     // 10. Coriolis/centripetal (translational, rigid + added mass) and gyroscopic terms.
     const A = hy.addedMass;
@@ -1251,6 +1379,7 @@ export class Vessel {
         kb: h.kb,
         bm: h.bm,
         kg: d.kg,
+        submerged: d.submarine !== null,
       },
       fl.totalMass,
       fl.weightMoment(d.kg),
@@ -1270,7 +1399,11 @@ export class Vessel {
     };
   }
 
-  /** Internal quantities for inspectors, plots and tests. */
+  /**
+   * Internal quantities for inspectors, plots and tests. Depth and depth order refer to the
+   * CoG below the mean surface [m], rather than the keel. For surface ships, the depth order,
+   * plane angles, and ballast are zero. Ballast [kg] is signed: negative means pumped out.
+   */
   diagnostics(): VesselDiagnostics {
     const h = this.hull;
     return {
@@ -1283,6 +1416,11 @@ export class Vessel {
       slamVelocity: h.slamVelocity,
       throttle: this.throttle,
       waterColumnCalls: this.water.columnCalls,
+      bowPlaneDeg: (this.diver?.bow ?? 0) / DEG,
+      sternPlaneDeg: (this.diver?.stern ?? 0) / DEG,
+      depth: -this.s.pz,
+      depthCmd: this.diver?.depthCmd ?? 0,
+      ballastKg: (this.diver?.ballastForce ?? 0) / this.hydro.g,
     };
   }
 }

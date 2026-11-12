@@ -83,6 +83,9 @@ Forces come from pressure integration over the instantaneous wetted hull
 mass, radiation and viscous damping, propulsion, rudder and autopilot. Wind
 acts on every hull through its frontal and side areas, and the square-rigged
 pirate ship sails on the wind alone, bracing and reefing as the wind changes.
+The Bermuda-rigged sloop yacht trims its main and jib to the apparent wind,
+heels, makes leeway that its fin keel resists and points about 40° off the
+true wind.
 
 The **11-hull parametric library** runs from an 8.5 m SOLAS lifeboat and a
 15 m power catamaran (two demihulls and a bridge deck lofted as one closed
@@ -90,6 +93,9 @@ mesh — very high GM/B, righting arm peaking near 20° heel as the weather hull
 lifts clear) to a 330 m VLCC oil tanker and a 333 m Nimitz-class aircraft
 carrier, with the analytic box barge and Wigley-I hull as validation targets,
 a feeder container ship, a stern trawler, a patrol boat and a cruising sloop.
+A 70 m diesel-electric submarine runs at periscope depth: fully submerged and
+neutrally buoyant, held at the ordered keel depth by bow and stern hydroplanes
+and a ballast tank while the swell heaves and pitches her.
 
 Slamming, green water and capsize are detected; a collision or heavy slam can
 breach a watertight compartment that floods through the hole, costing
@@ -129,6 +135,16 @@ automatically, with a live depth badge. Light fades per colour with depth
 following the water type's K_d (red first in clear water, blue first in
 turbid coastal water); from below, the surface shows the rippled sky inside
 the 48.6° window and a mirror outside it, and hulls are seen from beneath.
+
+The seafloor follows the experiment's water depth: a rippled floor with kelp
+forests, seagrass, coral and rocks in 60 m or less. In deep water the floor
+rises under the start as a submerged home reef (scenery only) and around
+islands as a lagoon and a shelving reef with coral, kelp, rocks and wrecks,
+while open blue water has a depth gradient and drifting marine snow. Animated
+caustics, god rays toward the refracted sun and a depth colour grade complete
+the look. With Wildlife on (Settings → Ambience) there is marine life too:
+schools of baitfish, reef fish around coral and wrecks, tuna, rays and
+jellyfish that glow at night, all instanced and budgeted per quality tier.
 
 </details>
 

@@ -205,6 +205,7 @@ export const VesselTypeSchema = z.enum([
   'aircraft-carrier',
   'pirate-ship',
   'sloop-yacht',
+  'submarine',
   'catamaran',
 ]);
 export type VesselType = z.infer<typeof VesselTypeSchema>;
@@ -246,11 +247,14 @@ export const VesselSchema = z.object({
   /**
    * Loading condition: displacement as a fraction of the design displacement (cargo and
    * ballast). The ship floats at the draft that carries this mass: 0.5 is light ballast, 1 the
-   * design load, above 1 overloaded with less freeboard.
+   * design load, above 1 overloaded with less freeboard. A submarine always trims to neutral
+   * buoyancy and accepts only 1.
    */
   loadFactor: finite().min(0.4).max(1.25).default(1),
   /** Anchor or buoy mooring the vessel starts on (see `MooringSchema`). */
   mooring: MooringSchema.optional(),
+  /** Submarine: ordered keel depth below the surface [m]. Absent = the design periscope depth. */
+  depthM: finite().min(10).max(500).optional(),
 });
 export type VesselConfig = z.infer<typeof VesselSchema>;
 
@@ -302,6 +306,10 @@ export function parseExperiment(input: unknown): ParseResult {
       if (ids.has(item.id)) dupes.push(`Duplicate id "${item.id}"`);
       ids.add(item.id);
     }
+    result.data.vessels.forEach((v, i) => {
+      if (v.type === 'submarine' && v.loadFactor !== 1)
+        dupes.push(`vessels.${i}.loadFactor: a submarine trims to neutral buoyancy; use 1`);
+    });
     if (dupes.length > 0) return { ok: false, errors: dupes };
     return { ok: true, experiment: result.data };
   }

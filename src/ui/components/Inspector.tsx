@@ -19,6 +19,10 @@ import { findProbe, findVessel, findWave, useLab } from '../store';
 import { newWaveSystem, VESSEL_TYPE_LABELS } from '../factories';
 import { DAMAGE_CAUSE_LABELS, healthPercent, healthTone } from '../health';
 import { thrustFactor } from '../../vessel/damage';
+import { BOTTOM_CLEARANCE, keelDepthRange, MIN_KEEL_DEPTH } from '../../vessel/depthKeeping';
+
+/** Deepest keel-depth order the experiment file stores [m]. */
+const MAX_DEPTH_ORDER = 500;
 import type { VesselTelemetry } from '../../vessel/api';
 import { fmt, NumberField, Readout, SelectField, Switch, TextField } from './fields';
 import { Icon } from './icons';
@@ -886,6 +890,13 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
   const lab = useLab.getState;
   const tel = useLab((s) => s.frame?.vessels.find((v) => v.id === vessel.id));
   const def = useLab((s) => s.vesselDefinitions[vessel.id]);
+  const seaDepth = useLab((s) => s.experiment.environment.depth);
+  // The orders `Vessel.command` accepts here, within the file format's 10–500 m.
+  const keel = def?.submarine ? keelDepthRange(def.draft, seaDepth) : null;
+  const depthRange =
+    keel && keel.max >= MIN_KEEL_DEPTH
+      ? { min: MIN_KEEL_DEPTH, max: Math.min(MAX_DEPTH_ORDER, keel.max) }
+      : null;
   const camera = useLab((s) => s.camera);
   const target = useLab((s) => s.cameraTarget);
   const update = (recipe: (v: VesselConfig) => void, reload = true) =>
@@ -937,6 +948,15 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
               { label: 'Speed', value: fmt(tel.speedKn, 1, 'kn') },
               { label: 'Heading', value: fmt(tel.headingDeg, 0, '°') },
               { label: 'Rudder', value: fmt(tel.rudderDeg, 1, '°') },
+              ...(def?.submarine
+                ? [
+                    {
+                      label: 'Keel depth',
+                      value: fmt(def.kg - tel.position.z, 1, 'm'),
+                      title: 'Depth of the keel below the mean surface',
+                    },
+                  ]
+                : []),
               {
                 label: 'Apparent wind',
                 value: `${fmt(tel.apparentWind, 0, 'm/s')} ${Math.abs(tel.apparentWindAngleDeg).toFixed(0)}° ${tel.apparentWindAngleDeg >= 0 ? 'P' : 'S'}`,
@@ -1037,6 +1057,27 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
             if (update((x) => void (x.speedKn = v), false)) live({ speedKn: v });
           }}
         />
+        {def?.submarine &&
+          (depthRange ? (
+            <NumberField
+              label="Keel depth"
+              value={Math.min(depthRange.max, Math.max(depthRange.min, vessel.depthM ?? def.draft))}
+              min={depthRange.min}
+              max={depthRange.max}
+              step={1}
+              unit="m"
+              unitLabel="metres"
+              onCommit={(v) => {
+                if (update((x) => void (x.depthM = v), false)) live({ depthM: v });
+              }}
+              hint={`Ordered depth of the keel, down to 10 m above the seabed. The bow and stern planes and the ballast tank hold it; the default 15 m keeps the sail just awash. Applied live.`}
+            />
+          ) : (
+            <p className="field__hint">
+              This water is too shallow to dive: a submarine needs {MIN_KEEL_DEPTH} m of keel depth
+              and {BOTTOM_CLEARANCE} m of clearance under the keel.
+            </p>
+          ))}
         {!vessel.autopilot && (
           <>
             <NumberField
@@ -1103,23 +1144,27 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
           onCommit={(v) => update((x) => void (x.kgFactor = v))}
           hint="Higher = less stable. Watch GM: negative GM means the vessel cannot stay upright."
         />
-        <NumberField
-          label="Loading (displacement / design)"
-          value={vessel.loadFactor}
-          min={0.4}
-          max={1.25}
-          step={0.01}
-          unit="×"
-          onCommit={(v) => update((x) => void (x.loadFactor = v))}
-          hint="Cargo and ballast. Below 1 the ship floats light and shows its red bottom paint; above 1 it is overloaded with less freeboard."
-        />
+        {!def?.submarine && (
+          <NumberField
+            label="Loading (displacement / design)"
+            value={vessel.loadFactor}
+            min={0.4}
+            max={1.25}
+            step={0.01}
+            unit="×"
+            onCommit={(v) => update((x) => void (x.loadFactor = v))}
+            hint="Cargo and ballast. Below 1 the ship floats light and shows its red bottom paint; above 1 it is overloaded with less freeboard."
+          />
+        )}
         {def && (
           <Readout
             items={[
               { label: 'Length', value: fmt(def.length, 1, 'm') },
               { label: 'Beam', value: fmt(def.beam, 1, 'm') },
               { label: 'Draft', value: fmt(def.draft, 2, 'm') },
-              { label: 'Freeboard', value: fmt(def.depth - def.draft, 2, 'm') },
+              ...(def.submarine
+                ? []
+                : [{ label: 'Freeboard', value: fmt(def.depth - def.draft, 2, 'm') }]),
               { label: 'Mass', value: fmt(def.mass / 1000, 0, 't') },
               { label: 'GM', value: fmt(def.gm, 2, 'm'), title: 'Transverse metacentric height' },
               { label: 'Max speed', value: fmt(def.maxSpeed / 0.5144, 0, 'kn') },

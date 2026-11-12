@@ -16,7 +16,7 @@ import type {
   VesselTelemetry,
 } from '../vessel/api';
 import { collisionDamage } from '../vessel/damage';
-import { footprintContact, resolveContact } from './collisions';
+import { footprintContact, resolveContact, verticallyClear } from './collisions';
 import { seaDiagnostics } from './diagnostics';
 import { Recorder } from './recorder';
 import { WeatherField } from '../weather/weather';
@@ -179,7 +179,10 @@ export class Simulation {
     return out;
   }
 
-  /** Separate overlapping hulls, exchange momentum and deal impact damage. */
+  /**
+   * Separate overlapping hulls, exchange momentum and deal impact damage. Pairs whose hulls are
+   * vertically clear of each other (a submarine under a surface ship's keel) pass freely.
+   */
   private collide(t: number): void {
     const bodies: { v: SimVessel; f: HullFootprint }[] = [];
     for (const v of this.vessels) {
@@ -189,6 +192,7 @@ export class Simulation {
       for (let j = i + 1; j < bodies.length; j++) {
         const A = bodies[i]!;
         const B = bodies[j]!;
+        if (verticallyClear(A.f, B.f)) continue;
         const c = footprintContact(A.f, B.f);
         if (!c) continue;
         const r = resolveContact(A.f, B.f, c);
