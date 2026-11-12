@@ -886,6 +886,9 @@ void main() {
   // and the seabed, absorbed along the real path through the water, and a line of foam where
   // the sea meets them. Without it: a flat bottom showing through optically shallow water.
   float contact = 0.0;
+  // Whether the prepass found geometry behind this pixel; where it found none, the flat-bottom
+  // fallback still applies.
+  float sceneHit = 0.0;
   if (uScene > 0.5) {
     vec2 suv = gl_FragCoord.xy / uResolution;
     float d0 = sceneDistance(suv);
@@ -903,7 +906,9 @@ void main() {
     vec3 through = exp(-kd * path * 1.5) * hit;
     refracted = mix(refracted, texture(uRefrTex, suv2).rgb, through);
     contact = (1.0 - smoothstep(0.0, 0.9, path0)) * step(dist - 0.5, d0) * (1.0 - step(uDepthParams.y * 0.8, d0));
-  } else {
+    sceneHit = hit;
+  }
+  if (sceneHit < 0.5) {
     vec3 transCrest = exp(-kd * mix(1.6, 0.22, crest));
     vec3 bottom = srgbToLinear(vec3(0.30, 0.26, 0.16));
     float kdMean = dot(kd, vec3(0.3, 0.45, 0.25));
