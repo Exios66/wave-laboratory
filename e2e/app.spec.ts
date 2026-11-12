@@ -1,15 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
-
-/** Collect console errors and uncaught exceptions for the whole test. */
-function trackErrors(page: Page): string[] {
-  const errors: string[] = [];
-  page.on('console', (msg) => {
-    if (msg.type() === 'error') errors.push(msg.text());
-  });
-  page.on('pageerror', (err) => errors.push(err.message));
-  return errors;
-}
+import type { Page } from '@playwright/test';
+import { expect, frames, test, trackErrors } from './fixtures';
 
 async function waitForSimulation(page: Page): Promise<void> {
   await expect(page.getByRole('status').filter({ hasText: 'Simulation running' })).toBeAttached({
@@ -332,12 +323,12 @@ test.describe('Wave Laboratory app', () => {
     );
     await expect(page.getByText(/^Riding with /)).toBeVisible({ timeout: 10_000 });
     // Let the flight condense, then look further down at the fleet.
-    await page.waitForTimeout(3500);
+    await frames(page, 14);
     await page.screenshot({ path: 'test-results/plane-view.png' });
     const canvas = page.locator('#viewport-canvas');
     await canvas.focus();
     for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowUp');
-    await page.waitForTimeout(500);
+    await frames(page, 4);
     await page.screenshot({ path: 'test-results/plane-view-down.png' });
     await page.getByRole('button', { name: 'Land' }).click();
     await expect(page.getByRole('radio', { name: 'Orbit' })).toHaveAttribute(
@@ -359,7 +350,7 @@ test.describe('Wave Laboratory app', () => {
       await radio.click();
       await expect(radio).toHaveAttribute('aria-checked', 'true');
       // Let a few frames render in the new mode (and the bridge hide its own glass).
-      await page.waitForTimeout(600);
+      await frames(page, 4);
     }
     await page.screenshot({ path: 'test-results/bridge-view.png' });
     await page.getByRole('radio', { name: 'Orbit', exact: true }).click();
@@ -387,12 +378,12 @@ test.describe('Wave Laboratory app', () => {
       .getByRole('button', { name: /^Follow/ })
       .first()
       .click();
-    await page.waitForTimeout(1500);
+    await frames(page, 6);
     await page.screenshot({ path: 'test-results/sloop-follow.png' });
     const bridge = page.getByRole('radio', { name: 'Bridge', exact: true });
     await bridge.click();
     await expect(bridge).toHaveAttribute('aria-checked', 'true');
-    await page.waitForTimeout(1000);
+    await frames(page, 4);
     expect(errors).toEqual([]);
   });
 
@@ -405,7 +396,7 @@ test.describe('Wave Laboratory app', () => {
     await expect(underwater).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByText(/^Underwater · \d+\.\d m$/)).toBeVisible({ timeout: 10_000 });
     // Let the marine life (schools, rays, jellyfish) spawn and animate for a few frames.
-    await page.waitForTimeout(2500);
+    await frames(page, 10);
     await page.screenshot({ path: 'test-results/underwater-view.png' });
     await page.getByRole('radio', { name: 'Orbit' }).click();
     await expect(page.getByRole('radio', { name: 'Orbit' })).toHaveAttribute(
@@ -429,12 +420,12 @@ test.describe('Wave Laboratory app', () => {
     const underwater = page.getByRole('radio', { name: 'Underwater' });
     await underwater.click();
     await expect(page.getByText(/^Underwater · \d+\.\d m$/)).toBeVisible({ timeout: 30_000 });
-    await page.waitForTimeout(1500);
+    await frames(page, 6);
     await page.screenshot({ path: 'test-results/underwater-shelf.png' });
     // Deep water: blue water mode (no floor, marine snow only).
     await depth.fill('4000');
     await depth.press('Enter');
-    await page.waitForTimeout(1500);
+    await frames(page, 6);
     await page.screenshot({ path: 'test-results/underwater-blue.png' });
     await page.getByRole('radio', { name: 'Orbit' }).click();
     expect(errors).toEqual([]);
@@ -573,7 +564,7 @@ test.describe('Wave Laboratory app', () => {
     await scene.getByRole('button', { name: /^Catamaran \d/ }).click();
     await expect(page.getByRole('combobox', { name: 'Hull type' })).toHaveValue('catamaran');
     await waitForSimulation(page);
-    await page.waitForTimeout(1500);
+    await frames(page, 6);
     expect(errors).toEqual([]);
   });
 
