@@ -630,6 +630,17 @@ export class Vessel {
     const R = s.rot;
     const def = this.definition;
     const fl = Math.hypot(R[0]!, R[3]!) || 1;
+    // Vertical extent of the rotated body box: a pitched submarine reaches above and below its
+    // level-trim range.
+    const b = this.bodyBox;
+    const zc =
+      s.pz +
+      (R[6]! * (b.min.x + b.max.x) + R[7]! * (b.min.y + b.max.y) + R[8]! * (b.min.z + b.max.z)) / 2;
+    const zh =
+      (Math.abs(R[6]!) * (b.max.x - b.min.x) +
+        Math.abs(R[7]!) * (b.max.y - b.min.y) +
+        Math.abs(R[8]!) * (b.max.z - b.min.z)) /
+      2;
     return {
       x: s.px,
       y: s.py,
@@ -637,8 +648,8 @@ export class Vessel {
       fy: R[3]! / fl,
       halfLength: def.length / 2,
       halfBeam: def.beam / 2,
-      zMin: s.pz + this.bodyBox.min.z,
-      zMax: s.pz + this.bodyBox.max.z,
+      zMin: zc - zh,
+      zMax: zc + zh,
       mass: def.mass,
       vx: R[0]! * s.u + R[1]! * s.v + R[2]! * s.w,
       vy: R[3]! * s.u + R[4]! * s.v + R[5]! * s.w,
