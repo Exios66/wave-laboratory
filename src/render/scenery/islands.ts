@@ -19,6 +19,7 @@
  */
 import * as THREE from 'three';
 import { mulberry32 } from '../../core/rng';
+import { ModelInstances, type ModelLibrary, type ModelName } from './models';
 import type { SceneryFrame, SceneryLayer } from './types';
 
 // ---------------------------------------------------------------------------------------------
@@ -486,6 +487,27 @@ function clear(spots: Spot[], x: number, z: number, r: number): boolean {
   return spots.every((o) => Math.hypot(o.x - x, o.z - z) > o.r + r);
 }
 
+/** Scenery model placed on an island (island-local, Three.js axes), drawn instanced. */
+export interface IslandProp {
+  model: IslandModel;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  sx: number;
+  sy: number;
+  sz: number;
+}
+
+/** Models the islands use when scenery models are on. */
+export const ISLAND_MODELS = ['rock-b', 'rock-a'] as const;
+export type IslandModel = (typeof ISLAND_MODELS)[number];
+/** Most copies of each model across all visible islands. */
+const MODEL_PER_ISLAND: Record<IslandModel, number> = {
+  'rock-b': 24,
+  'rock-a': 3,
+};
+
 interface IslandBuild {
   maxH: number;
   /** Palm placements, island-local: x, ground y, z, yaw, scale. */
@@ -494,7 +516,16 @@ interface IslandBuild {
   lamp: THREE.Vector3 | null;
 }
 
-function buildIsland(b: MeshBuilder, spec: IslandSpec): IslandBuild & { shape: IslandShape } {
+/**
+ * Build one island's merged mesh. With `props`, boulders are not baked into the
+ * mesh but listed there for the instanced scenery models, and shore rocks are added;
+ * the rest of the island (and its random layout) is the same either way.
+ */
+function buildIsland(
+  b: MeshBuilder,
+  spec: IslandSpec,
+  props: IslandProp[] | null = null,
+): IslandBuild & { shape: IslandShape } {
   const T = TEMPLATES();
   const rnd = mulberry32(spec.seed ^ 0x51ab0b5);
   const sh = makeShape(spec, rnd);
@@ -619,12 +650,44 @@ function buildIsland(b: MeshBuilder, spec: IslandSpec): IslandBuild & { shape: I
     const size = 0.7 + rnd() * (1 + Math.min(2.5, sh.r0 / 50));
     const g = heightAt(sh, x, z);
     const c = rnd() < 0.5 ? C.rock : C.rockDark;
-    const m = trs(x, g + size * 0.15, z, rnd() * 3, rnd() * 3, rnd() * 3, size, size * 0.7, size);
-    b.add(T.rock, m, shade(c, 0.1));
+    const rx = rnd() * 3;
+    const ry = rnd() * 3;
+    const rz = rnd() * 3;
+    const tint = shade(c, 0.1);
+    if (props) {
+      // The boulder model is 4 m across and 1.3 m high: match the procedural rock's size.
+      props.push({
+        model: 'rock-b',
+        x,
+        y: g - 0.3 * size,
+        z,
+        yaw: ry,
+        sx: size * 0.45,
+        sy: size * 1.1,
+        sz: size * 0.45,
+      });
+    } else {
+      b.add(T.rock, trs(x, g + size * 0.15, z, rx, ry, rz, size, size * 0.7, size), tint);
+    }
     if (rnd() < 0.4) {
       const s2 = size * 0.5;
-      const m2 = trs(x + size, g, z + size * 0.5, rnd() * 3, rnd() * 3, 0, s2, s2 * 0.8, s2);
-      b.add(T.rock, m2, shade(c, 0.1));
+      const a2 = rnd() * 3;
+      const b2 = rnd() * 3;
+      if (props) {
+        props.push({
+          model: 'rock-b',
+          x: x + size,
+          y: g - 0.3 * s2,
+          z: z + size * 0.5,
+          yaw: b2,
+          sx: s2 * 0.45,
+          sy: s2 * 1.1,
+          sz: s2 * 0.45,
+        });
+        shade(c, 0.1);
+      } else {
+        b.add(T.rock, trs(x + size, g, z + size * 0.5, a2, b2, 0, s2, s2 * 0.8, s2), shade(c, 0.1));
+      }
     }
   }
 
@@ -673,7 +736,36 @@ function buildIsland(b: MeshBuilder, spec: IslandSpec): IslandBuild & { shape: I
     i++;
   }
 
+  if (props) addShoreModels(sh, spec, props);
   return { maxH, palms, lamp, shape: sh };
+}
+
+/**
+ * Rocky shore shelves on the bigger islands, from their own random stream so the
+ * rest of the island is laid out the same with or without models. Each sits on the shoreline
+ * with its long side along the coast, mostly sunk so its top just clears the water.
+ */
+function addShoreModels(sh: IslandShape, spec: IslandSpec, props: IslandProp[]): void {
+  const rnd = mulberry32(spec.seed ^ 0x2c1b3c6d);
+  if (sh.r0 >= 30) {
+    const n = sh.r0 >= 70 ? 3 : sh.r0 >= 45 ? 2 : 1;
+    const k = THREE.MathUtils.clamp(sh.r0 / 110, 0.3, 0.8);
+    for (let i = 0; i < n; i++) {
+      const theta = rnd() * Math.PI * 2;
+      const [x, z] = polar(sh, 1.02, theta);
+      // Long axis (model x) along the coast: model z points out to sea.
+      props.push({
+        model: 'rock-a',
+        x,
+        y: -2.6 * k,
+        z,
+        yaw: Math.atan2(Math.cos(theta), Math.sin(theta)),
+        sx: k,
+        sy: 0.9 + 0.4 * rnd(),
+        sz: k,
+      });
+    }
+  }
 }
 
 /** One palm, base at the origin, crown leaning toward +x. Vertex coloured. */
@@ -900,6 +992,8 @@ interface Slot {
   shape: IslandShape | null;
   lamp: THREE.Vector3 | null;
   halo: THREE.Sprite | null;
+  /** Scenery models on this island (empty unless models are on). */
+  props: IslandProp[];
 }
 
 export class IslandLayer implements SceneryLayer {
@@ -932,6 +1026,13 @@ export class IslandLayer implements SceneryLayer {
 
   private readonly haloTexture: THREE.DataTexture;
   private readonly haloMaterial: THREE.SpriteMaterial;
+
+  /** CC0 scenery models (boulders and shore rocks); null keeps the all-procedural islands. */
+  private library: ModelLibrary | null = null;
+  private modelsRequested = false;
+  /** Whether islands are currently built with models (boulders and docks not baked). */
+  private modelMode = false;
+  private readonly modelInstances = new Map<IslandModel, ModelInstances>();
 
   constructor() {
     this.object.name = 'islands';
@@ -1070,6 +1171,46 @@ gl_Position = projectionMatrix * mvPosition;`,
     this.object.visible = enabled;
   }
 
+  /** Use scenery models where the tier allows (see scenery/models.ts). */
+  setModels(library: ModelLibrary | null): void {
+    this.library = library;
+    this.modelsRequested = false;
+  }
+
+  /** Models drawn instanced right now, by name (for tests and the budget). */
+  get modelCounts(): Partial<Record<ModelName, number>> {
+    const out: Partial<Record<ModelName, number>> = {};
+    for (const [name, inst] of this.modelInstances) out[name] = inst.count;
+    return out;
+  }
+
+  /** Switch between model-dressed and all-procedural islands, rebuilding what is visible. */
+  private updateModelMode(frame: SceneryFrame): void {
+    const lib = this.library;
+    const want = lib !== null && frame.tier !== 'lite';
+    if (want && !this.modelsRequested) {
+      this.modelsRequested = true;
+      void lib.request(...ISLAND_MODELS);
+    }
+    const on = want && lib.ready(...ISLAND_MODELS);
+    if (on === this.modelMode) return;
+    this.modelMode = on;
+    if (on) {
+      for (const name of ISLAND_MODELS) {
+        if (this.modelInstances.has(name)) continue;
+        const inst = new ModelInstances(
+          lib!.get(name)!,
+          POOL_SIZE * MODEL_PER_ISLAND[name],
+          `island-${name}`,
+        );
+        this.modelInstances.set(name, inst);
+        this.object.add(inst.object);
+      }
+    }
+    for (const slot of this.active.values()) this.assign(slot, slot.spec!);
+    this.rebuildInstances();
+  }
+
   /** Islands currently built (for tests and debugging). */
   get visibleIslands(): readonly IslandSpec[] {
     return [...this.active.values()].map((s) => s.spec!);
@@ -1086,6 +1227,7 @@ gl_Position = projectionMatrix * mvPosition;`,
       this.lastQuery.set(wx, wy);
       this.refresh(wx, wy);
     }
+    this.updateModelMode(frame);
 
     const night = THREE.MathUtils.smoothstep(1 - frame.daylight, 0.35, 0.85);
     this.glow.value = 0.12 + 2.6 * night;
@@ -1153,6 +1295,7 @@ gl_Position = projectionMatrix * mvPosition;`,
       shape: null,
       lamp: null,
       halo: null,
+      props: [],
     };
     this.slots.push(slot);
     return slot;
@@ -1160,7 +1303,9 @@ gl_Position = projectionMatrix * mvPosition;`,
 
   private assign(slot: Slot, spec: IslandSpec): void {
     const b = this.builder;
-    const built = buildIsland(b, spec);
+    const props: IslandProp[] | null = this.modelMode ? [] : null;
+    const built = buildIsland(b, spec, props);
+    slot.props = props ?? [];
     const nV = b.vertexCount;
     const nI = b.idx.length;
     if (nV > slot.vCap || nI > slot.iCap) {
@@ -1244,6 +1389,25 @@ gl_Position = projectionMatrix * mvPosition;`,
     }
     this.palmMesh.count = p;
     this.palmMesh.instanceMatrix.needsUpdate = true;
+    const counts = new Map<IslandModel, number>();
+    for (const slot of this.modelMode ? this.active.values() : []) {
+      const cx = slot.spec!.x;
+      const cz = -slot.spec!.y;
+      for (const prop of slot.props) {
+        const inst = this.modelInstances.get(prop.model);
+        if (!inst) continue;
+        const i = counts.get(prop.model) ?? 0;
+        tmpQ.setFromAxisAngle(tmpV.set(0, 1, 0), prop.yaw);
+        tmpM.compose(
+          tmpP.set(cx + prop.x, prop.y, cz + prop.z),
+          tmpQ,
+          tmpS.set(prop.sx, prop.sy, prop.sz),
+        );
+        inst.set(i, tmpM);
+        counts.set(prop.model, i + 1);
+      }
+    }
+    for (const [name, inst] of this.modelInstances) inst.commit(counts.get(name) ?? 0);
     this.palmMesh.computeBoundingSphere();
     if (this.palmMesh.boundingSphere) this.palmMesh.boundingSphere.radius += 3;
     this.lagoonMesh.count = l;
@@ -1272,6 +1436,12 @@ gl_Position = projectionMatrix * mvPosition;`,
     this.object.remove(this.lagoonMesh);
     this.haloTexture.dispose();
     this.haloMaterial.dispose();
+    for (const inst of this.modelInstances.values()) {
+      inst.dispose();
+      this.object.remove(inst.object);
+    }
+    this.modelInstances.clear();
+    this.modelMode = false;
     this.lastQuery.set(Number.NaN, Number.NaN);
   }
 }

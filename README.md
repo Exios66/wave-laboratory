@@ -264,7 +264,7 @@ src/
   test/         shared test fixtures
 docs/           plan, physics reference, architecture, and the built Pages site
 e2e/            Playwright browser tests
-scripts/        deploy-pages.mjs (publishes the build into docs/)
+scripts/        deploy-pages.mjs (publishes the build into docs/), fetch-models.mjs (CC0 scenery models)
 index.html      Vite entry point
 ```
 
@@ -309,3 +309,6 @@ uses relative paths, so it also works from any other static host or sub-folder.
 ## License
 
 [MIT](LICENSE) — © Exios66.
+
+The scenery models in `public/models/` (rocks, the buoy, lifebuoys) are CC0 assets from
+[Poly Haven](https://polyhaven.com); see [`public/models/CREDITS.md`](public/models/CREDITS.md).

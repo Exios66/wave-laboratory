@@ -13,6 +13,7 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import type { ModelPart } from '../scenery/models';
 import type { VesselType } from '../../schema/experiment';
 import type { VesselDefinition, VisualBox } from '../../vessel/api';
 
@@ -501,8 +502,13 @@ export class VesselDetail {
   readonly materials: THREE.MeshStandardMaterial[] = [];
   private scanner: THREE.Object3D | null = null;
   private readonly phase: number;
+  private lifebuoys: 'pending' | 'done' = 'pending';
 
-  constructor(def: VesselDefinition, id: string, colors: { rail: number }) {
+  constructor(
+    private readonly def: VesselDefinition,
+    private readonly id: string,
+    colors: { rail: number },
+  ) {
     const kit = detailKit(def.type);
     this.phase = (id.length * 1.37) % (Math.PI * 2);
     const tag = (o: THREE.Object3D) => {
@@ -586,6 +592,46 @@ export class VesselDetail {
       add('green', new THREE.Vector3(bx, sz, halfBeam));
       add('white', mastTop ?? new THREE.Vector3(fwd - def.length * 0.15, deckAt(fwd) + 3 * s, 0));
       add('white', new THREE.Vector3(aft + 0.2, deckAt(aft) + 1 * s, 0));
+    }
+  }
+
+  /**
+   * Hang lifebuoys (the CC0 model) on both sides of the bridge house, two a side, on ships that
+   * carry them. Safe to call every frame: it only does anything once.
+   */
+  addLifebuoys(parts: ModelPart[]): void {
+    if (this.lifebuoys !== 'pending') return;
+    this.lifebuoys = 'done';
+    const house = bridgeHouse(this.def);
+    const kit = detailKit(this.def.type);
+    if (!house || kit.rails !== 'steel' || !kit.radar || house.size.x < 4) return;
+    const k = THREE.MathUtils.clamp(this.def.length / 60, 0.5, 1);
+    const y = house.center.z - house.size.z / 2 + Math.min(1.7, house.size.z * 0.5);
+    const m = new THREE.Matrix4();
+    for (const part of parts) {
+      const copies: THREE.BufferGeometry[] = [];
+      for (const side of [-1, 1]) {
+        for (const dx of [-0.28, 0.28]) {
+          m.compose(
+            new THREE.Vector3(
+              house.center.x + dx * house.size.x,
+              y - 0.4 * k,
+              side * (house.size.y / 2 + 0.12),
+            ),
+            new THREE.Quaternion(),
+            new THREE.Vector3(k, k, k),
+          );
+          copies.push(part.geometry.clone().applyMatrix4(m));
+        }
+      }
+      const geo = mergeGeometries(copies);
+      for (const g of copies) g.dispose();
+      if (!geo) continue;
+      const mesh = new THREE.Mesh(geo, part.material);
+      mesh.name = 'lifebuoys';
+      mesh.userData.pickKind = 'vessel';
+      mesh.userData.pickId = this.id;
+      this.group.add(mesh);
     }
   }
 

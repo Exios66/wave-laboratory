@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   ISLAND_CELL,
   ISLAND_CLEAR_RADIUS,
@@ -11,8 +11,10 @@ import {
   POOL_SIZE,
   keysInCell,
   islandsNear,
+  ISLAND_MODELS,
   type IslandSpec,
 } from './islands';
+import { ModelLibrary } from './models';
 import type { SceneryFrame } from './types';
 
 function scan(range: number, keys = true): IslandSpec[] {
@@ -184,6 +186,53 @@ describe('IslandLayer', () => {
     camera.position.set(5_000, 50, 5_000);
     layer.update(frame(camera));
     expect(layer.visibleIslands).toEqual([]);
+    layer.dispose();
+  });
+});
+
+describe('IslandLayer scenery models', () => {
+  const library = () =>
+    new ModelLibrary('/models/', () => {
+      const geo = new THREE.BoxGeometry(4, 1.3, 3.8).translate(0, 0.65, 0);
+      return Promise.resolve(new THREE.Mesh(geo, new THREE.MeshStandardMaterial()));
+    });
+
+  it('swaps boulders for instanced models without moving anything else', async () => {
+    const plain = new IslandLayer();
+    const dressed = new IslandLayer();
+    const lib = library();
+    dressed.setModels(lib);
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(-3_100, 80, -900);
+    const f = { ...frame(camera), tier: 'full' as const };
+    dressed.update(f);
+    await lib.request(...ISLAND_MODELS);
+    dressed.update(f);
+    plain.update(f);
+    expect(dressed.visibleIslands).toEqual(plain.visibleIslands);
+    const counts = dressed.modelCounts;
+    expect(counts['rock-b']).toBeGreaterThan(0);
+    // One draw call per model, whatever the number of islands.
+    const models = dressed.object.children.filter((c) => c.name.startsWith('island-rock'));
+    expect(models).toHaveLength(ISLAND_MODELS.length);
+    // Palms are laid out from the same random stream either way.
+    const palms = (l: IslandLayer) =>
+      (l.object.children.find((c) => c.name === 'island-palms') as THREE.InstancedMesh).count;
+    expect(palms(dressed)).toBe(palms(plain));
+    plain.dispose();
+    dressed.dispose();
+    lib.dispose();
+  });
+
+  it('keeps the procedural islands on the lite tier', () => {
+    const layer = new IslandLayer();
+    const load = vi.fn(() => Promise.resolve(new THREE.Group()));
+    layer.setModels(new ModelLibrary('/models/', load));
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(-3_100, 80, -900);
+    layer.update({ ...frame(camera), tier: 'lite' });
+    expect(load).not.toHaveBeenCalled();
+    expect(layer.modelCounts).toEqual({});
     layer.dispose();
   });
 });
