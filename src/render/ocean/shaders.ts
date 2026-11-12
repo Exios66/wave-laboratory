@@ -935,7 +935,9 @@ void main() {
     if (rc.w > 0.0) {
       vec2 ruv = rc.xy / rc.w + N.xz * vec2(0.06, 0.12);
       vec4 mirrored = texture(uReflTex, clamp(ruv, vec2(0.002), vec2(0.998)));
-      reflection = mix(reflection, mirrored.rgb, clamp(mirrored.a, 0.0, 1.0) * (1.0 - smoothstep(0.3, 0.55, alpha)));
+      // The target is cleared to transparent black, so its colour is premultiplied by coverage.
+      float w = 1.0 - smoothstep(0.3, 0.55, alpha);
+      reflection = reflection * (1.0 - clamp(mirrored.a, 0.0, 1.0) * w) + mirrored.rgb * w;
     }
   }
 

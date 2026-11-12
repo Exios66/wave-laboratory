@@ -280,6 +280,11 @@ export class GpuOcean {
     if (this.foamWanted === 0) this.uniforms.uFoamCascades!.value = 0;
   }
 
+  /** Redraw the surface and foam on the next frame even if simulated time is paused. */
+  invalidate(): void {
+    this.dirty = true;
+  }
+
   /** Rebuild GPU buffers after the browser restores a lost context (a phone tab in the background). */
   restore(): void {
     const n = this.n;
