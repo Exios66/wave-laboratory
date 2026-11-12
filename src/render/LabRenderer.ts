@@ -1850,7 +1850,7 @@ export class LabRenderer implements LabRendererApi {
           azimuth,
           polar,
           this.mode === 'top'
-            ? Math.max(this.radius, focus.definition.length)
+            ? Math.max(this.radius, this.topViewDistance(focus.definition.length))
             : this.mode === 'follow' && !this.userMoved
               ? // Frame the ship being followed, not the biggest one in the scene.
                 Math.min(this.radius, THREE.MathUtils.clamp(focus.definition.length * 2.4, 28, 700))
@@ -2026,6 +2026,13 @@ export class LabRenderer implements LabRendererApi {
       this.fog.density = fallbackFogDensity(optics.attenuation);
       this.post.setUnderwater(null);
     }
+  }
+
+  /** Distance at which the whole hull fits on screen from above, in any heading, with 10 % margin. */
+  private topViewDistance(length: number): number {
+    const tanV = Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2);
+    const tan = Math.min(tanV, tanV * this.camera.aspect);
+    return (0.55 * length) / tan;
   }
 
   private placeBridgeCamera(position: Vec3, attitude: Quat, definition: VesselDefinition): void {
