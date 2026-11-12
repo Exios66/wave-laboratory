@@ -68,6 +68,13 @@ function inside(f: HullFootprint, px: number, py: number): boolean {
   return Math.abs(along) <= f.halfLength + 1e-9 && Math.abs(across) <= f.halfBeam + 1e-9;
 }
 
+/** True when both hulls give vertical extents and one lies wholly above the other. */
+export function verticallyClear(a: HullFootprint, b: HullFootprint): boolean {
+  if (a.zMin === undefined || a.zMax === undefined) return false;
+  if (b.zMin === undefined || b.zMax === undefined) return false;
+  return a.zMax < b.zMin || b.zMax < a.zMin;
+}
+
 /** Overlap of two hull rectangles, or null when they do not touch. */
 export function footprintContact(a: HullFootprint, b: HullFootprint): Contact | null {
   const dx = b.x - a.x;
