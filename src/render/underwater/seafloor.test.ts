@@ -11,6 +11,7 @@ import {
   HOME_REEF_CREST,
   HOME_REEF_SLOPE,
   maxCameraDepth,
+  FLOOR_CLEARANCE,
   maxCameraDepthAt,
   REEF_INFLUENCE,
   REEF_LAGOON,
@@ -150,6 +151,17 @@ describe('island reefs in deep water', () => {
     expect(cam).toBeGreaterThanOrEqual(CAMERA_MIN_DEPTH);
     expect(cam).toBeLessThan(floorDepthAt(x, reef.y, 4000, [reef])!);
     expect(maxCameraDepthAt(0, 0, 4000, [reef])).toBe(CAMERA_MAX_DEPTH);
+  });
+
+  it('keeps the floor clearance over a reef flat shallower than the minimum eye depth', () => {
+    for (let r = 0; r < lagoon + 400; r += 7) {
+      const x = reef.x + r;
+      const floor = floorDepthAt(x, reef.y, 4000, [reef]);
+      if (floor === null) continue;
+      const cam = maxCameraDepthAt(x, reef.y, 4000, [reef]);
+      expect(cam).toBeGreaterThan(0);
+      if (floor > 2) expect(cam).toBeLessThanOrEqual(floor - FLOOR_CLEARANCE + 1e-9);
+    }
   });
 });
 
