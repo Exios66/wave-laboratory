@@ -756,7 +756,7 @@ float softCap(float x, float cap) {
 // about.
 uniform sampler2DShadow uShadowMap;
 uniform mat4 uShadowMatrix;
-uniform vec3 uShadowParams; // (on, bias, texel size in shadow-map uv)
+uniform vec4 uShadowParams; // (on, bias, texel size in shadow-map uv, 1 = cast by the moon)
 float oceanShadow(vec3 p) {
   if (uShadowParams.x < 0.5) return 1.0;
   vec4 c = uShadowMatrix * vec4(p, 1.0);
@@ -878,15 +878,17 @@ void main() {
   float cloudDim = 1.0 - 0.85 * smoothstep(0.3, 1.0, uCloud);
   float sunElev = degrees(asin(clamp(L.y, -1.0, 1.0)));
   float sunE = clamp(0.35 + sunElev / 28.0, 0.25, 2.6) * smoothstep(-4.0, 3.0, sunElev) * cloudDim;
-  // In a hull's shadow the sun is gone and the hull also hides part of the sky beside it.
+  // In a hull's shadow the light that cast it (the sun, or the moon at night) is gone and the
+  // hull also hides part of the sky beside it.
   float shade = oceanShadow(vThreePos);
-  sunE *= shade;
+  float moonShade = uShadowParams.w > 0.5 ? shade : 1.0;
+  sunE *= uShadowParams.w > 0.5 ? 1.0 : shade;
   float skyShade = mix(0.6, 1.0, shade);
   float sunVis = (1.0 - smoothstep(0.5, 0.95, uCloud)) * smoothstep(-0.02, 0.04, L.y);
   vec3 sunCol = vec3(1.0, 0.97, 0.92) * uSunTint;
   float moonElev = degrees(asin(clamp(uMoonDir.y, -1.0, 1.0)));
   float moonE = (0.7 * smoothstep(2.0, 20.0, moonElev) + 0.25) * smoothstep(-2.0, 2.0, moonElev)
-    * uNight * (1.0 - smoothstep(-4.0, 3.0, sunElev)) * cloudDim;
+    * uNight * (1.0 - smoothstep(-4.0, 3.0, sunElev)) * cloudDim * moonShade;
   vec3 moonCol = srgbToLinear(vec3(0.75, 0.82, 0.95));
   vec3 ambient = skyAmbient();
   // Downwelling irradiance below the surface: direct sun and moon, the sky dome, lightning.

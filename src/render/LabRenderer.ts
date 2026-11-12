@@ -534,7 +534,7 @@ export class LabRenderer implements LabRendererApi {
       uScene: { value: 0 },
       uShadowMap: { value: null as THREE.Texture | null },
       uShadowMatrix: { value: new THREE.Matrix4() },
-      uShadowParams: { value: new THREE.Vector3(0, 0, 0) },
+      uShadowParams: { value: new THREE.Vector4(0, 0, 0, 0) },
       uReflOn: { value: 0 },
       uRefrTex: { value: this.prepass.refraction.texture },
       uRefrDepth: { value: this.prepass.refraction.depthTexture },
@@ -1362,7 +1362,7 @@ export class LabRenderer implements LabRendererApi {
     this.lastRenderT = t;
     this.updateWeather(t, dt);
     this.applyUnderwater();
-    this.updateEnvironment(dt);
+    this.updateEnvironment();
     this.updateShadows();
     this.drawPrepass();
     if (this.post.active) this.post.render();
@@ -1414,7 +1414,7 @@ export class LabRenderer implements LabRendererApi {
     const lit = size > 0 && sun.intensity > 0.05 && sun.position.y > 0;
     sun.castShadow = lit;
     if (!lit) {
-      (u.uShadowParams!.value as THREE.Vector3).set(0, 0, 0);
+      (u.uShadowParams!.value as THREE.Vector4).set(0, 0, 0, 0);
       // SkyLighting places the light relative to the origin.
       sun.target.position.set(0, 0, 0);
       sun.target.updateMatrixWorld();
@@ -1440,8 +1440,8 @@ export class LabRenderer implements LabRendererApi {
         if (!m.isMesh || o === this.oceanMesh || o === this.sky) return;
         // The seabed and what lives on it sit below the water the sun lights.
         if (o.name.startsWith('underwater-') || o.name.startsWith('marine-')) return;
-        const mat = m.material as THREE.Material;
-        if ((mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
+        const mats = Array.isArray(m.material) ? m.material : [m.material];
+        if (mats.some((mat) => (mat as THREE.MeshStandardMaterial).isMeshStandardMaterial)) {
           m.castShadow = true;
           m.receiveShadow = true;
         }
@@ -1469,10 +1469,11 @@ export class LabRenderer implements LabRendererApi {
     sun.updateMatrixWorld();
     this.renderer.shadowMap.needsUpdate = true;
     u.uShadowMap!.value = sun.shadow.map?.depthTexture ?? this.shadowFallback.depthTexture;
-    (u.uShadowParams!.value as THREE.Vector3).set(
+    (u.uShadowParams!.value as THREE.Vector4).set(
       sun.shadow.map ? 1 : 0,
       sun.shadow.bias,
       0.75 / size,
+      this.lightState?.lightIsMoon ? 1 : 0,
     );
   }
 
@@ -1481,7 +1482,7 @@ export class LabRenderer implements LabRendererApi {
    * hemisphere fill down to match. Off at quality low, on phones and software GPUs, and under the
    * sea, where the sky above is not what lights a hull.
    */
-  private updateEnvironment(dt: number): void {
+  private updateEnvironment(): void {
     const on = !this.lightTier && !this.underwater && BUDGET[this.quality].ibl;
     if (!on) {
       this.scene.environment = null;
@@ -1489,7 +1490,8 @@ export class LabRenderer implements LabRendererApi {
     }
     const ls = this.lightState;
     const u = this.ocean.uniforms;
-    this.skyEnv.update(Number.isFinite(dt) ? Math.max(0, dt) : 0, {
+    // Wall time: a paused simulation still redraws the environment for a new time of day.
+    this.skyEnv.update(this.wallDt, {
       sunDir: ls?.sunDir ?? (u.uSunDir!.value as THREE.Vector3),
       cloud: u.uCloud!.value as number,
       night: ls?.night ?? 0,
