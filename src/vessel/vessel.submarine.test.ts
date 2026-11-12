@@ -7,8 +7,10 @@ import { SEAWATER_DENSITY } from '../core/constants';
 import { quatIdentity } from '../core/vec';
 import { OceanField } from '../ocean/oceanField';
 import { env, regular } from '../test/fixtures';
-import { createVesselDefinition } from './definition';
-import { MIN_KEEL_DEPTH } from './depthKeeping';
+import { createVesselDefinition, trimSubmarine } from './definition';
+import { BOTTOM_CLEARANCE, keelDepthRange, MIN_KEEL_DEPTH } from './depthKeeping';
+import { buildHydroModel, stripImmersion } from './hydroModel';
+import { Vessel } from './vessel';
 import { effectiveGm } from './flooding';
 import { quatToMat3, submergedProperties } from './hydrostatics';
 import { meshBounds, meshVolume } from './mesh';
@@ -167,6 +169,68 @@ describe('depth keeping', () => {
     expect(v.diagnostics().depthCmd + def.kg).toBeCloseTo(MIN_KEEL_DEPTH, 6);
     v.command({ depthM: 1e6 });
     expect(v.diagnostics().depthCmd).toBeLessThan(4000);
+  });
+});
+
+describe('environment limits', () => {
+  const place = (depth: number, waterDensity = SEAWATER_DENSITY) =>
+    new Vessel(
+      'sub',
+      def,
+      { x: 0, y: 0, headingDeg: 90, speedKn: 0, autopilot: true },
+      new OceanField([], env({ depth, waterDensity }), { physicsGrid: 8 }),
+    );
+
+  it('rejects placement where the minimum keel depth and the bottom clearance do not fit', () => {
+    expect(keelDepthRange(def.draft, 1)).toBeNull();
+    expect(() => place(1)).toThrow(RangeError);
+    expect(() => place(MIN_KEEL_DEPTH + BOTTOM_CLEARANCE - 0.5)).toThrow(/too shallow/);
+    expect(() => place(MIN_KEEL_DEPTH + BOTTOM_CLEARANCE)).not.toThrow();
+  });
+
+  it('clamps depth orders to the seabed clearance in shallow water', () => {
+    const v = place(60);
+    v.command({ depthM: 500 });
+    expect(v.diagnostics().depthCmd + def.kg).toBeCloseTo(60 - BOTTOM_CLEARANCE, 6);
+  });
+
+  it('trims to neutral buoyancy for the water density and holds her depth at rest', () => {
+    for (const rho of [900, 1100]) {
+      const trimmed = trimSubmarine(def, rho);
+      expect(trimmed.mass / rho).toBeCloseTo(def.mass / SEAWATER_DENSITY, 6);
+      expect(trimmed.draft).toBe(def.draft);
+      const v = place(4000, rho);
+      expect(v.definition.mass).toBeCloseTo(trimmed.mass, 3);
+      let worst = 0;
+      run(v, 120, () => (worst = Math.max(worst, Math.abs(v.telemetry().heave))));
+      report(`submarine ρ ${rho} at rest 120 s: max |heave| ${worst.toExponential(2)} m`);
+      expect(worst).toBeLessThan(0.05);
+    }
+    // Surface ships are not trimmed.
+    const ship = createVesselDefinition('cargo-ship');
+    expect(trimSubmarine(ship, 900)).toBe(ship);
+  });
+
+  it('accepts only the neutral loading', () => {
+    expect(() => createVesselDefinition('submarine', 1, 0.6, 0.4)).toThrow(/loadFactor must be 1/);
+    expect(() => createVesselDefinition('submarine', 1, 0.6, 1.25)).toThrow(RangeError);
+  });
+
+  it('keeps strip forces while the hull stays under at a shallow order', () => {
+    const hy = buildHydroModel(def, SEAWATER_DENSITY, 9.81);
+    expect(hy.submerged).toBe(true);
+    const axisZ = def.submarine!.axisZ;
+    const waterline = def.draft - def.kg;
+    // Keel 10 m down (5 m above the design depth): the axis is still several metres under.
+    const axisDepth = waterline - 5 - axisZ;
+    expect(axisDepth).toBeGreaterThan(3);
+    for (let i = 0; i < hy.stripX.length; i++) {
+      expect(stripImmersion(hy, axisZ, hy.stripDraft[i]!, axisDepth)).toBe(1);
+    }
+    // Broaching: the axis at the surface leaves the sections half immersed, above it none.
+    const mid = Math.floor(hy.stripX.length / 2);
+    expect(stripImmersion(hy, axisZ, hy.stripDraft[mid]!, 0)).toBeCloseTo(0.5, 6);
+    expect(stripImmersion(hy, axisZ, hy.stripDraft[mid]!, -10)).toBe(0);
   });
 });
 

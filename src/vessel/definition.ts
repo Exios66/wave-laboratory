@@ -50,6 +50,11 @@ const GZ_HEELS = Array.from({ length: 37 }, (_, i) => i * 5);
  * draft bounded between 2 % of the design draft and 98 % of the depth (the mesh top for a
  * submarine); 1 uses the design draft. Submarine draft denotes keel depth, and its stored
  * righting arm uses GM · sin(heel).
+ *
+ * A submarine carries her stores and crew inside a hull of fixed volume and trims to neutral
+ * buoyancy with her tanks, so her loading cannot change her displacement: only `loadFactor` 1
+ * is supported (see `trimSubmarine` for the water-density trim).
+ * @throws {RangeError} For a submarine with `loadFactor` other than 1.
  */
 export function createVesselDefinition(
   type: VesselType,
@@ -58,6 +63,11 @@ export function createVesselDefinition(
   loadFactor = 1,
 ): VesselDefinition {
   const d = hullDesign(type);
+  if (d.submarine && Math.abs(loadFactor - 1) > 1e-9) {
+    throw new RangeError(
+      `A submarine is always trimmed to neutral buoyancy: loadFactor must be 1 (got ${loadFactor}).`,
+    );
+  }
   const s = scale;
   const rho = SEAWATER_DENSITY;
   const g = STANDARD_GRAVITY;
@@ -472,5 +482,22 @@ function sailPlan(
         drop: sl.drop * s,
       })),
     })),
+  };
+}
+
+/**
+ * A submarine trimmed for water of density `rho`: her compensating tanks take on or discharge
+ * water until she is neutrally buoyant at her design keel depth, so mass and inertia scale by
+ * rho / design density while the hull, centre of gravity and draft stay the same. Any other
+ * vessel is returned unchanged.
+ */
+export function trimSubmarine(def: VesselDefinition, rho: number): VesselDefinition {
+  const k = rho / def.hydrostatics.waterDensity;
+  if (!def.submarine || Math.abs(k - 1) < 1e-12) return def;
+  return {
+    ...def,
+    mass: def.mass * k,
+    inertia: { x: def.inertia.x * k, y: def.inertia.y * k, z: def.inertia.z * k },
+    hydrostatics: { ...def.hydrostatics, waterDensity: rho },
   };
 }
