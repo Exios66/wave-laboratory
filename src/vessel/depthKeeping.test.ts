@@ -38,6 +38,15 @@ describe('hydroplane forces', () => {
     expect(b).toBeCloseTo(a, 6);
     expect(planeForce(p, 0.2, 0, 0, RHO, { ...out }).fz).toBe(0);
   });
+
+  it('astern, a deflection lifts the other way but a rising plane is still pushed down', () => {
+    const p = sub.sternPlanes;
+    const ahead = planeForce(p, 0.1, 3, 0, RHO, { ...out }).fz;
+    expect(planeForce(p, 0.1, -3, 0, RHO, { ...out }).fz).toBeCloseTo(-ahead, 6);
+    expect(planeForce(p, 0, -3, 0.5, RHO, { ...out }).fz).toBeLessThan(0);
+    expect(planeForce(p, 0, -3, -0.5, RHO, { ...out }).fz).toBeGreaterThan(0);
+    expect(planeForce(p, 0, -3, 0, RHO, { ...out }).fx).toBeGreaterThan(0);
+  });
 });
 
 describe('DepthKeeper', () => {

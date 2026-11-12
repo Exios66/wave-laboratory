@@ -40,7 +40,13 @@ import {
 } from './coefficients';
 import { Autopilot, rateLimit } from './control';
 import { trimSubmarine } from './definition';
-import { DepthKeeper, keelDepthRange, planeForce, type PlaneForce } from './depthKeeping';
+import {
+  BOTTOM_CLEARANCE,
+  DepthKeeper,
+  keelDepthRange,
+  planeForce,
+  type PlaneForce,
+} from './depthKeeping';
 import { DamageModel, steeringFactor, thrustFactor, type DamageCause } from './damage';
 import {
   buildCompartments,
@@ -330,6 +336,12 @@ export class Vessel {
     // hull point can reach when heeled or pitched.
     const H = 1.1 * Math.max(def.depth, def.beam / 2, def.draft * 1.5);
     const levels = [0, -0.06, -0.15, -0.3, -0.55, -1].map((f) => f * H);
+    // A submarine can be ordered far deeper: extend the levels (doubling) to its deepest keel.
+    const deepest = def.submarine ? 1.1 * (keelDepthRange(def.draft, this.seaDepth)?.max ?? 0) : 0;
+    for (let z = H; z < deepest;) {
+      z = Math.min(2 * z, deepest);
+      levels.push(-z);
+    }
     this.water = new LocalWater(
       field,
       levels,
@@ -406,7 +418,12 @@ export class Vessel {
       const hawse = this.hawse();
       this.dropAnchor(m.x ?? hawse.x, m.y ?? hawse.y, m.scope, m.length);
     }
+    // With no order, hold the design keel depth, clamped like any order (the Inspector shows the
+    // same clamped value), so shallow water never leaves the boat below its clearance.
     if (config.depthM !== undefined) this.command({ depthM: config.depthM });
+    else if (def.submarine && this.seaDepth - BOTTOM_CLEARANCE < def.draft) {
+      this.command({ depthM: def.draft });
+    }
     this.autopilotOn = config.autopilot;
     this.headingCmdDeg = config.headingDeg;
     this.speedCmdKn = config.speedKn;
