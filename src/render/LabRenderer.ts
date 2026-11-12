@@ -773,8 +773,9 @@ export class LabRenderer implements LabRendererApi {
     const whitecap = whitecapFraction(wind);
     if (whitecap !== u.uWhitecap!.value) {
       u.uWhitecap!.value = whitecap;
-      // The foam maps integrate the whitecap fraction, so refresh them even while paused.
-      this.ocean.invalidate();
+      // The foam maps integrate the whitecap fraction. While time runs the next scheduled refresh
+      // picks the change up; while paused, nothing would, so force one.
+      if (dt === 0) this.ocean.invalidate();
     }
     u.uSkyTime!.value = t;
     const drift = u.uCloudDrift!.value as THREE.Vector2;

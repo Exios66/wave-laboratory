@@ -189,6 +189,8 @@ test.describe('Wave Laboratory app', () => {
     await water.selectOption('coastal-9');
     await expect(water).toHaveValue('coastal-9');
     await frames(page, 4);
+    // The clock display refreshes every 80 ms: wait for it to change, then check it went forward.
+    await expect.poll(() => simulationSeconds(time), { timeout: 30_000 }).not.toBe(t0);
     const t1 = await simulationSeconds(time);
     expect(t1).toBeGreaterThan(t0);
     await page.screenshot({ path: 'test-results/water-type-coastal-9.png' });
@@ -198,6 +200,7 @@ test.describe('Wave Laboratory app', () => {
     await water.selectOption('oceanic-i');
     await expect(water).toHaveValue('oceanic-i');
     await frames(page, 4);
+    await expect.poll(() => simulationSeconds(time), { timeout: 30_000 }).not.toBe(t2);
     expect(await simulationSeconds(time)).toBeGreaterThan(t2);
     await page.screenshot({ path: 'test-results/water-type-oceanic-i.png' });
     expect(errors).toEqual([]);
