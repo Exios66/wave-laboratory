@@ -267,3 +267,14 @@ describe('moderate sea', () => {
     expect(tm.health).toBeGreaterThan(0.99);
   });
 });
+
+describe('submarine collision extent', () => {
+  it('reaches further up and down when pitched', () => {
+    const v = makeVessel('submarine', { speedKn: 0 });
+    const level = v.hullFootprint();
+    v.applyOffset({ pitchDeg: 20 });
+    const pitched = v.hullFootprint();
+    expect(pitched.zMin).toBeLessThan(level.zMin! - 1);
+    expect(pitched.zMax).toBeGreaterThan(level.zMax! + 1);
+  });
+});
