@@ -130,7 +130,8 @@ export function createVesselDefinition(
   // Propulsion sized so that full effective thrust balances calm-water resistance at the
   // service speed (thrust deduction is folded into the "effective" thrust).
   const maxSpeed = d.maxSpeedKn * KNOT * Math.sqrt(s); // Froude scaling of speed
-  const k1 = formFactor(cb, lwl, bHull, T);
+  // A submarine's resistance (hydroModel) uses its hull diameter, not its keel depth.
+  const k1 = formFactor(cb, lwl, bHull, sub ? sub.hullDiameter * s : T);
   // Sailing ships have no engine: the sails are their propulsion.
   const sailing = d.rig !== undefined;
   const maxThrust = sailing
