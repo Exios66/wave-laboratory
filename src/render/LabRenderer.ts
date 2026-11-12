@@ -770,7 +770,12 @@ export class LabRenderer implements LabRendererApi {
     u.uFlash!.value = flash;
     u.uRain!.value = rain;
     u.uWind!.value = wind;
-    u.uWhitecap!.value = whitecapFraction(wind);
+    const whitecap = whitecapFraction(wind);
+    if (whitecap !== u.uWhitecap!.value) {
+      u.uWhitecap!.value = whitecap;
+      // The foam maps integrate the whitecap fraction, so refresh them even while paused.
+      this.ocean.invalidate();
+    }
     u.uSkyTime!.value = t;
     const drift = u.uCloudDrift!.value as THREE.Vector2;
     // Cloud deck coordinates are in km; it drifts at ~1.5× the surface wind.
@@ -1224,8 +1229,6 @@ export class LabRenderer implements LabRendererApi {
     this.poseAt(t);
     this.updateWakes(t);
     this.ocean.update(t);
-    // Count only the scene draw, not the FFT passes, so the numbers are steady frame to frame.
-    this.renderer.info.reset();
     this.tickWall(t0);
     this.updateCamera();
     this.constrainToSurface(t);
@@ -1244,6 +1247,9 @@ export class LabRenderer implements LabRendererApi {
     this.updateWeather(t, dt);
     this.applyUnderwater();
     this.drawPrepass();
+    // Count only the scene draw, not the FFT passes or the reflection and depth prepasses, so
+    // the numbers are steady frame to frame.
+    this.renderer.info.reset();
     if (this.post.active) this.post.render();
     else this.renderer.render(this.scene, this.camera);
     this.gpuTimer.end();
