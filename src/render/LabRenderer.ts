@@ -73,6 +73,7 @@ import {
   WINDOW_TILES,
   worldUvs,
 } from './vessel/detail';
+import { ModelLibrary } from './scenery/models';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { reefsNear, UnderwaterSceneryLayer } from './underwater/scenery';
 import { createRadialOceanGeometry, OCEAN_DENSITY, OCEAN_SLICES } from './scene/oceanMesh';
@@ -352,6 +353,8 @@ export class LabRenderer implements LabRendererApi {
   private flash = 0;
   private readonly islands = new IslandLayer();
   private readonly traffic = new TrafficLayer();
+  /** CC0 scenery models (null on phones and software GPUs, which keep the procedural look). */
+  private models: ModelLibrary | null = null;
   private readonly underwaterScenery = new UnderwaterSceneryLayer();
   private readonly marineLife = new MarineLifeLayer();
   private readonly wildlife = new WildlifeLayer(DEFAULT_WILDLIFE_SEED, (out) =>
@@ -551,6 +554,11 @@ export class LabRenderer implements LabRendererApi {
     this.ocean = new GpuOcean(this.renderer, texType);
     this.quality = tier === 'light' ? 'medium' : 'high';
     this.lightTier = tier === 'light';
+    if (!this.lightTier) {
+      this.models = new ModelLibrary(`${import.meta.env.BASE_URL}models/`);
+      this.islands.setModels(this.models);
+      this.traffic.setModels(this.models);
+    }
     Object.assign(this.ocean.uniforms, {
       uMeshScale: { value: 1 },
       uScene: { value: 0 },
@@ -1517,8 +1525,21 @@ export class LabRenderer implements LabRendererApi {
    * hemisphere fill down to match. Off at quality low, on phones and software GPUs, and under the
    * sea, where the sky above is not what lights a hull.
    */
+  /** Hang lifebuoys on deckhouses once the model is in (see vessel/detail.ts). */
+  private dressVessels(): void {
+    const lib = this.models;
+    if (!lib || this.vessels.size === 0) return;
+    const parts = lib.get('lifebuoy');
+    if (!parts) {
+      if (!lib.hasFailed('lifebuoy')) void lib.request('lifebuoy');
+      return;
+    }
+    for (const view of this.vessels.values()) view.detail.addLifebuoys(parts);
+  }
+
   private updateEnvironment(): void {
     setVesselNight(this.lightState?.night ?? 0, this.lightState?.dusk ?? 0);
+    this.dressVessels();
     const on = !this.lightTier && !this.underwater && BUDGET[this.quality].ibl;
     if (!on) {
       this.scene.environment = null;
@@ -1800,6 +1821,9 @@ export class LabRenderer implements LabRendererApi {
       this.scene.remove(layer.object);
       layer.dispose();
     }
+    // After the layers: their instanced meshes draw the library's geometry and materials.
+    this.models?.dispose();
+    this.models = null;
     this.lighting.dispose();
     this.setProbes([]);
     this.ocean.dispose();

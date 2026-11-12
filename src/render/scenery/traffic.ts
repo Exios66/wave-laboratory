@@ -36,6 +36,7 @@ import { hullDesign, type HullDesign } from '../../vessel/hulls';
 import { loftHull } from '../../vessel/mesh';
 import type { WakeSource } from '../scene/wakes';
 import { ISLAND_CLEAR_RADIUS, islandsNear } from './islands';
+import { ModelInstances, type ModelLibrary } from './models';
 import type { SceneryFrame, SceneryLayer, SceneryTier } from './types';
 import { KN, type WildVessel } from './wildlife';
 
@@ -984,6 +985,10 @@ const TRAFFIC_KINDS: readonly TrafficKind[] = [
   'pirate',
 ];
 const STRUCTURE_KINDS: readonly StructureKind[] = ['oil-rig', 'wind-turbine', 'buoy'];
+/** The buoy model: height of its top [m], scale to the procedural buoy's size, depth sunk [m]. */
+const BUOY_MODEL_TOP = 2.7;
+const BUOY_MODEL_SCALE = 1.9;
+const BUOY_MODEL_SINK = 1.5;
 const MAX_LIGHTS = 64;
 
 /** Soft round light sprite (white, alpha falloff) so night lamps are glows, not hard squares. */
@@ -1019,6 +1024,9 @@ export class TrafficLayer implements SceneryLayer {
   });
   private readonly shipMeshes: Record<TrafficKind, THREE.InstancedMesh>;
   private readonly structMeshes: Record<StructureKind, THREE.InstancedMesh>;
+  /** Sea buoys drawn from the CC0 buoy model when it is loaded (see scenery/models.ts). */
+  private library: ModelLibrary | null = null;
+  private buoyModel: ModelInstances | null = null;
   private readonly lightPoints: THREE.Points;
   private readonly lightPos: THREE.BufferAttribute;
   private readonly lightCol: THREE.BufferAttribute;
@@ -1072,6 +1080,30 @@ export class TrafficLayer implements SceneryLayer {
     this.lightPoints = new THREE.Points(lGeo, this.lightMat);
     this.lightPoints.frustumCulled = false;
     this.object.add(this.lightPoints);
+  }
+
+  /** Use scenery models where the tier allows. */
+  setModels(library: ModelLibrary | null): void {
+    this.library = library;
+  }
+
+  /** The buoy model's instances when it is in use this frame, else null. */
+  private buoyInstances(tier: SceneryTier): ModelInstances | null {
+    const lib = this.library;
+    if (!lib || tier === 'lite') {
+      this.buoyModel?.commit(0);
+      return null;
+    }
+    if (!this.buoyModel) {
+      const parts = lib.get('buoy');
+      if (!parts) {
+        void lib.request('buoy');
+        return null;
+      }
+      this.buoyModel = new ModelInstances(parts, 16, 'structure-buoy-model');
+      this.object.add(this.buoyModel.object);
+    }
+    return this.buoyModel;
   }
 
   setEnabled(enabled: boolean): void {
@@ -1224,6 +1256,10 @@ export class TrafficLayer implements SceneryLayer {
       if (this.shipMeshes[k].count > 0) this.shipMeshes[k].instanceMatrix.needsUpdate = true;
     }
 
+    // With structures off, empty the model buoys too (traffic may still keep this group shown).
+    if (!this.structuresEnabled) this.buoyModel?.commit(0);
+    const buoys = this.structuresEnabled ? this.buoyInstances(tier) : null;
+    let buoyCount = 0;
     if (this.structuresEnabled) {
       const cells = structuresNear(camX, camY, tier);
       for (const cell of cells) {
@@ -1239,6 +1275,13 @@ export class TrafficLayer implements SceneryLayer {
           this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
           mesh.setMatrixAt(idx, this.tmpM);
           mesh.count = idx + 1;
+          if (item.kind === 'buoy' && buoys) {
+            // The model buoy (2.7 m) scaled to the procedural one's size, its skirt under water.
+            this.tmpP.y = bob - BUOY_MODEL_SINK * item.scale;
+            this.tmpS.setScalar(item.scale * BUOY_MODEL_SCALE);
+            this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
+            buoys.set(buoyCount++, this.tmpM);
+          }
 
           const beacon = structureBeaconIntensity(frame.t, item.seed, frame.calm);
           if (item.kind === 'oil-rig') {
@@ -1247,7 +1290,12 @@ export class TrafficLayer implements SceneryLayer {
             if (beacon > 0.1)
               pushLight(item.x + 6, 52 * item.scale, -item.y + 4, beacon, 0.1, 0.08);
           } else if (beacon > 0.1) {
-            const h = item.kind === 'wind-turbine' ? 76 * item.scale : 5.2;
+            const h =
+              item.kind === 'wind-turbine'
+                ? 76 * item.scale
+                : buoys
+                  ? (BUOY_MODEL_TOP * BUOY_MODEL_SCALE - BUOY_MODEL_SINK) * item.scale
+                  : 5.2;
             pushLight(
               item.x,
               h + bob,
@@ -1260,6 +1308,10 @@ export class TrafficLayer implements SceneryLayer {
         }
       }
       this.tmpS.set(1, 1, 1);
+      if (buoys) {
+        buoys.commit(buoyCount);
+        this.structMeshes.buoy.count = 0;
+      }
       for (const k of STRUCTURE_KINDS) {
         if (this.structMeshes[k].count > 0) this.structMeshes[k].instanceMatrix.needsUpdate = true;
       }
@@ -1281,6 +1333,8 @@ export class TrafficLayer implements SceneryLayer {
       this.structMeshes[k].geometry.dispose();
       this.structMeshes[k].dispose();
     }
+    this.buoyModel?.dispose();
+    this.buoyModel = null;
     this.material.dispose();
     this.lightPoints.geometry.dispose();
     this.lightMat.map?.dispose();
