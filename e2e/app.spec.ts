@@ -392,6 +392,8 @@ test.describe('Wave Laboratory app', () => {
     await underwater.click();
     await expect(underwater).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByText(/^Underwater · \d+\.\d m$/)).toBeVisible({ timeout: 10_000 });
+    // Let the marine life (schools, rays, jellyfish) spawn and animate for a few frames.
+    await frames(page, 10);
     await page.screenshot({ path: 'test-results/underwater-view.png' });
     await page.getByRole('radio', { name: 'Orbit' }).click();
     await expect(page.getByRole('radio', { name: 'Orbit' })).toHaveAttribute(
