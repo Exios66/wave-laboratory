@@ -20,6 +20,7 @@ import {
   trafficInCell,
   TrafficLayer,
   trafficNear,
+  lanePoint,
 } from './traffic';
 import type { SceneryFrame } from './types';
 
@@ -298,6 +299,29 @@ describe('traffic route integrity', () => {
 function wrapDelta(a: number): number {
   return Math.atan2(Math.sin(a), Math.cos(a));
 }
+
+describe('lane turn heel', () => {
+  it('ramps the turn rate in and out at both joins of each lane turn', () => {
+    const span = 800;
+    const R = LANE_TURN_RADIUS;
+    const H = span / 2 - R;
+    const arc = Math.PI * R;
+    // Both kinds of join: leg into arc (2H, 4H + arc) and arc into leg (2H + arc, 4H + 2 arc).
+    for (const join of [2 * H, 2 * H + arc, 4 * H + arc, 4 * H + 2 * arc]) {
+      let prev = lanePoint(span, join - 60).k;
+      for (let d = -60 + 0.5; d <= 60; d += 0.5) {
+        const k = lanePoint(span, join + d).k;
+        // Never more than a small step per half metre: no 0 to 1/R jump.
+        expect(Math.abs(k - prev)).toBeLessThan(0.05 / R);
+        prev = k;
+      }
+      expect(lanePoint(span, join - 60).k + lanePoint(span, join + 60).k).toBeCloseTo(1 / R, 6);
+    }
+    // Full turn rate mid-arc, none mid-leg.
+    expect(lanePoint(span, 2 * H + arc / 2).k).toBeCloseTo(1 / R, 9);
+    expect(lanePoint(span, H).k).toBe(0);
+  });
+});
 
 describe('offshore static structures', () => {
   it('places deterministic oil rigs, wind turbines and buoys outside the clear radius', () => {
