@@ -7,9 +7,14 @@ const SWIFTSHADER = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
 export default defineConfig({
   testDir: './e2e',
   timeout: 60_000,
-  fullyParallel: false,
+  // Every test opens its own page and context, so tests of one file can share the workers;
+  // otherwise the whole of app.spec.ts runs on a single worker while the others go idle.
+  fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,
+  // Stop a run that is clearly broken instead of grinding through every remaining test
+  // (PW_MAX_FAILURES=0 runs them all).
+  maxFailures: Number(process.env.PW_MAX_FAILURES ?? (process.env.CI ? 3 : 0)),
   reporter: process.env.CI ? [['github'], ['list']] : 'list',
   use: {
     baseURL: `http://localhost:${PORT}`,
