@@ -106,6 +106,7 @@ export class ModelLibrary {
   private readonly pending = new Map<ModelName, Promise<void>>();
   private readonly failed = new Set<ModelName>();
   private load: Loader | null;
+  private disposed = false;
 
   /**
    * @param baseUrl where the GLB files are served (`<base>models/`)
@@ -140,6 +141,11 @@ export class ModelLibrary {
     const p = this.load(`${this.baseUrl}${name}.glb`)
       .then((scene) => {
         const parts = partsFromScene(scene);
+        // The renderer went away while this was loading: free it rather than keep it.
+        if (this.disposed) {
+          disposeParts(parts);
+          return;
+        }
         const look = LOOK[name];
         for (const part of parts) {
           const m = part.material as THREE.MeshStandardMaterial;
@@ -167,15 +173,18 @@ export class ModelLibrary {
   }
 
   dispose(): void {
-    for (const parts of this.parts.values()) {
-      for (const p of parts) {
-        p.geometry.dispose();
-        const m = p.material as THREE.MeshStandardMaterial;
-        for (const t of [m.map, m.normalMap, m.roughnessMap, m.metalnessMap, m.aoMap]) t?.dispose();
-        m.dispose();
-      }
-    }
+    this.disposed = true;
+    for (const parts of this.parts.values()) disposeParts(parts);
     this.parts.clear();
+  }
+}
+
+function disposeParts(parts: readonly ModelPart[]): void {
+  for (const p of parts) {
+    p.geometry.dispose();
+    const m = p.material as THREE.MeshStandardMaterial;
+    for (const t of [m.map, m.normalMap, m.roughnessMap, m.metalnessMap, m.aoMap]) t?.dispose();
+    m.dispose();
   }
 }
 
