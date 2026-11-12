@@ -407,6 +407,8 @@ export class LabRenderer implements LabRendererApi {
   private storminess: number | null = null;
   private calm = 1;
   private calmPrimed = false;
+  /** A whitecap change the foam maps may not have seen yet; see updateWeather. */
+  private whitecapPending = false;
   private wallT = 0;
   private lastRenderAt = 0;
   private readonly vesselPositions: THREE.Vector3[] = [];
@@ -778,9 +780,14 @@ export class LabRenderer implements LabRendererApi {
     const whitecap = whitecapFraction(wind);
     if (whitecap !== u.uWhitecap!.value) {
       u.uWhitecap!.value = whitecap;
-      // The foam maps integrate the whitecap fraction. While time runs the next scheduled refresh
-      // picks the change up; while paused, nothing would, so force one.
-      if (dt === 0) this.ocean.invalidate();
+      this.whitecapPending = true;
+    }
+    // The foam maps integrate the whitecap fraction. While time runs the next scheduled refresh
+    // picks the change up; once paused nothing would (including a change made on the last running
+    // frame, after that frame's ocean update), so force one refresh on the first paused frame.
+    if (dt === 0 && this.whitecapPending) {
+      this.whitecapPending = false;
+      this.ocean.invalidate();
     }
     u.uSkyTime!.value = t;
     const drift = u.uCloudDrift!.value as THREE.Vector2;
