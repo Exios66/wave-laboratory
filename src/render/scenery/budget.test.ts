@@ -15,8 +15,10 @@ import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { UNDERWATER_BUDGET, UnderwaterSceneryLayer } from '../underwater/scenery';
 import {
+  evaluateTrafficShip,
   STRUCTURE_BUDGET,
   STRUCTURE_CELL,
+  STRUCTURE_VIEW_RANGE,
   structuresInCell,
   TRAFFIC_BUDGET,
   TRAFFIC_CELL,
@@ -76,30 +78,37 @@ function makeFrame(camera: THREE.Camera, overrides: Partial<SceneryFrame> = {}):
   };
 }
 
-/** Camera spot (world x, y) with the most traffic hulls and the most rig cells in range. */
+/**
+ * Camera spot (world x, y) with the most traffic hulls and rig cells in view: uncapped counts of
+ * ship poses (at the frame's time and weather) and structure cells that pass the same view-range
+ * filters the layer applies, so the caps are shown to bind after filtering.
+ */
 function busiestSpot(): { x: number; y: number; ships: number; cells: number } {
   let best = { x: 0, y: 0, ships: 0, cells: 0 };
+  const shipReach = Math.ceil(TRAFFIC_VIEW_RANGE / TRAFFIC_CELL) + 1;
+  const cellReach = Math.ceil(STRUCTURE_VIEW_RANGE / STRUCTURE_CELL) + 1;
   for (let y = -12000; y <= 12000; y += 1800) {
     for (let x = -12000; x <= 12000; x += 1800) {
       let ships = 0;
-      for (let iy = -4; iy <= 4; iy++) {
-        for (let ix = -4; ix <= 4; ix++) {
-          ships += trafficInCell(
+      for (let iy = -shipReach; iy <= shipReach; iy++) {
+        for (let ix = -shipReach; ix <= shipReach; ix++) {
+          for (const spec of trafficInCell(
             Math.floor(x / TRAFFIC_CELL) + ix,
             Math.floor(y / TRAFFIC_CELL) + iy,
-          ).length;
+          )) {
+            const pose = evaluateTrafficShip(spec, 200, 1, 0.6);
+            if (pose && Math.hypot(pose.x - x, pose.y - y) <= TRAFFIC_VIEW_RANGE) ships++;
+          }
         }
       }
       let cells = 0;
-      for (let iy = -2; iy <= 2; iy++) {
-        for (let ix = -2; ix <= 2; ix++) {
-          if (
-            structuresInCell(
-              Math.floor(x / STRUCTURE_CELL) + ix,
-              Math.floor(y / STRUCTURE_CELL) + iy,
-            )
-          )
-            cells++;
+      for (let iy = -cellReach; iy <= cellReach; iy++) {
+        for (let ix = -cellReach; ix <= cellReach; ix++) {
+          const cell = structuresInCell(
+            Math.floor(x / STRUCTURE_CELL) + ix,
+            Math.floor(y / STRUCTURE_CELL) + iy,
+          );
+          if (cell && Math.hypot(cell.cx - x, cell.cy - y) <= STRUCTURE_VIEW_RANGE) cells++;
         }
       }
       if (ships + cells * 3 > best.ships + best.cells * 3) best = { x, y, ships, cells };
@@ -175,8 +184,8 @@ describe('underwater budget enforced on the real layer', () => {
   const cam = new THREE.PerspectiveCamera();
   cam.position.set(85, -8, 65);
 
-  it('declares the issue table (4 / 2 / 1)', () => {
-    expect(UNDERWATER_BUDGET).toEqual({ full: 4, mid: 2, lite: 1 });
+  it('declares the tier table (6 / 3 / 1)', () => {
+    expect(UNDERWATER_BUDGET).toEqual({ full: 6, mid: 3, lite: 1 });
   });
 
   for (const tier of TIERS) {
@@ -186,8 +195,9 @@ describe('underwater budget enforced on the real layer', () => {
       const calls = drawCalls(layer.object);
       expect(calls).toBeLessThanOrEqual(UNDERWATER_BUDGET[tier]);
       expect(calls).toBe(layer.activeDrawCalls);
-      // The scene is dense, so each tier really spends its whole allowance.
-      expect(calls).toBe(UNDERWATER_BUDGET[tier]);
+      // The scene is dense, so each tier really spends its whole allowance. On the full tier one
+      // of the six is the god-ray shafts, drawn by the absorption pass rather than this layer.
+      expect(calls).toBe(UNDERWATER_BUDGET[tier] - (tier === 'full' ? 1 : 0));
       layer.dispose();
     });
   }
