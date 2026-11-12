@@ -5,7 +5,7 @@
  * above at noon, warm from the sun's side at dusk, grey under overcast.
  *
  * The cube is redrawn only when the sky has visibly changed (the sun moved, cloud, night or the
- * light level shifted), and at most twice a second, so it costs nothing on most frames.
+ * light level shifted, or the clouds drifted), and at most twice a second, so it costs nothing on most frames.
  */
 import * as THREE from 'three';
 
@@ -13,6 +13,8 @@ import * as THREE from 'three';
 const FACE = 64;
 /** Shortest time between regenerations [s]. */
 const MIN_INTERVAL = 0.5;
+/** Cloud deck drift [km] that counts as a changed sky: about a cloud's width. */
+const DRIFT_STEP = 0.5;
 
 export interface SkyEnvironmentKey {
   sunDir: THREE.Vector3;
@@ -20,6 +22,8 @@ export interface SkyEnvironmentKey {
   night: number;
   dusk: number;
   level: number;
+  /** Cloud deck drift [km]; omit for a sky without moving clouds. */
+  cloudDrift?: THREE.Vector2;
 }
 
 export class SkyEnvironment {
@@ -35,6 +39,7 @@ export class SkyEnvironment {
     night: -1,
     dusk: -1,
     level: -1,
+    drift: new THREE.Vector2(),
   };
   private sinceLast = Infinity;
 
@@ -68,13 +73,15 @@ export class SkyEnvironment {
       Math.abs(key.cloud - l.cloud) > 0.03 ||
       Math.abs(key.night - l.night) > 0.02 ||
       Math.abs(key.dusk - l.dusk) > 0.02 ||
-      Math.abs(key.level - l.level) > 0.02;
+      Math.abs(key.level - l.level) > 0.02 ||
+      (key.cloud > 0.02 && !!key.cloudDrift && key.cloudDrift.distanceTo(l.drift) > DRIFT_STEP);
     if (!changed || (this.sinceLast < MIN_INTERVAL && this.envTarget)) return false;
     l.sun.copy(key.sunDir);
     l.cloud = key.cloud;
     l.night = key.night;
     l.dusk = key.dusk;
     l.level = key.level;
+    if (key.cloudDrift) l.drift.copy(key.cloudDrift);
     this.sinceLast = 0;
     this.draw();
     return true;
@@ -99,12 +106,15 @@ export class SkyEnvironment {
     const prevTarget = r.getRenderTarget();
     const prevXr = r.xr.enabled;
     r.xr.enabled = false;
-    this.cubeCamera.update(r, this.scene);
-    this.envTarget = this.pmrem.fromCubemap(this.cubeTarget.texture, this.envTarget);
-    r.xr.enabled = prevXr;
-    r.setRenderTarget(prevTarget);
-    u.uSunHdr!.value = hdr;
-    if (u.uFlash) u.uFlash.value = flash;
+    try {
+      this.cubeCamera.update(r, this.scene);
+      this.envTarget = this.pmrem.fromCubemap(this.cubeTarget.texture, this.envTarget);
+    } finally {
+      r.xr.enabled = prevXr;
+      r.setRenderTarget(prevTarget);
+      u.uSunHdr!.value = hdr;
+      if (u.uFlash) u.uFlash.value = flash;
+    }
   }
 
   dispose(): void {

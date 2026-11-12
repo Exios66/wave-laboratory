@@ -1499,6 +1499,7 @@ export class LabRenderer implements LabRendererApi {
       night: ls?.night ?? 0,
       dusk: ls?.dusk ?? 0,
       level: this.daylight,
+      cloudDrift: u.uCloudDrift!.value as THREE.Vector2,
     });
     this.scene.environment = this.skyEnv.texture;
     if (this.scene.environment) {
