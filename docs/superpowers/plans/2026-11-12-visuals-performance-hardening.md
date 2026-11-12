@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:executing-plans (Native; the user asked for no subagents). Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Clean up the repo. Remove the box-built offshore rigs and turbines the user flagged. Make the app load and measure faster, close the security gaps, then add TAA, shoreline surf, storm visuals and a UI layout pass.
+**Goal:** Clean up the repo. Remove the box-built offshore rigs and turbines the user flagged. Make the app load and measure faster, close the security gaps, then add TAA, shoreline surf, storm visuals and a UI layout pass. Finally, give the aircraft painted, textured airframes and turn the Plane view into a proper flight experience.
 
 **Architecture:** Every change lands on `claude/hopeful-shannon-f2xayr` and reaches `main` through one PR per phase (A–D), merged as a merge commit. Each phase ends with `pnpm deploy:pages`. Pure logic goes in small, separately tested TypeScript modules: `src/core/csp.ts`, `src/render/post/taa.ts`, `src/render/gpuTimer.ts` sections, `src/render/scenery/surf.ts`. GPU work plugs into the existing `PostStack` and the ocean shader.
 
 **Tech Stack:** TypeScript 5.9, React 19, three 0.186 (WebGL 2), Vite 8, vitest 4, Playwright 1.56 (SwiftShader), pnpm 10.
 
-**Spec:** The user's brief: "complement, expand, improve, harden, secure, and optimize". Their selections: all four visual items, one plan, and "REMOVE THE STRANGE LOOMING UNTEXTURED STRUCTURES STICKING OUT OF THE WATER". The audit evidence is in each task. This file is saved to `docs/superpowers/plans/2026-11-12-visuals-performance-hardening.md` in Task 0.
+**Spec:** The user's brief: "complement, expand, improve, harden, secure, and optimize". Their selections: all four visual items, one plan, , "REMOVE THE STRANGE LOOMING UNTEXTURED STRUCTURES STICKING OUT OF THE WATER", and the follow-up "further enhance the airplane view & user experience … appropriately rendered airplane model textures". The audit evidence is in each task. This file is saved to `docs/superpowers/plans/2026-11-12-visuals-performance-hardening.md` in Task 0.
 
 ## Global Constraints
 
@@ -314,6 +314,144 @@ Rain streaks, rain ripples, spindrift, overcast and lightning already exist (`pa
   - Both are off on the 'light' tier.
 - [ ] **Step 4:** Add an e2e test in `graphics.spec.ts`: a storm preset at `?gfx=full` on the Bridge camera with no console errors. Take a screenshot for the user. Commit: "Distant rain curtains and a wet lens in storms". Open and merge the Phase D PR (Phase C's PR goes up after Task 7 the same way), then deploy.
 
+### Task 10: Textured, properly shaded aircraft (Phase E)
+
+The evidence is in `src/render/scenery/planes.ts:582-740,833`. The airframes are boxes and 8-sided tubes. `merge()` strips the UVs, and every aircraft shares one flat-shaded grey `MeshLambertMaterial` at 0.9 opacity. Up close in the Plane view this looks crude.
+
+No CC0 aircraft models exist on Poly Haven (`scripts/fetch-models.mjs`), so the textures are painted procedurally at runtime. That keeps it free of licensing questions and adds no download.
+
+**Files:**
+
+- Create: `src/render/scenery/aircraftLivery.ts` and `aircraftLivery.test.ts` (pure painting into `Uint8Array`s).
+- Modify: `src/render/scenery/planes.ts`:
+  - `merge()` keeps UVs, remapped into atlas regions, and keeps two groups: body and glass.
+  - Tubes go to 16 segments with tapered nose and tail cones.
+  - `MeshStandardMaterial` with smooth shading, plus a glass material.
+  - Add a prop-blur disc.
+
+**Liveries.** These are generic, with no airline logos.
+
+| Aircraft | Paint                                                                                                                    | Markings                                   |
+| -------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ |
+| Avenger  | 1945 US Navy tri-colour: sea blue `#1f2f4a` on top, intermediate blue `#4a5d7a` on the sides, white `#e8eaec` underneath | star-and-bar insignia; tail code `FT-28`   |
+| Mariner  | glossy sea blue `#1c2a44` overall                                                                                        | star-and-bar insignia                      |
+| DC-3     | polished aluminium `#c9ced3`                                                                                             | dark-blue cheatline `#1e3a5f`              |
+| Tudor    | silver `#bfc5cb`                                                                                                         | dark-blue cheatline; registration `G-AHNP` |
+
+Every aircraft also gets:
+
+- panel lines every 1.2 m along the fuselage;
+- rivet rows, painted into the height map;
+- exhaust staining behind each engine;
+- a roughness map (0.35–0.6 for paint, 0.25 for aluminium).
+
+**Interfaces:**
+
+- Produces `type AtlasRegion = 'fuselage' | 'wingTop' | 'wingBottom' | 'tail' | 'engine'`.
+- Produces `ATLAS_RECTS: Record<AtlasRegion, { u0: number; v0: number; u1: number; v1: number }>`, a fixed layout shared by every kind.
+- Produces `interface Livery { kind: AircraftKind; base: number; upper: number; lower: number; cheatline: number | null; insignia: 'usn-star' | null; code: string | null; metal: boolean }`.
+- Produces `liveryFor(kind: AircraftKind): Livery`.
+- Produces `paintAtlas(livery: Livery, size: 256 | 512): { albedo: Uint8Array; roughness: Uint8Array; normal: Uint8Array }`.
+  - `albedo` is RGBA in sRGB; `roughness` holds the R channel; `normal` is a tangent-space RGB normal map derived from the height map with a Sobel filter.
+  - The size is 512 on the full tier and 256 on the others. Textures are generated lazily, the first time a kind is shown, and cached per kind.
+- Produces `remapUv(geo: THREE.BufferGeometry, region: AtlasRegion): THREE.BufferGeometry`.
+- Ghost lore stays:
+  - fade-in, fade-out, shimmer, flicker and the laggard are unchanged;
+  - steady opacity becomes 1;
+  - a desaturation `ghost ∈ [0,1]` tints `material.color` from white toward `GHOST_COLOR`: 0.35 for sky crossings, 0 for the ridden aircraft.
+
+- [ ] **Step 1: Failing tests** in `aircraftLivery.test.ts`:
+  - `paintAtlas(liveryFor('avenger'), 256)` is deterministic: two calls give byte-identical buffers.
+  - The pixel at the centre of `ATLAS_RECTS.wingBottom` is within ΔE 3 of `#e8eaec`.
+  - The insignia centre pixel on the fuselage is white and its surrounding disc is blue `#1f2f4a`.
+  - All roughness bytes are in [0.2·255, 0.7·255].
+  - The normal map's z component is ≥ 0.7 everywhere (unit vectors pointing out of the surface).
+  - The DC-3 livery has `metal: true` and no insignia.
+  - `remapUv` keeps every UV inside its region's rect.
+  - In `planes.test.ts`: every built airframe has a `uv` attribute and exactly 2 groups.
+- [ ] **Step 2:** Run `pnpm vitest run src/render/scenery/aircraftLivery.test.ts src/render/scenery/planes.test.ts`. Expected: FAIL. Implement. Run again. Expected: PASS.
+- [ ] **Step 3: Wire up the materials.**
+  - `MeshStandardMaterial({ map, roughnessMap, normalMap, metalness: livery.metal ? 0.8 : 0.1 })`. Set `map.colorSpace = SRGBColorSpace` and anisotropy 4 on the full tier. Keep `fog: false` (as today).
+  - Canopy glass: roughness 0.05, metalness 0, opacity 0.55, reflecting the sky through `scene.environment`.
+  - The prop disc is a radial-alpha texture spinning at 1 rad per frame.
+  - Dispose of all textures in `PlaneLayer.dispose()`.
+  - Extend `budget.test.ts`: the plane layer still uses ≤ 3 draw calls per aircraft.
+- [ ] **Step 4:** Take screenshots of each kind in the Plane view at `?gfx=full` and show them to the user. Commit: "Textured, smooth-shaded aircraft with period liveries".
+
+### Task 11: Plane view camera modes and smoother flight (Phase E)
+
+Today the Plane view has one chase camera (`LabRenderer.ts:316-328,1748-1790,2221`) that stays level while the aircraft banks about 30° (`crossingPose`, `planes.ts:420`).
+
+**Files:**
+
+- Create: `src/render/rideCamera.ts` and `rideCamera.test.ts` (pure).
+- Modify: `src/render/LabRenderer.ts` (use it), `src/render/api.ts` (new API), `src/render/scenery/planes.ts` (`planRide(..., kind?: AircraftKind)` to force a kind; `nextRide()` in `PlaneLayer`).
+
+**Interfaces:**
+
+- Produces `type RideView = 'chase' | 'cockpit' | 'wing' | 'flyby'`.
+- Produces `RIDE_VIEWS: readonly RideView[]` in that order.
+- Produces `rideCameraPose(view: RideView, pose: PlanePose, kind: AircraftKind, look: { yaw: number; dip: number; chase: number }, t: number, out: { pos: THREE.Vector3; target: THREE.Vector3; roll: number }): void`.
+  - `chase`: the current placement, rolled by `0.5·bank`.
+  - `cockpit`: the eye at the pilot seat. The offset comes from a per-kind table in `rideCamera.ts`; Avenger is (2.0, 1.25, 0) in model space × `AIRCRAFT_DRAW_SCALE`. Roll equals `bank`. Yaw and dip are look-around, clamped to ±100° and ±60°.
+  - `wing`: the eye 0.8 × half-span out on the starboard wing, looking forward and inboard. Roll equals `bank`.
+  - `flyby`: a fixed point 400 m ahead on the circuit, 30 m below the flight path. It is re-placed each time the aircraft passes within 60 m, and it always looks at the aircraft. Roll is 0.
+- Produces `dampVec(current: THREE.Vector3, target: THREE.Vector3, halfLifeS: number, dt: number): void`. This is frame-rate-independent exponential smoothing for the chase eye; the half-life is 0.25 s.
+- Produces `LabRendererApi.setRideView(view: RideView): void` and `LabRendererApi.nextRide(): void`. `nextRide` switches to the next kind in `KINDS` order, dissolves the old flight over the existing fade, and joins the new one at the same circuit bearing.
+
+- [ ] **Step 1: Failing tests:**
+  - The cockpit eye lies within 0.6 × fuselage radius of the fuselage axis and ahead of the wing's leading edge.
+  - The wing eye is on the starboard side at 0.8 × half-span (±0.5 m).
+  - Roll equals `bank` for cockpit and wing, `0.5·bank` for chase, and `0` for flyby.
+  - For flyby, the distance to the aircraft never exceeds 450 m during a 60 s circuit sampled at 10 Hz, and the eye is re-placed at least once.
+  - `dampVec` with dt = halfLife moves halfway, and its result does not depend on splitting dt into 4 steps (1e-6 tolerance).
+  - `planRide(rng, c, 0, 1, 0, 0, 'dc3').kind === 'dc3'`.
+- [ ] **Step 2:** Run the tests. Expected: FAIL. Implement. Run again. Expected: PASS.
+- [ ] **Step 3: Wire up the renderer.**
+  - Apply the roll by rotating `camera.up` about the view axis.
+  - The near plane is 0.15 m in the cockpit, so the canopy frame is visible without clipping.
+  - Switching view resets TAA history (Task 7 `TaaPass.reset()`).
+- [ ] **Step 4:** Commit: "Plane view: cockpit, wing and fly-by cameras with banked, damped flight".
+
+### Task 12: Plane view HUD and controls (Phase E)
+
+`RideCaption` (`Viewport.tsx:278-290`) shows only "Riding with …" plus a tip.
+
+**Files:**
+
+- Modify: `src/ui/components/Viewport.tsx`, `src/ui/store.ts` (`rideView: RideView`, persisted like the other viewer preferences, defaulting to `'chase'` and sanitized against `RIDE_VIEWS`), `src/ui/App.tsx` (keys), `src/ui/components/Dialogs.tsx:60-66` (shortcut list), `src/ui/styles.css`.
+- Modify: `src/render/api.ts`: replace `planeRide(): string | null` with `planeTelemetry(): RideTelemetry | null`.
+- Test: `src/ui/store.test.ts`, `e2e/app.spec.ts` and `e2e/mobile.spec.ts`.
+
+**Interfaces:**
+
+- Produces `interface RideTelemetry { label: string; kind: AircraftKind; altitudeM: number; speedMs: number; headingDeg: number; bankDeg: number }`.
+- Keys (Plane view only; ignored while typing in inputs):
+  - `C` cycles the camera through `RIDE_VIEWS`;
+  - `N` switches to the next aircraft;
+  - `Esc` lands, i.e. returns to the ground camera (`store.ts:371` `groundCamera`). The existing Esc clear-selection still applies outside Plane view.
+- HUD card layout:
+  - the label;
+  - a segmented control (Chase · Cockpit · Wing · Fly-by) as a `role="radiogroup"` with roving tabindex, following the same pattern as the camera buttons (`Viewport.tsx:190`);
+  - a "Next aircraft" button;
+  - a monospace line, refreshed every 250 ms: `ALT 312 m · 1,024 ft · IAS 132 kn · HDG 274° · BANK 31° R` (negative bank = left). Formatting goes through `fmt` (`fields.tsx`) and `src/core/units.ts`.
+  - On screens under 640 px wide the telemetry line wraps onto a second row and the tip is hidden.
+
+- [ ] **Step 1: Failing tests.**
+  - Unit: `sanitize` on `{ rideView: 'barrel-roll' }` gives `'chase'`.
+  - Unit: `formatRideTelemetry({ altitudeM: 312, speedMs: 68, headingDeg: 274.4, bankDeg: -30.6 })` gives `'ALT 312 m · 1,024 ft · IAS 132 kn · HDG 274° · BANK 31° L'`. Put this function in `src/ui/components/rideHud.ts` and export it.
+  - e2e `test('plane view: switch cameras, change aircraft, read telemetry')`:
+    - click Plane;
+    - expect `/Riding with/`;
+    - press `C` three times; the radio checked state cycles Chase → Cockpit → Wing → Fly-by;
+    - click "Next aircraft"; the label changes within 15 s;
+    - the telemetry line matches `/ALT \d+ m/`;
+    - press `Esc`; the Plane button reads "Plane" again;
+    - no console errors.
+  - e2e mobile at 390×844: the HUD card has no horizontal overflow and the segmented control buttons are ≥ 44 px tall.
+- [ ] **Step 2:** Run the tests. Expected: FAIL. Implement. Run again. Expected: PASS. Then run `pnpm run check`.
+- [ ] **Step 3:** Commit: "Plane view HUD: camera modes, next aircraft, flight telemetry". Open and merge the Phase E PR, then deploy, as before.
+
 ---
 
 ## Verification (end to end)
@@ -334,5 +472,6 @@ Native, as the user requested: I implement every task inline, in order 0 → 9, 
 - Phase B: Tasks 4–5.
 - Phase C: Tasks 6–7.
 - Phase D: Tasks 8–9.
+- Phase E: Tasks 10–12, the aircraft and Plane view. Phase E depends only on Task 7's `TaaPass.reset()`, and only if TAA has already shipped. It can move ahead of Phase D if the user wants it sooner.
 
 A final self-review of the whole branch happens before each phase PR.
