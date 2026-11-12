@@ -1256,6 +1256,8 @@ export class TrafficLayer implements SceneryLayer {
       if (this.shipMeshes[k].count > 0) this.shipMeshes[k].instanceMatrix.needsUpdate = true;
     }
 
+    // With structures off, empty the model buoys too (traffic may still keep this group shown).
+    if (!this.structuresEnabled) this.buoyModel?.commit(0);
     const buoys = this.structuresEnabled ? this.buoyInstances(tier) : null;
     let buoyCount = 0;
     if (this.structuresEnabled) {

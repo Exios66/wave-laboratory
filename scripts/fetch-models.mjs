@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import {
@@ -34,7 +35,7 @@ const ASSETS = [
   { id: 'lifebuoy', name: 'lifebuoy', tris: 800, tex: 256 },
 ];
 
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = path.join(root, 'public', 'models');
 const cache = process.argv[2] ?? path.join(os.tmpdir(), 'wave-lab-models');
 const API = 'https://api.polyhaven.com';
