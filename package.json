@@ -29,7 +29,7 @@
     "react-dom": "^19.3.0",
     "three": "~0.186.1",
     "uplot": "~1.6.32",
-    "zod": "^4.6.5",
+    "zod": "^4.6.6",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
