@@ -188,6 +188,20 @@ describe('environment limits', () => {
     expect(() => place(MIN_KEEL_DEPTH + BOTTOM_CLEARANCE)).not.toThrow();
   });
 
+  it('samples the water down to the deepest keel it can be ordered to', () => {
+    const levels = (v: Vessel) =>
+      (v as unknown as { water: { levels: Float64Array } }).water.levels;
+    const deep = levels(place(300));
+    expect(deep[deep.length - 1]!).toBeLessThanOrEqual(-(300 - BOTTOM_CLEARANCE));
+    const shallow = levels(place(MIN_KEEL_DEPTH + BOTTOM_CLEARANCE));
+    expect(shallow.length).toBeLessThanOrEqual(deep.length);
+  });
+
+  it('without an order in shallow water, holds the clamped design depth the Inspector shows', () => {
+    const v = place(MIN_KEEL_DEPTH + BOTTOM_CLEARANCE + 2);
+    expect(v.diagnostics().depthCmd + def.kg).toBeCloseTo(MIN_KEEL_DEPTH + 2, 6);
+  });
+
   it('clamps depth orders to the seabed clearance in shallow water', () => {
     const v = place(60);
     v.command({ depthM: 500 });
