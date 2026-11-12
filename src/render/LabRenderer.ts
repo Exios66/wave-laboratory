@@ -334,6 +334,8 @@ export class LabRenderer implements LabRendererApi {
   private underwater = false;
   /** Commanded eye depth of the Underwater camera [m]. */
   private uwDepth: number = UNDERWATER_VIEW.depth;
+  /** Deepest the Underwater eye may go where it was last placed (reef-aware) [m]. */
+  private uwLimit = Infinity;
   /** Sea surface under the camera as last reported by the worker, and the time it is valid for. */
   private surface = { eta: 0, etaT: 0, t: 0 };
   private surfaceNow = 0;
@@ -1498,11 +1500,10 @@ export class LabRenderer implements LabRendererApi {
     }
     if (this.mode === 'underwater') {
       // Scrolling out sinks the eye deeper; in brings it up toward the surface.
-      this.uwDepth = THREE.MathUtils.clamp(
-        this.uwDepth * factor,
-        UNDERWATER_VIEW.minDepth,
-        maxCameraDepth(this.env?.depth ?? 4000),
-      );
+      // Clamp to the reef-aware limit at the eye first, so the stored depth never runs past it.
+      const limit = Math.min(maxCameraDepth(this.env?.depth ?? 4000), this.uwLimit);
+      const depth = Math.min(this.uwDepth, limit) * factor;
+      this.uwDepth = Math.min(Math.max(depth, UNDERWATER_VIEW.minDepth), limit);
       return;
     }
     this.radius = THREE.MathUtils.clamp(this.radius * factor, 6, 4000);
@@ -1962,7 +1963,8 @@ export class LabRenderer implements LabRendererApi {
     const reefs = this.ambience.underwater
       ? reefsNear(ex, -ez, { islands: this.ambience.islands })
       : [];
-    const y = -Math.min(this.uwDepth, maxCameraDepthAt(ex, -ez, this.env?.depth ?? 4000, reefs));
+    this.uwLimit = maxCameraDepthAt(ex, -ez, this.env?.depth ?? 4000, reefs);
+    const y = -Math.min(this.uwDepth, this.uwLimit);
     this.orbitCentre.set(tx, 0, tz);
     this.camera.up.set(0, 1, 0);
     this.camera.position.set(tx + reach * sy, y, tz + reach * cy);
@@ -2024,7 +2026,7 @@ export class LabRenderer implements LabRendererApi {
       // Depth grade for every tier; volumetric god rays on the full tier only.
       const sun = this.lightState?.sunDir ?? (u.uSunDir!.value as THREE.Vector3);
       const rays =
-        this.quality === 'high'
+        this.quality === 'high' || this.quality === 'ultra'
           ? underwaterRays(
               [sun.x, sun.y, sun.z],
               this.lightLevel,
