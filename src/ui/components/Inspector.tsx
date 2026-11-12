@@ -953,6 +953,23 @@ function VesselInspector({ vessel }: { vessel: VesselConfig }) {
                     { label: 'Yards braced', value: fmt(Math.abs(tel.braceDeg), 0, '°') },
                   ]
                 : []),
+              ...(def?.foreAft
+                ? [
+                    { label: 'Sail set', value: fmt(tel.sailSet * 100, 0, '%') },
+                    { label: 'Main sheet', value: fmt(Math.abs(tel.braceDeg), 0, '°') },
+                    { label: 'Jib sheet', value: fmt(Math.abs(tel.jibDeg), 0, '°') },
+                    {
+                      label: 'Leeway',
+                      value: fmt(tel.leewayDeg, 1, '°'),
+                      title: 'Angle between the heading and the track through the water',
+                    },
+                    {
+                      label: 'VMG upwind',
+                      value: fmt(tel.vmgKn, 1, 'kn'),
+                      title: 'Velocity made good to windward (negative when running downwind)',
+                    },
+                  ]
+                : []),
             ]}
           />
           <p
