@@ -37,11 +37,18 @@ for (const quality of ['high', 'low'] as const) {
     });
     const t0 = await simulationSeconds(page);
     await expect.poll(() => simulationSeconds(page), { timeout: 90_000 }).toBeGreaterThan(t0);
-    // Storm weather exercises rain, streaks, squalls and the heaviest foam.
+    // Storm weather exercises rain, streaks, squalls and the heaviest foam. The preset starts a
+    // new simulation: wait for its clock to restart, then for the new run to advance, so a
+    // late frame of the old run cannot pass the check.
+    const before = await simulationSeconds(page);
     await page.getByRole('button', { name: 'Presets' }).click();
     await page.getByRole('button', { name: /North Sea winter storm/ }).click();
+    await expect.poll(() => simulationSeconds(page), { timeout: 90_000 }).toBeLessThan(before);
+    await expect(page.getByRole('status').filter({ hasText: 'Simulation running' })).toBeAttached({
+      timeout: 60_000,
+    });
     const t1 = await simulationSeconds(page);
-    await expect.poll(() => simulationSeconds(page), { timeout: 90_000 }).not.toBe(t1);
+    await expect.poll(() => simulationSeconds(page), { timeout: 90_000 }).toBeGreaterThan(t1);
     await page.getByRole('radio', { name: 'Underwater' }).click();
     await page.waitForTimeout(3000);
     await page.screenshot({ path: `test-results/graphics-${quality}.png` });
