@@ -22,7 +22,8 @@ async function simulationSeconds(page: Page): Promise<number> {
 
 for (const quality of ['high', 'low'] as const) {
   test(`full graphics tier renders at ${quality} quality without errors`, async ({ page }) => {
-    test.setTimeout(180_000);
+    // Budget covers every wait below at its limit (2×60 s + 3×90 s + 3 s) plus navigation.
+    test.setTimeout(420_000);
     const errors = trackErrors(page);
     await page.addInitScript((q) => {
       localStorage.setItem('wave-lab:performance', q);
