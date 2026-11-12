@@ -186,6 +186,7 @@ test.describe('Wave Laboratory app', () => {
   });
 
   test('picks a Jerlov water type without restarting the sea', async ({ page }) => {
+    // Five sequential 30 s polls plus page load: budget every wait at its own limit.
     test.setTimeout(180_000);
     const errors = trackErrors(page);
     await page.goto('/');
