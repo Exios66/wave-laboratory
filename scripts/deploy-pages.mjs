@@ -5,9 +5,10 @@
  *   pnpm deploy:pages            build and commit the site here
  *   pnpm deploy:pages --dry-run  build the site into a temporary folder; touch nothing here
  *
- * GitHub Pages is "Deploy from a branch" → main → /docs. The site (index.html, 404.html,
- * assets/ and .nojekyll) is written into docs/ next to the markdown notes: only those four
- * site entries are ever replaced, everything else already in docs/ is left untouched.
+ * GitHub Pages is "Deploy from a branch" → main → /docs. The site is written into docs/ next
+ * to the markdown notes: every top-level entry of the build (index.html, assets/, and whatever
+ * public/ contributes, such as models/) plus 404.html and .nojekyll. Only those site entries
+ * are ever replaced; everything else already in docs/ is left untouched.
  * Asset paths are relative, so the site works at any URL prefix.
  */
 import { execFileSync } from 'node:child_process';
@@ -43,31 +44,33 @@ console.info('› Building…');
 run('pnpm', ['run', 'build']);
 const indexHtml = builtIndex();
 
+/** Top-level build entries that make up the site; index.html is also published as 404.html. */
+const siteEntries = () => readdirSync(dist).filter((entry) => !entry.endsWith('.map'));
+
 /**
  * Replace the site in `dir`. The new files are staged next to it first, so a failed copy never
  * leaves a half-deleted site behind.
  */
 const copySite = (dir) => {
+  const entries = siteEntries();
+  const notes = entries.filter((entry) => entry.endsWith('.md') || entry === 'screenshots');
+  if (notes.length)
+    throw new Error(`Build output would overwrite docs/ notes: ${notes.join(', ')}`);
   const staged = mkdtempSync(join(tmpdir(), 'wave-lab-site-'));
-  cpSync(join(dist, 'assets'), join(staged, 'assets'), {
-    recursive: true,
-    filter: (src) => !src.endsWith('.map'),
-  });
+  for (const entry of entries) {
+    cpSync(join(dist, entry), join(staged, entry), {
+      recursive: true,
+      filter: (src) => !src.endsWith('.map'),
+    });
+  }
+  const managed = new Set([...entries, '404.html', '.nojekyll']);
   if (existsSync(dir)) {
     for (const entry of readdirSync(dir)) {
-      if (
-        entry === 'assets' ||
-        entry === 'index.html' ||
-        entry === '404.html' ||
-        entry === '.nojekyll'
-      ) {
-        rmSync(join(dir, entry), { recursive: true, force: true });
-      }
+      if (managed.has(entry)) rmSync(join(dir, entry), { recursive: true, force: true });
     }
   }
-  cpSync(join(staged, 'assets'), join(dir, 'assets'), { recursive: true });
+  cpSync(staged, dir, { recursive: true });
   rmSync(staged, { recursive: true, force: true });
-  cpSync(indexHtml, join(dir, 'index.html'));
   cpSync(indexHtml, join(dir, '404.html'));
   writeFileSync(join(dir, '.nojekyll'), '');
 };
