@@ -56,4 +56,31 @@ describe('SkyEnvironment', () => {
     expect(env.update(0.6, key(0.2))).toBe(true);
     expect(seen).toHaveLength(2);
   });
+
+  it('redraws when the clouds have drifted about a cloud width, and not under a clear sky', () => {
+    const { env, seen } = probe();
+    const cloudy = (x: number) => ({
+      ...key(0.5),
+      cloud: 0.6,
+      cloudDrift: new THREE.Vector2(x, 0),
+    });
+    env.update(0, cloudy(0));
+    expect(env.update(1, cloudy(0.2))).toBe(false);
+    expect(env.update(1, cloudy(0.8))).toBe(true);
+    const clear = { ...key(0.5), cloudDrift: new THREE.Vector2(5, 0) };
+    env.update(1, clear);
+    expect(env.update(1, { ...clear, cloudDrift: new THREE.Vector2(9, 0) })).toBe(false);
+    expect(seen).toHaveLength(3);
+  });
+
+  it('restores the sun disc and the flash if the capture throws', () => {
+    const { env, material } = probe();
+    material.uniforms.uFlash!.value = 0.8;
+    (env as unknown as { cubeCamera: { update: () => void } }).cubeCamera.update = () => {
+      throw new Error('context lost');
+    };
+    expect(() => env.update(0, key(0.5))).toThrow('context lost');
+    expect(material.uniforms.uSunHdr!.value).toBe(3);
+    expect(material.uniforms.uFlash!.value).toBe(0.8);
+  });
 });
