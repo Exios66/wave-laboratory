@@ -16,6 +16,8 @@ export const CAMERA_MIN_DEPTH = 1.5;
 export const CAMERA_MAX_DEPTH = 30;
 /** Clearance kept between the eye and the highest point of the floor [m]. */
 export const FLOOR_CLEARANCE = 0.5;
+/** Shallowest the Underwater eye goes, even over a reef flat [m]: just under the surface. */
+export const CAMERA_SURFACE_DEPTH = 0.3;
 
 export type SeafloorMode = 'shelf' | 'blue';
 
@@ -156,8 +158,11 @@ export function maxCameraDepthAt(
 ): number {
   const floor = floorDepthAt(x, y, envDepth, reefs);
   if (floor === null) return maxCameraDepth(envDepth);
-  const base = Math.min(maxCameraDepth(envDepth), floor - reliefAt(floor) - FLOOR_CLEARANCE);
-  return Math.max(CAMERA_MIN_DEPTH, base);
+  const clear = floor - reliefAt(floor) - FLOOR_CLEARANCE;
+  const base = Math.min(maxCameraDepth(envDepth), clear);
+  // The floor clearance wins over the minimum eye depth: over a reef flat shallower than that,
+  // the eye rises (but stays just under the surface) rather than sinking into the seabed.
+  return Math.min(Math.max(CAMERA_MIN_DEPTH, base), Math.max(CAMERA_SURFACE_DEPTH, clear));
 }
 
 // ---------------------------------------------------------------------------------------------

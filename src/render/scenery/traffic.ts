@@ -333,26 +333,43 @@ function buildTrafficCell(ix: number, iy: number): TrafficShipSpec[] {
   return out;
 }
 
+/** Length over which the turn rate (and so the heel) eases in and out at each end of a lane turn [m]. */
+const LANE_EASE = 30;
+
 /**
  * Point on a racetrack lane `path` metres along its loop (period `4H + 2*pi*R` with
  * `H = span/2 - R`): out along +heading on the starboard-lateral leg, a half circle of radius
- * `LANE_TURN_RADIUS` round the far end, back on the other leg and round the near end. Position,
- * heading and turn rate are all continuous, so the ship never snaps round at the lane ends.
+ * `LANE_TURN_RADIUS` round the far end, back on the other leg and round the near end. Position
+ * and heading are continuous. The geometric curvature steps between 0 and 1/R where an arc meets
+ * a leg; `k` is that curvature eased over `LANE_EASE` metres either side of each join, so the
+ * turn rate, and the heel it drives, ramp in and out instead of snapping.
  */
-function lanePoint(span: number, path: number): { u: number; v: number; dir: number; k: number } {
+export function lanePoint(
+  span: number,
+  path: number,
+): { u: number; v: number; dir: number; k: number } {
   const R = LANE_TURN_RADIUS;
   const H = Math.max(span * 0.5 - R, 1);
   const arc = Math.PI * R;
   const total = 4 * H + 2 * arc;
   const s = ((path % total) + total) % total;
-  if (s < 2 * H) return { u: -H + s, v: -R, dir: 0, k: 0 };
+  // Signed distance into the nearer arc (positive inside), wrapped round the loop.
+  const into = (start: number) => {
+    let d = s - start;
+    if (d > total / 2) d -= total;
+    if (d < -total / 2) d += total;
+    return Math.min(d, arc - d);
+  };
+  const ease = Math.min(LANE_EASE, arc / 2, H);
+  const k = smoothstep(-ease, ease, Math.max(into(2 * H), into(4 * H + arc))) / R;
+  if (s < 2 * H) return { u: -H + s, v: -R, dir: 0, k };
   if (s < 2 * H + arc) {
     const a = -Math.PI / 2 + (s - 2 * H) / R;
-    return { u: H + R * Math.cos(a), v: R * Math.sin(a), dir: a + Math.PI / 2, k: 1 / R };
+    return { u: H + R * Math.cos(a), v: R * Math.sin(a), dir: a + Math.PI / 2, k };
   }
-  if (s < 4 * H + arc) return { u: H - (s - 2 * H - arc), v: R, dir: Math.PI, k: 0 };
+  if (s < 4 * H + arc) return { u: H - (s - 2 * H - arc), v: R, dir: Math.PI, k };
   const a = Math.PI / 2 + (s - 4 * H - arc) / R;
-  return { u: -H + R * Math.cos(a), v: R * Math.sin(a), dir: a + Math.PI / 2, k: 1 / R };
+  return { u: -H + R * Math.cos(a), v: R * Math.sin(a), dir: a + Math.PI / 2, k };
 }
 
 /**
