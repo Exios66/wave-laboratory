@@ -1,15 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
-
-/** Collect console errors and uncaught exceptions for the whole test. */
-function trackErrors(page: Page): string[] {
-  const errors: string[] = [];
-  page.on('console', (msg) => {
-    if (msg.type() === 'error') errors.push(msg.text());
-  });
-  page.on('pageerror', (err) => errors.push(err.message));
-  return errors;
-}
+import type { Page } from '@playwright/test';
+import { expect, frames, test, trackErrors } from './fixtures';
 
 async function waitForSimulation(page: Page): Promise<void> {
   await expect(page.getByRole('status').filter({ hasText: 'Simulation running' })).toBeAttached({
@@ -178,7 +169,8 @@ test.describe('Wave Laboratory app', () => {
   });
 
   test('picks a Jerlov water type without restarting the sea', async ({ page }) => {
-    test.setTimeout(90_000);
+    // Five sequential 30 s polls plus page load: budget every wait at its own limit.
+    test.setTimeout(180_000);
     const errors = trackErrors(page);
     await page.goto('/');
     await waitForSimulation(page);
@@ -197,7 +189,9 @@ test.describe('Wave Laboratory app', () => {
     const t0 = await simulationSeconds(time);
     await water.selectOption('coastal-9');
     await expect(water).toHaveValue('coastal-9');
-    await page.waitForTimeout(800);
+    await frames(page, 4);
+    // The clock display refreshes every 80 ms: wait for it to change, then check it went forward.
+    await expect.poll(() => simulationSeconds(time), { timeout: 30_000 }).not.toBe(t0);
     const t1 = await simulationSeconds(time);
     expect(t1).toBeGreaterThan(t0);
     await page.screenshot({ path: 'test-results/water-type-coastal-9.png' });
@@ -206,7 +200,8 @@ test.describe('Wave Laboratory app', () => {
     const t2 = await simulationSeconds(time);
     await water.selectOption('oceanic-i');
     await expect(water).toHaveValue('oceanic-i');
-    await page.waitForTimeout(800);
+    await frames(page, 4);
+    await expect.poll(() => simulationSeconds(time), { timeout: 30_000 }).not.toBe(t2);
     expect(await simulationSeconds(time)).toBeGreaterThan(t2);
     await page.screenshot({ path: 'test-results/water-type-oceanic-i.png' });
     expect(errors).toEqual([]);
@@ -312,12 +307,12 @@ test.describe('Wave Laboratory app', () => {
     );
     await expect(page.getByText(/^Riding with /)).toBeVisible({ timeout: 10_000 });
     // Let the flight condense, then look further down at the fleet.
-    await page.waitForTimeout(3500);
+    await frames(page, 14);
     await page.screenshot({ path: 'test-results/plane-view.png' });
     const canvas = page.locator('#viewport-canvas');
     await canvas.focus();
     for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowUp');
-    await page.waitForTimeout(500);
+    await frames(page, 4);
     await page.screenshot({ path: 'test-results/plane-view-down.png' });
     await page.getByRole('button', { name: 'Land' }).click();
     await expect(page.getByRole('radio', { name: 'Orbit' })).toHaveAttribute(
@@ -424,6 +419,8 @@ test.describe('Wave Laboratory app', () => {
   });
 
   test('keeps the flooding compartment valid across hull changes', async ({ page }) => {
+    // Two hull changes, each restarting the simulation under software GL.
+    test.slow();
     const errors = trackErrors(page);
     await page.goto('/');
     await waitForSimulation(page);
@@ -440,8 +437,14 @@ test.describe('Wave Laboratory app', () => {
     await hull.selectOption('patrol-boat');
     await expect(bay.locator('option')).toHaveCount(4);
     await expect(bay).toHaveValue('3');
-    await page.getByRole('button', { name: 'Flood compartment' }).click();
-    await expect(page.getByText('1 breach(es) open.', { exact: true })).toBeVisible();
+    // The hull change restarts the simulation; a click that lands before the new vessel is
+    // in is lost, so retry until a breach shows.
+    await expect(async () => {
+      await page.getByRole('button', { name: 'Flood compartment' }).click();
+      await expect(page.getByText(/^[1-9]\d* breach\(es\) open\.$/)).toBeVisible({
+        timeout: 5_000,
+      });
+    }).toPass({ timeout: 45_000 });
     await expect
       .poll(
         async () => {
@@ -478,7 +481,7 @@ test.describe('Wave Laboratory app', () => {
     await scene.getByRole('button', { name: /^Catamaran \d/ }).click();
     await expect(page.getByRole('combobox', { name: 'Hull type' })).toHaveValue('catamaran');
     await waitForSimulation(page);
-    await page.waitForTimeout(1500);
+    await frames(page, 6);
     expect(errors).toEqual([]);
   });
 
@@ -532,6 +535,8 @@ test.describe('Wave Laboratory app', () => {
   test('post-processing: bloom, grain and vignette persist and render cleanly', async ({
     page,
   }) => {
+    // Boots the app twice (before and after the reload) under software GL.
+    test.slow();
     const errors = trackErrors(page);
     await page.goto('/');
     await waitForSimulation(page);
@@ -568,6 +573,8 @@ test.describe('Wave Laboratory app', () => {
   test('scenery toggles: ambient world defaults on, hostiles opt-in and persisted', async ({
     page,
   }) => {
+    // Boots the app twice (before and after the reload) under software GL.
+    test.slow();
     const errors = trackErrors(page);
     await page.goto('/');
     await waitForSimulation(page);

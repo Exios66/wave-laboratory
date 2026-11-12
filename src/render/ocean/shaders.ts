@@ -235,11 +235,22 @@ float cloudDensity(vec3 dir) {
   float d = smoothstep(1.0 - cover - 0.08, 1.0 - cover + 0.32, f + 0.12 * cover);
   return d * smoothstep(0.0, 0.12, dir.y);
 }
-vec3 skyColor(vec3 dir, vec3 sun) {
-  vec3 horizon = horizonColor();
+vec3 zenithColor() {
   vec3 zenithClear = srgbToLinear(vec3(0.16, 0.38, 0.72));
   vec3 zenith = mix(zenithClear, overcastBase() * 1.6, overcastAmount()) * daylight();
-  zenith = mix(zenith, srgbToLinear(vec3(0.04, 0.07, 0.15)) * (1.0 - 0.5 * overcastAmount()), uNight);
+  return mix(zenith, srgbToLinear(vec3(0.04, 0.07, 0.15)) * (1.0 - 0.5 * overcastAmount()), uNight);
+}
+// Cloud: bright tops toward the sun, dark bases when the deck is thick.
+vec3 cloudColor(vec3 nd, vec3 sun, float d) {
+  float lit = 0.55 + 0.45 * max(dot(nd, sun), 0.0);
+  vec3 cloudCol = mix(srgbToLinear(vec3(0.95, 0.96, 0.97)), srgbToLinear(vec3(0.30, 0.32, 0.36)), smoothstep(0.35, 1.0, uCloud));
+  cloudCol *= lit * daylight();
+  return cloudCol + vec3(0.8, 0.85, 1.0) * uFlash * (0.6 + 0.8 * d) * (1.0 + 0.5 * (uSunHdr - 1.0));
+}
+// discs = 0 leaves out the sun and moon discs (the water draws their glitter itself).
+vec3 skyColorExt(vec3 dir, vec3 sun, float discs) {
+  vec3 horizon = horizonColor();
+  vec3 zenith = zenithColor();
   vec3 below = horizon * 0.8;
   float up = pow(clamp(dir.y, 0.0, 1.0), 0.55);
   vec3 col = dir.y >= 0.0 ? mix(horizon, zenith, up) : mix(horizon, below, clamp(-dir.y, 0.0, 1.0));
@@ -258,24 +269,83 @@ vec3 skyColor(vec3 dir, vec3 sun) {
   if (uNight > 0.001) {
     float md = max(dot(nd, uMoonDir), 0.0);
     float moonUp = smoothstep(-0.04, 0.02, uMoonDir.y) * uNight * (1.0 - cloudDensity(dir)) * (1.0 - 0.8 * overcastAmount());
-    col += srgbToLinear(vec3(0.85, 0.90, 1.0)) * (smoothstep(0.99965, 0.99985, md) * 0.9 + pow(md, 60.0) * 0.06) * moonUp;
+    col += srgbToLinear(vec3(0.85, 0.90, 1.0)) * (smoothstep(0.99965, 0.99985, md) * 0.9 * discs + pow(md, 60.0) * 0.06) * moonUp;
   }
   float d = cloudDensity(dir);
   float clearSun = 1.0 - smoothstep(0.55, 0.95, uCloud);
   float sunGate = 1.0 - uNight * (1.0 - smoothstep(-0.06, 0.0, sun.y));
-  float sunDisc = pow(max(dot(normalize(dir), sun), 0.0), 1400.0) * (1.0 - d) * clearSun * sunGate;
-  float glow = pow(max(dot(normalize(dir), sun), 0.0), 8.0) * (1.0 - 0.7 * uCloud);
+  float sunDisc = pow(max(dot(nd, sun), 0.0), 1400.0) * (1.0 - d) * clearSun * sunGate * discs;
+  float glow = pow(max(dot(nd, sun), 0.0), 8.0) * (1.0 - 0.7 * uCloud);
   vec3 glowCol = mix(srgbToLinear(vec3(1.0, 0.85, 0.65)), srgbToLinear(vec3(1.0, 0.55, 0.25)), uDusk);
   col += srgbToLinear(vec3(1.0, 0.96, 0.88)) * sunDisc * 1.6 * uSunHdr;
   col += glowCol * glow * (0.28 + 0.35 * uDusk) * daylight() * (1.0 - uNight * (1.0 - smoothstep(-0.2, 0.0, sun.y)));
-  // Cloud: bright tops toward the sun, dark bases when the deck is thick.
-  float lit = 0.55 + 0.45 * max(dot(normalize(dir), sun), 0.0);
-  vec3 cloudCol = mix(srgbToLinear(vec3(0.95, 0.96, 0.97)), srgbToLinear(vec3(0.30, 0.32, 0.36)), smoothstep(0.35, 1.0, uCloud));
-  cloudCol *= lit * daylight();
-  cloudCol += vec3(0.8, 0.85, 1.0) * uFlash * (0.6 + 0.8 * d) * (1.0 + 0.5 * (uSunHdr - 1.0));
-  col = mix(col, cloudCol, d * 0.92);
+  col = mix(col, cloudColor(nd, sun, d), d * 0.92);
   col += vec3(0.6, 0.65, 0.85) * uFlash * 0.25;
   return col;
+}
+vec3 skyColor(vec3 dir, vec3 sun) {
+  return skyColorExt(dir, sun, 1.0);
+}
+// The sky averaged over a wide cone about dir (no discs, clouds smeared to their mean): what
+// very rough water reflects.
+vec3 skyBlurred(vec3 dir, vec3 sun) {
+  vec3 nd = normalize(dir);
+  float up = pow(clamp(nd.y, 0.0, 1.0), 0.55);
+  vec3 col = mix(horizonColor(), zenithColor(), up * 0.85);
+  float glow = pow(max(dot(nd, sun), 0.0), 4.0) * (1.0 - 0.7 * uCloud);
+  vec3 glowCol = mix(srgbToLinear(vec3(1.0, 0.85, 0.65)), srgbToLinear(vec3(1.0, 0.55, 0.25)), uDusk);
+  col += glowCol * glow * (0.2 + 0.3 * uDusk) * daylight() * (1.0 - uNight * (1.0 - smoothstep(-0.2, 0.0, sun.y)));
+  float cover = uCloud * smoothstep(0.0, 0.15, nd.y);
+  col = mix(col, cloudColor(nd, sun, cover), cover * 0.75);
+  return col + vec3(0.6, 0.65, 0.85) * uFlash * 0.25;
+}
+// Mean radiance of the sky dome (ambient light on foam and into the water).
+vec3 skyAmbient() {
+  return 0.45 * horizonColor() + 0.55 * zenithColor();
+}
+`;
+
+/**
+ * Breaking gate and foam injection; mirrored by whitecapGate() and foamInject() in foamSim.ts.
+ * 'share' is a cascade's share of the surface compression (1 for the whole sea).
+ */
+const FOAM_GLSL = /* glsl */ `
+float foamGate(float whitecap, float squall, float share, float margin) {
+  float gate = 0.5 + 0.7 * sqrt(max(whitecap, 0.0)) + 0.15 * squall;
+  return 1.0 - (1.0 - gate + margin) * share;
+}
+float foamInject(float jacobian, float gate, float share, float onCrest) {
+  float width = max(0.25 * share, 1.0e-3);
+  return (1.0 - smoothstep(gate - width, gate, jacobian)) * (0.35 + 0.65 * onCrest);
+}
+`;
+
+/**
+ * One step of a cascade's foam map (see foamSim.ts): RG = (foam, fresh foam) decayed by the
+ * step's survival fractions, topped up wherever the cascade breaks now.
+ */
+export const FOAM_SIM_FRAG = /* glsl */ `
+uniform sampler2D uPrev;
+uniform sampler2D uSlope;
+uniform sampler2D uDisp;
+uniform float uDecay;
+uniform float uFreshDecay;
+uniform float uWhitecap;
+uniform float uShare;
+uniform float uMargin;
+uniform float uCascadeHs;
+${FOAM_GLSL}
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec2 prev = texelFetch(uPrev, p, 0).rg;
+  vec4 s = texelFetch(uSlope, p, 0);
+  float eta = texelFetch(uDisp, p, 0).r;
+  float jacobian = (1.0 + s.z) * (1.0 + s.w);
+  float onCrest = smoothstep(-0.15, 0.45, eta / uCascadeHs);
+  float inject = foamInject(jacobian, foamGate(uWhitecap, 0.0, uShare, uMargin), uShare, onCrest);
+  float foam = max(prev.r * uDecay, inject);
+  float fresh = max(prev.g * uFreshDecay, inject);
+  gl_FragColor = vec4(foam, fresh, 0.0, 1.0);
 }
 `;
 
@@ -407,6 +477,28 @@ uniform float uGustCount;
 uniform vec4 uSquall;
 uniform float uSquallOn;
 uniform float uSquallDur;
+// Persistent foam maps of cascades 0-2 (foamSim.ts) and how many are live (0 = instantaneous).
+uniform sampler2D uF0;
+uniform sampler2D uF1;
+uniform sampler2D uF2;
+uniform float uFoamCascades;
+// The rest of the scene as the water sees it (water/ScenePrepass.ts): colour and depth behind
+// the surface, and the mirrored view above it. uDepthParams = (near, far, reversed depth, -).
+uniform float uScene;
+uniform float uReflOn;
+uniform sampler2D uRefrTex;
+uniform sampler2D uRefrDepth;
+uniform sampler2D uReflTex;
+uniform mat4 uReflMatrix;
+uniform vec2 uResolution;
+uniform vec4 uDepthParams;
+uniform vec2 uTanHalf;
+uniform vec4 uFoamShare;
+uniform vec4 uFoamMargin;
+// Mean-square slope of each cascade [-] (GpuCascade.slopeVariance).
+uniform vec4 uSlopeVar;
+// RG ripple slopes, B foam lace, A foam body (scene/textures.ts surfaceDetailData).
+uniform sampler2D uSurfaceTex;
 varying vec3 vThreePos;
 varying vec2 vLabel;
 varying float vEta;
@@ -414,6 +506,17 @@ varying vec4 vRegSlope;
 varying float vCell;
 
 ${SKY}
+${FOAM_GLSL}
+
+const float PI = 3.14159265;
+// DETAIL_SLOPE_RANGE in textures.ts.
+const float DETAIL_RANGE = 4.0;
+// Ripple tiles of the two detail octaves [m].
+const float DETAIL_TILE_A = 5.3;
+const float DETAIL_TILE_B = 1.37;
+// Foam texture tiles [m].
+const float FOAM_TILE_A = 11.0;
+const float FOAM_TILE_B = 2.3;
 
 vec3 ramp5(float u, vec3 a, vec3 b, vec3 c, vec3 d, vec3 e) {
   float x = clamp(u, 0.0, 1.0);
@@ -601,14 +704,62 @@ vec3 underwaterSurface(vec3 V, vec3 N, float foam) {
   return mix(col, uUwScatter * 0.35, foam * 0.85);
 }
 
+// Share of a cascade's slope variance that a mip level of 'lod' averages away: each cascade
+// owns the wavenumbers 6–24 cells across its patch (the last one up to Nyquist), and its slope
+// variance spreads about evenly over those two octaves.
+float unresolvedShare(float lod, bool last) {
+  float lo = last ? -0.5 : log2(uN / 48.0) - 0.5;
+  float hi = log2(uN / 12.0) + 0.5;
+  return smoothstep(lo, hi, lod);
+}
+
+// GGX (Trowbridge-Reitz) reflection of a distant light with roughness a2 = α² ≈ mss: radiance
+// per unit irradiance, with the height-correlated Smith visibility and Schlick's Fresnel.
+float ggx(vec3 N, vec3 V, vec3 L, float a2) {
+  float nl = dot(N, L);
+  if (nl <= 0.0) return 0.0;
+  float nv = max(dot(N, V), 1.0e-3);
+  vec3 H = normalize(V + L);
+  float nh = max(dot(N, H), 0.0);
+  float d = nh * nh * (a2 - 1.0) + 1.0;
+  float D = a2 / max(PI * d * d, 1.0e-6);
+  float vis = 0.5 / max(nl * sqrt(nv * nv * (1.0 - a2) + a2) + nv * sqrt(nl * nl * (1.0 - a2) + a2), 1.0e-5);
+  float F = 0.02 + 0.98 * pow(1.0 - clamp(dot(V, H), 0.0, 1.0), 5.0);
+  return D * vis * F * nl;
+}
+
+// Soft ceiling: linear for small x, tending to cap.
+float softCap(float x, float cap) {
+  return x / (1.0 + x / cap);
+}
+
+// Distance from the camera to whatever the prepass drew at screen position uv [m].
+float sceneDistance(vec2 uv) {
+  float z = texture(uRefrDepth, uv).x;
+  float near = uDepthParams.x;
+  float far = uDepthParams.y;
+  float viewZ = uDepthParams.z > 0.5
+    ? (near * far) / (near + z * (far - near))
+    : (2.0 * near * far) / (far + near - (2.0 * z - 1.0) * (far - near));
+  return viewZ * length(vec3((uv * 2.0 - 1.0) * uTanHalf, 1.0));
+}
+
+vec2 foamSample(sampler2D tex, float size, vec2 p) {
+  return texture(tex, p / size + (0.5 / uN)).rg;
+}
+
 void main() {
   vec2 label = vLabel;
   // Total slopes of the surface (spectral cascades + analytic waves) at this particle label.
-  vec4 sl = vRegSlope;
-  if (uCount > 0.5) sl += slopeSample(uS0, uSize0, label);
-  if (uCount > 1.5) sl += slopeSample(uS1, uSize1, label);
-  if (uCount > 2.5 && uDetailCascades > 2.5) sl += slopeSample(uS2, uSize2, label);
-  if (uCount > 3.5 && uDetailCascades > 3.5) sl += slopeSample(uS3, uSize3, label);
+  vec4 s0 = vec4(0.0);
+  vec4 s1 = vec4(0.0);
+  vec4 s2 = vec4(0.0);
+  vec4 s3 = vec4(0.0);
+  if (uCount > 0.5) s0 = slopeSample(uS0, uSize0, label);
+  if (uCount > 1.5) s1 = slopeSample(uS1, uSize1, label);
+  if (uCount > 2.5 && uDetailCascades > 2.5) s2 = slopeSample(uS2, uSize2, label);
+  if (uCount > 3.5 && uDetailCascades > 3.5) s3 = slopeSample(uS3, uSize3, label);
+  vec4 sl = vRegSlope + s0 + s1 + s2 + s3;
   float jx = 1.0 + sl.z;
   float jy = 1.0 + sl.w;
   float jacobian = jx * jy;
@@ -616,6 +767,12 @@ void main() {
   float dist = distance(cameraPosition, vThreePos);
   float foot = length(fwidth(label));
   float near = 1.0 - smoothstep(30.0, 250.0, dist);
+  // Pixel footprint as the (×4 anisotropic) texture filter sees it [m].
+  vec2 dLx = dFdx(label);
+  vec2 dLy = dFdy(label);
+  float fa = length(dLx);
+  float fb = length(dLy);
+  float footAniso = max(max(min(fa, fb), 0.25 * max(fa, fb)), 1.0e-5);
 
   // Weather on the water: gust patches ("cat's paws") roughen it, squall lines darken it.
   // Wind, rain and ship wakes are anchored to the world, not to the drifting water.
@@ -623,75 +780,218 @@ void main() {
   float gust = uGustCount > 0.5 ? gustAt(world) : 0.0;
   float squall = squallAt(world);
   float rough = clamp(0.35 + uWind * 0.05, 0.2, 2.5) * (1.0 + 2.5 * max(gust, 0.0)) * (1.0 + squall);
-  vec2 cap = vec2(0.0);
-  float capFade = 1.0 - smoothstep(0.15, 0.6, foot);
-  if (capFade > 0.0) {
-    vec2 q = label * 2.2 + uWindDir * uTime * 0.8;
-    cap.x = vnoise(q) - vnoise(q + vec2(0.37, 0.0));
-    cap.y = vnoise(q) - vnoise(q + vec2(0.0, 0.37));
-    cap *= 0.35 * rough * capFade;
-  }
+
+  // Close-range ripples: two octaves of the tileable slope texture, aligned with and drifting
+  // down the wind. Their mip chains low-pass them with distance; what is filtered away turns
+  // into roughness below.
+  vec2 wd = uWindDir;
+  vec2 wq = vec2(dot(label, wd), -label.x * wd.y + label.y * wd.x);
+  vec2 qa = wq / DETAIL_TILE_A - vec2(uTime * 0.55 / DETAIL_TILE_A, 0.0);
+  vec2 qb = mat2(0.96, 0.28, -0.28, 0.96) * wq / DETAIL_TILE_B - vec2(uTime * 0.32 / DETAIL_TILE_B, 0.17);
+  vec4 ta = texture(uSurfaceTex, qa);
+  vec4 tb = texture(uSurfaceTex, qb);
+  float ampA = 0.075 * rough;
+  float ampB = 0.05 * rough;
+  vec2 rip = (ta.rg - 0.5) * (2.0 * DETAIL_RANGE) * ampA;
+  vec2 ripB = (tb.rg - 0.5) * (2.0 * DETAIL_RANGE) * ampB;
+  ripB = mat2(0.96, -0.28, 0.28, 0.96) * ripB;
+  rip += ripB;
+  vec2 cap = rip.x * wd + rip.y * vec2(-wd.y, wd.x);
   if (uRain > 0.1 && near > 0.0) {
     cap += rainRipples(world, clamp(uRain / 20.0, 0.3, 3.0)) * 0.08 * near * clamp(uRain / 15.0, 0.2, 1.0);
   }
+
+  // Slope variance the pixel does not resolve [-]: the filtered-away part of every cascade,
+  // all of the cascades this quality level skips, the filtered ripples and a capillary floor.
+  float mss = 0.002 + 0.0011 * uWind * (1.0 + 1.5 * max(gust, 0.0));
+  float sizes[4] = float[4](uSize0, uSize1, uSize2, uSize3);
+  for (int i = 0; i < 4; i++) {
+    if (float(i) + 0.5 > uCount) break;
+    float texel = sizes[i] / uN;
+    float share = uHasMips > 0.5
+      ? unresolvedShare(log2(footAniso / texel), i == 3)
+      : smoothstep(1.0, 3.0, foot / texel);
+    if (float(i) + 0.5 > uDetailCascades) share = 1.0;
+    mss += uSlopeVar[i] * share;
+  }
+  // Ripple octaves: unit-variance slopes spread over cells 3–51 of the 256-texel tile.
+  float lodA = log2(footAniso * 256.0 / DETAIL_TILE_A);
+  float lodB = log2(footAniso * 256.0 / DETAIL_TILE_B);
+  mss += 2.0 * (ampA * ampA * smoothstep(0.8, 5.9, lodA) + ampB * ampB * smoothstep(0.8, 5.9, lodB));
+  // Capped near the largest slope variance measured at sea (Cox and Munk at storm winds).
+  float a2 = clamp(mss, 2.0e-4, 0.14);
+  float alpha = sqrt(a2);
+
   // Lagrangian normal: tangents (1 + Dxx, 0, ηx) and (0, 1 + Dyy, ηy) in world (x, y, z).
   vec3 nWorld = normalize(vec3(-(sl.x + cap.x) * jy, -(sl.y + cap.y) * jx, jx * jy));
   vec3 N = normalize(vec3(nWorld.x, nWorld.z, -nWorld.y));
   if (!gl_FrontFacing) N = -N;
   vec3 V = normalize(cameraPosition - vThreePos);
   float ndv = clamp(dot(N, V), 0.0, 1.0);
-  float fresnel = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
-  vec3 R = reflect(-V, N);
-  if (R.y < 0.0) R.y = -R.y * 0.3;
-  vec3 reflection = skyColor(R, uSunDir);
+  // Fresnel averaged over the unresolved facets (Schlick with Lagarde's roughness term).
+  float fresnel = 0.02 + (max(1.0 - alpha, 0.02) - 0.02) * pow(1.0 - ndv, 5.0);
   float crest = clamp(vEta / max(uHs, 0.4) * 0.5 + 0.5, 0.0, 1.0);
-  float light = daylight() * (1.0 - 0.55 * uCloud) + uFlash * 0.5;
-  // Jerlov body colour and Beer–Lambert transmission. Scatter is already linear RGB.
+
+  // Light on the water: direct sun and moon irradiance as the scene's directional light has them
+  // (scenery/lighting.ts), dimmed under cloud the same way, plus the sky dome.
+  vec3 L = uSunDir;
+  float cloudDim = 1.0 - 0.85 * smoothstep(0.3, 1.0, uCloud);
+  float sunElev = degrees(asin(clamp(L.y, -1.0, 1.0)));
+  float sunE = clamp(0.35 + sunElev / 28.0, 0.25, 2.6) * smoothstep(-4.0, 3.0, sunElev) * cloudDim;
+  float sunVis = (1.0 - smoothstep(0.5, 0.95, uCloud)) * smoothstep(-0.02, 0.04, L.y);
+  vec3 sunCol = mix(vec3(1.0, 0.97, 0.92), srgbToLinear(vec3(1.0, 0.70, 0.45)), uDusk);
+  float moonElev = degrees(asin(clamp(uMoonDir.y, -1.0, 1.0)));
+  float moonE = (0.7 * smoothstep(2.0, 20.0, moonElev) + 0.25) * smoothstep(-2.0, 2.0, moonElev)
+    * uNight * (1.0 - smoothstep(-4.0, 3.0, sunElev)) * cloudDim;
+  vec3 moonCol = srgbToLinear(vec3(0.75, 0.82, 0.95));
+  vec3 ambient = skyAmbient();
+  // Downwelling irradiance below the surface: direct sun and moon, the sky dome, lightning.
+  vec3 ed = sunE * max(L.y, 0.0) * sunCol + moonE * max(uMoonDir.y, 0.0) * moonCol
+    + PI * ambient + vec3(uFlash * 0.5);
+
+  // Refracted / body light: what comes up out of the water. Jerlov in-scatter and light
+  // through the wave faces here; further down, whatever lies behind the surface.
   vec3 scatter = uScatter;
   vec3 kd = max(uAtten, vec3(1.0e-4));
-  float crestPath = mix(1.6, 0.22, crest);
-  vec3 transCrest = exp(-kd * crestPath);
-  vec3 deep = scatter * 1.7;
-  vec3 shallow = scatter * 0.35 + transCrest * vec3(0.10, 0.28, 0.26);
-  vec3 stormy = mix(deep, scatter * 0.9, 0.45);
-  vec3 water = mix(deep, mix(shallow, stormy, smoothstep(0.4, 1.0, uCloud)), crest) * light;
-  water *= 1.0 - 0.25 * squall;
-  vec3 col = mix(water, reflection, fresnel);
-  // Sun glitter: roughness grows with the unresolved slope variance at distance.
-  float sharp = mix(1400.0, 90.0, clamp(foot / 2.0, 0.0, 1.0));
-  float sun = max(dot(normalize(R), uSunDir), 0.0);
-  float sunVis = (1.0 - smoothstep(0.5, 0.95, uCloud)) * step(0.0, uSunDir.y);
-  float spec = (pow(sun, 90.0) * 0.3 + pow(sun, sharp) * (sharp / 1400.0 + 0.15) * uSunHdr) * sunVis;
-  vec3 glint = mix(srgbToLinear(vec3(1.0, 0.97, 0.90)), srgbToLinear(vec3(1.0, 0.68, 0.40)), uDusk);
-  col += glint * spec * (0.4 + 0.6 * fresnel);
-  // Moon glitter path at night.
-  float moonGlint = pow(max(dot(normalize(R), uMoonDir), 0.0), 220.0) * uNight * step(0.0, uMoonDir.y);
-  col += srgbToLinear(vec3(0.75, 0.82, 0.95)) * moonGlint * 0.5 * (1.0 - smoothstep(0.4, 0.9, uCloud));
-  // Subsurface glow through thin crests, tinted by what this water type transmits.
-  vec3 sssTint = scatter * 10.0 + transCrest * vec3(0.08, 0.32, 0.28);
-  float sss = pow(crest, 2.0) * (1.0 - fresnel) * max(dot(V, -uSunDir) * 0.5 + 0.5, 0.0);
-  col += sssTint * sss * 0.5 * light;
-  float thin = clamp(length(sl.xy) * 2.5, 0.0, 1.0) * crest;
-  col += sssTint * thin * light * 0.45;
-  // Crest glow: sunlight through thin crests when looking toward a low sun.
-  vec3 sunFlat = normalize(vec3(uSunDir.x, 0.0, uSunDir.z) + vec3(0.0, 1e-4, 0.0));
-  float backlit = pow(clamp(dot(-V, sunFlat), 0.0, 1.0), 3.0);
-  float glowCrest = smoothstep(0.55, 1.0, crest) * smoothstep(0.05, 0.3, length(sl.xy) + 0.08);
-  float sunUp = smoothstep(-0.05, 0.25, uSunDir.y);
-  vec3 glowTint = scatter * 14.0 + transCrest * vec3(0.10, 0.62, 0.48);
-  col += glowTint * backlit * glowCrest * sunUp * sunVis * (1.0 - fresnel) * 0.65;
-  // Optically shallow water: the bottom shows through where K_d · depth is small.
-  vec3 bottom = srgbToLinear(vec3(0.30, 0.26, 0.16));
-  float kdMean = dot(kd, vec3(0.3, 0.45, 0.25));
-  float seeBottom = exp(-kdMean * uWaterDepth) * (1.0 - smoothstep(20.0, 70.0, uWaterDepth));
-  col = mix(col, mix(col, bottom * transCrest * light, 0.6), seeBottom * (1.0 - fresnel));
+  vec3 body = scatter * ed * 1.1;
+  // Toward sunset the light going into the sea is weak and warm: the body greys instead of
+  // holding its midday blue.
+  body = mix(body, vec3(dot(body, vec3(0.2126, 0.7152, 0.0722))) * vec3(1.0, 0.95, 0.92), 0.45 * uDusk);
+  float height = smoothstep(-0.1, 0.65, vEta / max(uHs, 0.3));
+  // Upwelling light escapes more easily through the thin upper part of a wave than from under
+  // its trough: crests read a little lighter.
+  body *= (0.6 + 0.9 * height) * (1.0 - 0.25 * squall);
+  // Slopes tilted toward the sun take in more of its light.
+  body *= 1.0 + 0.45 * sunVis * clamp(dot(N.xz, normalize(L.xz + vec2(1.0e-5))) * 2.5, -0.5, 1.0);
+  // Under cloud there is no sun to model the waves: the diffuse sky still lights the faces
+  // turned toward the viewer more than those turned away, and a grey sea scatters back more
+  // of it than the same sea under a blue sky.
+  float overcast = smoothstep(0.4, 1.0, uCloud);
+  body *= 1.0 + 0.6 * overcast;
+  body *= 1.0 + 0.7 * overcast * clamp(dot(N.xz, normalize(V.xz + vec2(1.0e-5))) * 3.0, -0.5, 1.0);
+  // Subsurface: sunlight that enters the back of a wave, travels through it bent toward the
+  // horizon, and leaves through the face toward the viewer. Strongest looking toward a low sun,
+  // high on steep faces, tinted by what the water transmits over the path.
+  vec3 Lb = normalize(vec3(L.x, max(L.y, 0.0) * 0.35, L.z) + vec3(0.0, 1.0e-4, 0.0));
+  float toward = pow(max(dot(V, -Lb), 0.0), 3.0);
+  vec2 nh = N.xz;
+  vec2 vh = normalize(V.xz + vec2(1.0e-5));
+  float facing = clamp(dot(nh, vh) * 3.0 + 0.15, 0.0, 1.0);
+  float path = mix(2.5, 0.35, height * facing);
+  vec3 trans = exp(-kd * path);
+  vec3 sssTint = scatter * 8.0 + trans * vec3(0.03, 0.12, 0.10);
+  float sssSun = (0.15 + 1.6 * toward) * height * facing * sunE * sunVis;
+  vec3 refracted = body + sssTint * (sssSun * sunCol + PI * ambient * 0.4 * height * (0.4 + 0.6 * facing)) * 0.35;
+  // What lies behind the surface. With the scene prepass: the refracted picture of hulls, shores
+  // and the seabed, absorbed along the real path through the water, and a line of foam where
+  // the sea meets them. Without it: a flat bottom showing through optically shallow water.
+  float contact = 0.0;
+  // Whether the prepass found geometry behind this pixel; where it found none, the flat-bottom
+  // fallback still applies.
+  float sceneHit = 0.0;
+  if (uScene > 0.5) {
+    vec2 suv = gl_FragCoord.xy / uResolution;
+    float d0 = sceneDistance(suv);
+    float path0 = max(d0 - dist, 0.0);
+    vec2 bend = (viewMatrix * vec4(N, 0.0)).xy * 0.05 * clamp(path0 * 0.4, 0.0, 1.0) / (1.0 + dist * 0.01);
+    vec2 suv2 = clamp(suv + bend, vec2(0.002), vec2(0.998));
+    float d1 = sceneDistance(suv2);
+    // Never bend the ray onto something in front of the water.
+    if (d1 < dist) {
+      suv2 = suv;
+      d1 = d0;
+    }
+    float path = max(d1 - dist, 0.0);
+    float hit = 1.0 - step(uDepthParams.y * 0.8, d1);
+    vec3 through = exp(-kd * path * 1.5) * hit;
+    refracted = mix(refracted, texture(uRefrTex, suv2).rgb, through);
+    contact = (1.0 - smoothstep(0.0, 0.9, path0)) * step(dist - 0.5, d0) * (1.0 - step(uDepthParams.y * 0.8, d0));
+    sceneHit = hit;
+  }
+  if (sceneHit < 0.5) {
+    vec3 transCrest = exp(-kd * mix(1.6, 0.22, crest));
+    vec3 bottom = srgbToLinear(vec3(0.30, 0.26, 0.16));
+    float kdMean = dot(kd, vec3(0.3, 0.45, 0.25));
+    float seeBottom = exp(-kdMean * uWaterDepth) * (1.0 - smoothstep(20.0, 70.0, uWaterDepth));
+    refracted = mix(refracted, mix(refracted, bottom * transCrest * ed * 0.18, 0.6), seeBottom);
+  }
 
-  // Whitecaps: breaking where the surface compresses (Jacobian), with coverage that follows
-  // the Monahan whitecap law for the wind, plus wind-aligned foam streaks above Beaufort 8.
-  // Breaking happens on the crests: weight the compression by the elevation.
-  float gate = 0.5 + 0.7 * sqrt(uWhitecap) + 0.15 * squall;
+  // Reflected light. Rough water
+  // reflects a wider cone of sky: the lookup is lifted (the facets turned toward the viewer
+  // see higher sky) and blurred. A ray reflected downward meets another wave: it sees that
+  // wave's mix of low sky and water.
+  vec3 R = reflect(-V, N);
+  vec3 Rs = vec3(R.x, max(R.y, 0.0), R.z);
+  Rs.y += alpha * 0.6 * (1.0 - Rs.y);
+  Rs = normalize(Rs);
+  vec3 skyR = skyColorExt(Rs, uSunDir, 0.0);
+  skyR = mix(skyR, skyBlurred(Rs, uSunDir), smoothstep(0.08, 0.45, alpha));
+  vec3 lowSea = mix(horizonColor() * 0.85, refracted, 0.55);
+  vec3 reflection = mix(skyR, lowSea, smoothstep(0.0, 0.25, -R.y));
+  // Ships, islands and structures mirrored in the mean sea level, displaced by the wave normal
+  // and fading out as the water gets too rough to hold an image.
+  if (uReflOn > 0.5) {
+    vec4 rc = uReflMatrix * vec4(vThreePos.x, 0.0, vThreePos.z, 1.0);
+    if (rc.w > 0.0) {
+      vec2 ruv = rc.xy / rc.w + N.xz * vec2(0.06, 0.12);
+      vec4 mirrored = texture(uReflTex, clamp(ruv, vec2(0.002), vec2(0.998)));
+      // The target is cleared to transparent black, so its colour is premultiplied by coverage.
+      float w = 1.0 - smoothstep(0.3, 0.55, alpha);
+      reflection = reflection * (1.0 - clamp(mirrored.a, 0.0, 1.0) * w) + mirrored.rgb * w;
+    }
+  }
+
+  vec3 col = mix(refracted, reflection, fresnel);
+
+  // Whitecaps. With foam maps: what each cascade's breaking left behind, decaying over seconds;
+  // cascades without a map add their breaking now. Without maps (quality low): the Jacobian of
+  // the whole sea against the Monahan gate, weighted toward the crests.
   float onCrest = smoothstep(-0.15, 0.45, vEta / max(uHs, 0.3));
-  float breaking = (1.0 - smoothstep(gate - 0.25, gate, jacobian)) * (0.35 + 0.65 * onCrest);
+  // Foam texture at two scales: lace walls between bubbles and a soft body. Its body channel
+  // also jitters the foam-map lookups, so patches get ragged outlines instead of the smooth
+  // contours of bilinear filtering.
+  vec4 fa1 = texture(uSurfaceTex, label / FOAM_TILE_A + vec2(0.31, 0.77));
+  vec4 fa2 = texture(uSurfaceTex, mat2(0.8, -0.6, 0.6, 0.8) * label / FOAM_TILE_B);
+  vec4 fa3 = texture(uSurfaceTex, label / 23.0 + vec2(0.53, 0.11));
+  vec2 foamAt = label + (vec2(fa1.a, fa3.a) - 0.5) * 1.4 + (fa3.ba - 0.5) * 3.0;
+  float foamAcc = 0.0;
+  float fresh = 0.0;
+  if (uFoamCascades > 0.5) {
+    vec2 f = foamSample(uF0, uSize0, foamAt);
+    foamAcc = f.r;
+    fresh = f.g;
+    if (uFoamCascades > 1.5) {
+      f = foamSample(uF1, uSize1, foamAt);
+      foamAcc = 1.0 - (1.0 - foamAcc) * (1.0 - f.r);
+      fresh = max(fresh, f.g);
+    } else if (uCount > 1.5) {
+      float inst = foamInject((1.0 + s1.z) * (1.0 + s1.w), foamGate(uWhitecap, 0.0, uFoamShare.y, uFoamMargin.y), uFoamShare.y, onCrest);
+      foamAcc = 1.0 - (1.0 - foamAcc) * (1.0 - inst);
+      fresh = max(fresh, inst);
+    }
+    if (uFoamCascades > 2.5) {
+      f = foamSample(uF2, uSize2, foamAt);
+      foamAcc = 1.0 - (1.0 - foamAcc) * (1.0 - f.r * 0.8);
+      fresh = max(fresh, f.g * 0.8);
+    } else if (uCount > 2.5 && uDetailCascades > 2.5) {
+      float inst = foamInject((1.0 + s2.z) * (1.0 + s2.w), foamGate(uWhitecap, 0.0, uFoamShare.z, uFoamMargin.z), uFoamShare.z, onCrest) * 0.8;
+      foamAcc = 1.0 - (1.0 - foamAcc) * (1.0 - inst);
+      fresh = max(fresh, inst);
+    }
+    // Left-behind foam thins where the surface is stretching again and stays dense where the
+    // fine waves still compress it, which gives a 4 m foam texel its metre-scale structure.
+    foamAcc *= mix(0.4, 1.0, 1.0 - smoothstep(0.8, 1.15, jacobian));
+    // Crests breaking this instant show at once, before the maps have built up their trails.
+    float instAll = foamInject(jacobian, foamGate(uWhitecap, squall, 1.0, 0.0), 1.0, onCrest);
+    foamAcc = max(foamAcc, instAll);
+    fresh = max(fresh, instAll);
+    // Squall lines whip up more of it.
+    foamAcc = clamp(foamAcc * (1.0 + 0.8 * squall), 0.0, 1.0);
+  } else {
+    float gate = foamGate(uWhitecap, squall, 1.0, 0.0);
+    foamAcc = foamInject(jacobian, gate, 1.0, onCrest);
+    fresh = foamAcc;
+  }
   // Streaks: long, narrow, wavy bands along the wind, faded where a pixel spans a band.
   float alongW = dot(label, uWindDir);
   float acrossW = -label.x * uWindDir.y + label.y * uWindDir.x;
@@ -702,14 +1002,43 @@ void main() {
     * smoothstep(16.0, 24.0, uWind) * 0.6 * bandFade
     // Streaks come and go along their length instead of running unbroken for kilometres.
     * smoothstep(0.25, 0.65, vnoise(vec2(alongW * 0.004, acrossW * 0.015 + 7.0)));
-  float texture1 = vnoise(label * 0.9 + uTime * 0.05) * 0.6 + vnoise(label * 3.1) * 0.4;
-  float foam = breaking * smoothstep(0.25, 0.75, texture1 + breaking * 0.35);
-  foam += streaks * (0.5 + 0.5 * texture1);
-  foam += wakeFoam(label, foot);
-  foam = clamp(foam, 0.0, 1.0);
-  // Foam is lit like the water around it: at night only a faint grey, not a glowing band.
-  vec3 foamCol = srgbToLinear(vec3(0.90, 0.94, 0.96)) * (0.06 + 0.94 * light);
-  col = mix(col, foamCol, foam * 0.92);
+  float lace = max(fa1.b, fa2.b * 0.85);
+  float pattern = clamp(lace * 0.7 + (fa1.a * 0.6 + fa2.a * 0.4) * 0.4, 0.0, 1.0);
+  float wake = wakeFoam(label, foot);
+  float coverage = clamp(foamAcc + streaks * (0.6 + 0.4 * fa1.a) + wake + contact * 0.55, 0.0, 1.0);
+  // As foam ages its sheet breaks up into lace: erode the texture by the coverage. Where the
+  // texture is filtered away (distance), the coverage itself is the mean.
+  // Fresh breaking and the churned water of a wake are denser than residual foam.
+  float solid = clamp(coverage * 0.7 + 0.2 * fresh + 0.4 * wake, 0.0, 0.9);
+  float eroded = smoothstep(1.0 - solid, 1.0 - solid + 0.45, pattern) * (0.55 + 0.45 * solid);
+  float texFar = smoothstep(3.0, 6.0, log2(footAniso * 256.0 / FOAM_TILE_A));
+  float foam = clamp(mix(eroded, coverage, texFar), 0.0, 1.0);
+  // Wind streaks are thin already: they keep their own shape instead of eroding away.
+  foam = max(foam, streaks * (0.5 + 0.5 * fa1.a));
+  // Bubbles below the surface: decaying foam leaves a pale blue-green cloud under the water.
+  float bubbles = clamp(foamAcc - fresh, 0.0, 1.0) * (1.0 - foam);
+  col = mix(col, (scatter * 6.0 + vec3(0.02, 0.07, 0.065)) * ed * 0.45, bubbles * 0.4);
+
+  // Sun and moon glitter: GGX on the unresolved slope variance, so the glitter path widens with
+  // distance instead of sparkling, energy-capped below a bloomable ceiling.
+  vec3 glint = mix(srgbToLinear(vec3(1.0, 0.97, 0.90)), srgbToLinear(vec3(1.0, 0.68, 0.40)), uDusk);
+  // Only tight, sharp glints get the HDR headroom that blooms; a broad, rough glitter path
+  // stays just under the bloom threshold.
+  float sharpGlint = 1.0 - smoothstep(0.05, 0.18, alpha);
+  float sunSpec = ggx(N, V, L, a2 + 2.0e-5) * sunE * sunVis;
+  sunSpec = softCap(sunSpec * mix(1.0, uSunHdr, sharpGlint), 1.0 + (uSunHdr - 1.0) * 1.5 * sharpGlint);
+  float moonVis = smoothstep(-0.02, 0.05, uMoonDir.y) * (1.0 - smoothstep(0.4, 0.9, uCloud));
+  float moonSpec = softCap(ggx(N, V, uMoonDir, a2 + 2.0e-5) * moonE * moonVis, 0.6);
+  vec3 spec = glint * sunSpec + moonCol * moonSpec;
+  col += spec * (1.0 - foam);
+
+  // Foam is a rough white scatterer lit by the sun (softened Lambert) and the sky: at night only
+  // a faint grey, not a glowing band.
+  float wrap = clamp((dot(N, L) + 0.3) / 1.3, 0.0, 1.0);
+  vec3 foamCol = srgbToLinear(vec3(0.90, 0.94, 0.96))
+    * ((sunE * sunCol * wrap + moonE * moonCol * clamp((dot(N, uMoonDir) + 0.3) / 1.3, 0.0, 1.0)) / PI
+      + ambient * (1.3 + 0.4 * N.y) + vec3(uFlash * 0.5));
+  col = mix(col, foamCol, foam * 0.95);
 
   if (uOverlay > 0.5 && uOverlay < 1.5) {
     float u = clamp(vEta / max(0.25, uHs * 0.75) * 0.5 + 0.5, 0.0, 1.0);
@@ -728,7 +1057,8 @@ void main() {
       srgbToLinear(vec3(0.973, 0.584, 0.251)),
       srgbToLinear(vec3(0.941, 0.976, 0.129)));
   } else if (uOverlay > 2.5) {
-    float u = clamp(1.0 - jacobian, 0.0, 1.0);
+    // Foam overlay: the accumulated whitecap foam, or the compression without foam maps.
+    float u = uFoamCascades > 0.5 ? foamAcc : clamp(1.0 - jacobian, 0.0, 1.0);
     col = mix(srgbToLinear(vec3(0.031, 0.188, 0.420)), srgbToLinear(vec3(0.969, 0.984, 1.0)), u);
   }
 
@@ -963,7 +1293,9 @@ varying float vAlpha;
 varying vec2 vDir;
 varying float vStretch;
 varying float vLit;
+varying float vViewZ;
 void main() {
+  vViewZ = 1.0;
   float age = uTime - aMisc.x;
   float life = max(aVel.w, 1e-3);
   float u = age / life;
@@ -983,6 +1315,7 @@ void main() {
   vec3 v = vt + (aVel.xyz - vt) * decay;
   vec4 mv = viewMatrix * vec4(p, 1.0);
   vec4 clip = projectionMatrix * mv;
+  vViewZ = -mv.z;
   // Screen-space direction of travel: fast spray is drawn as a short streak along it.
   vec4 clip2 = projectionMatrix * (mv + vec4((viewMatrix * vec4(v, 0.0)).xyz * 0.05, 0.0));
   vec2 d = (clip2.xy / clip2.w - clip.xy / clip.w) * vec2(uAspect, 1.0);
@@ -1001,10 +1334,15 @@ void main() {
 
 export const GPU_SPRAY_FRAG = /* glsl */ `
 uniform vec3 uColor;
+uniform float uSoft;
+uniform sampler2D uSceneDepth;
+uniform vec2 uResolution;
+uniform vec3 uDepthParams;
 varying float vAlpha;
 varying vec2 vDir;
 varying float vStretch;
 varying float vLit;
+varying float vViewZ;
 void main() {
   vec2 c = (gl_PointCoord - 0.5) * 2.0;
   c.y = -c.y;
@@ -1013,6 +1351,17 @@ void main() {
   float r = dot(q, q);
   if (r > 1.0) discard;
   float soft = (1.0 - r) * sqrt(1.0 - r);
+  // Soft particles: fade out over the last 0.8 m in front of whatever the prepass drew (hulls,
+  // islands) instead of being cut off along a hard line.
+  if (uSoft > 0.5) {
+    float z = texture2D(uSceneDepth, gl_FragCoord.xy / uResolution).x;
+    float near = uDepthParams.x;
+    float far = uDepthParams.y;
+    float sceneZ = uDepthParams.z > 0.5
+      ? (near * far) / (near + z * (far - near))
+      : (2.0 * near * far) / (far + near - (2.0 * z - 1.0) * (far - near));
+    soft *= clamp((sceneZ - vViewZ) / 0.8, 0.0, 1.0);
+  }
   gl_FragColor = vec4(uColor * vLit, vAlpha * soft);
   #include <colorspace_fragment>
 }

@@ -7,7 +7,9 @@
 import * as THREE from 'three';
 import { FFT } from '../../ocean/fft';
 import type { GpuOceanData } from '../../ocean/gpuData';
+import { surfaceDetailTexture } from '../scene/textures';
 import { evolveSpectra } from './evolve';
+import { FOAM_MARGIN, FoamSim, foamShares, MAX_FOAM_CASCADES } from './foamSim';
 import { gpuVerifyWanted } from './gpuVerify';
 import { COMBINE_FRAG, FFT_FRAG, FFT_VERT, GRADIENT_FRAG, SPECTRUM_FRAG } from './shaders';
 
@@ -90,6 +92,13 @@ export class GpuOcean {
   private readonly live: boolean[] = [];
   private verified = false;
   private fftCpu: FFT | null = null;
+  private readonly foam: FoamSim;
+  /** Foam maps the quality level asks for (FoamSim caps it). */
+  private foamWanted = 0;
+  private readonly foamShare = [0, 0, 0, 0];
+  private readonly cascadeHs = [0, 0, 0, 0];
+  /** Ripple slopes and foam pattern (scene/textures.ts). */
+  private readonly surfaceTex = surfaceDetailTexture();
 
   constructor(renderer: THREE.WebGLRenderer, texType: THREE.TextureDataType = THREE.FloatType) {
     this.renderer = renderer;
@@ -143,7 +152,16 @@ export class GpuOcean {
       uWakeShip: { value: [] },
       uWakeInfo: { value: [] },
       uWakeBox: { value: [] },
+      uF0: { value: this.black },
+      uF1: { value: this.black },
+      uF2: { value: this.black },
+      uFoamCascades: { value: 0 },
+      uFoamShare: { value: new THREE.Vector4() },
+      uFoamMargin: { value: new THREE.Vector4().fromArray([...FOAM_MARGIN, 0]) },
+      uSlopeVar: { value: new THREE.Vector4() },
+      uSurfaceTex: { value: this.surfaceTex },
     };
+    this.foam = new FoamSim((material, target) => this.blit(material, target));
 
     const geo = new THREE.PlaneGeometry(2, 2);
     this.fftMat = this.passMaterial(FFT_FRAG, {
@@ -215,6 +233,19 @@ export class GpuOcean {
       regB[i]!.set(r?.dirX ?? 1, r?.dirY ?? 0, r?.cothKh ?? 1, r?.stokes ? 1 : 0);
     }
     this.uniforms.uRegularCount!.value = Math.min(data.regular.length, MAX_REGULAR);
+    const mss = Array.from(
+      { length: MAX_CASCADES },
+      (_, i) => data.cascades[i]?.slopeVariance ?? 0,
+    );
+    const shares = foamShares(mss);
+    for (let i = 0; i < MAX_CASCADES; i++) {
+      this.foamShare[i] = shares[i]!;
+      this.cascadeHs[i] = 4 * Math.sqrt(data.cascades[i]?.variance ?? 0);
+    }
+    (this.uniforms.uSlopeVar!.value as THREE.Vector4).fromArray(mss);
+    (this.uniforms.uFoamShare!.value as THREE.Vector4).fromArray(shares);
+    this.foam.setCount(Math.min(this.foamWanted, count));
+    this.foam.reset();
     this.dirty = true;
     this.verified = false;
     this.lastT = Number.NaN;
@@ -235,11 +266,31 @@ export class GpuOcean {
     this.dirty = true;
   }
 
+  /**
+   * Cascades with persistent foam maps (0 = instantaneous whitecaps, as on quality low).
+   * The maps start empty.
+   */
+  setFoamCascades(count: number): void {
+    const wanted = Math.max(0, Math.min(MAX_FOAM_CASCADES, Math.floor(count)));
+    // Refresh the foam targets on the next frame even if simulated time is paused.
+    if (wanted !== this.foamWanted) this.dirty = true;
+    this.foamWanted = wanted;
+    const available = this.data ? Math.min(this.data.cascades.length, MAX_CASCADES) : 0;
+    this.foam.setCount(Math.min(this.foamWanted, available));
+    if (this.foamWanted === 0) this.uniforms.uFoamCascades!.value = 0;
+  }
+
+  /** Redraw the surface and foam on the next frame even if simulated time is paused. */
+  invalidate(): void {
+    this.dirty = true;
+  }
+
   /** Rebuild GPU buffers after the browser restores a lost context (a phone tab in the background). */
   restore(): void {
     const n = this.n;
     if (n >= 2) this.allocate(n);
     for (const tex of this.sources) tex.needsUpdate = true;
+    this.surfaceTex.needsUpdate = true;
     this.dirty = true;
     this.lastT = Number.NaN;
   }
@@ -283,6 +334,22 @@ export class GpuOcean {
       u[`uC${i}`]!.value = (live && this.outputs[i]?.texture) || this.black;
       u[`uS${i}`]!.value = (live && this.slopes[i]?.texture) || this.black;
     }
+    this.foam.step({
+      t,
+      slopes: this.slopes.map((rt, i) => (this.live[i] ? rt.texture : null)),
+      outputs: this.outputs.map((rt, i) => (this.live[i] ? rt.texture : null)),
+      hs: this.cascadeHs,
+      shares: this.foamShare,
+      whitecap: (u.uWhitecap?.value as number | undefined) ?? 0,
+    });
+    // The shader reads maps for a leading run of cascades; the rest break instantaneously.
+    let foamCount = 0;
+    for (let i = 0; i < MAX_FOAM_CASCADES; i++) {
+      const tex = this.foam.texture(i);
+      if (tex && foamCount === i) foamCount++;
+      u[`uF${i}`]!.value = (foamCount > i && tex) || this.black;
+    }
+    u.uFoamCascades!.value = foamCount;
     this.renderer.setRenderTarget(null);
     if (!this.verified) {
       if (gpuVerifyWanted()) this.verify(t);
@@ -293,6 +360,8 @@ export class GpuOcean {
   dispose(): void {
     this.disposeSources();
     this.disposeTargets();
+    this.foam.dispose();
+    this.surfaceTex.dispose();
     this.black.dispose();
     this.fftMat.dispose();
     this.spectrumMat.dispose();
@@ -395,6 +464,7 @@ export class GpuOcean {
       this.outputs[i] = floatTarget(n, this.sampleFilter, THREE.RepeatWrapping, this.texType, mips);
       this.slopes[i] = floatTarget(n, this.sampleFilter, THREE.RepeatWrapping, this.texType, mips);
     }
+    this.foam.allocate(n);
   }
 
   private verify(t: number): void {

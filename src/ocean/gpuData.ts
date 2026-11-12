@@ -22,6 +22,12 @@ export interface GpuCascade {
   physics: boolean;
   /** Surface-elevation variance in this cascade [m²]. */
   variance: number;
+  /**
+   * Mean-square slope of this cascade, E[(∂η/∂x)² + (∂η/∂y)²] [-]: the time (and space) average
+   * of the slopes the drawn h₀ produces, 2 Σ |k|² |h₀(k)|². The renderer turns the part of it a
+   * pixel cannot resolve into surface roughness (sun glitter, blurred reflections).
+   */
+  slopeVariance: number;
 }
 
 export interface GpuOceanData {
@@ -32,6 +38,29 @@ export interface GpuOceanData {
   choppiness: number;
   /** Expected significant wave height of everything represented [m]. */
   hs: number;
+}
+
+/**
+ * Mean-square slope of a packed h₀ field (RGBA texels as in GpuCascade.h0). With
+ * η = Σ_k ĥ(k, t) e^{ik·x} and ĥ = h₀(k) e^{−iωt} + conj(h₀(−k)) e^{iωt}, Parseval gives
+ * ⟨|∇η|²⟩ = Σ_k |k|² ⟨|ĥ(k, t)|²⟩ = 2 Σ_k |k|² |h₀(k)|² once the cross terms between k and −k
+ * (which oscillate at 2ω) are averaged out.
+ */
+export function meanSquareSlope(h0: ArrayLike<number>, n: number, size: number): number {
+  const dk = (2 * Math.PI) / size;
+  let sum = 0;
+  for (let iy = 0; iy < n; iy++) {
+    const my = iy < n / 2 ? iy : iy - n;
+    for (let ix = 0; ix < n; ix++) {
+      const mx = ix < n / 2 ? ix : ix - n;
+      const cell = iy * n + ix;
+      const re = h0[4 * cell] ?? 0;
+      const im = h0[4 * cell + 1] ?? 0;
+      if (re === 0 && im === 0) continue;
+      sum += (mx * mx + my * my) * (re * re + im * im);
+    }
+  }
+  return 2 * dk * dk * sum;
 }
 
 export function buildGpuOceanData(
@@ -58,6 +87,7 @@ export function buildGpuOceanData(
       h0,
       physics: spec.physics,
       variance: c.variance,
+      slopeVariance: meanSquareSlope(h0, n, spec.size),
     };
   });
   for (const r of sea.regular) if (!r.group) variance += (r.amplitude * r.amplitude) / 2;

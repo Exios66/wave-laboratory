@@ -2,7 +2,10 @@
  * WebGL 2 view of the lab: GPU FFT ocean, vessels, gauges and cameras.
  * World space is z-up; the Three.js scene is y-up via (x, y, z) → (x, z, −y).
  */
+import { gfxForcedFull } from '../core/gfxOverride';
 import * as THREE from 'three';
+import { GpuTimer } from './gpuTimer';
+import { ScenePrepass } from './water/ScenePrepass';
 import { smoothstep } from '../core/mathUtil';
 import { rotate, type Quat, type Vec3 } from '../core/vec';
 import type { GpuOceanData } from '../ocean/gpuData';
@@ -102,15 +105,19 @@ const HULL_COLORS: Record<VisualMaterial, number> = {
   flag: 0x0b0b0b,
 };
 
-/** Per-quality budgets for the effects. */
+/**
+ * Per-quality budgets for the effects: rain streaks, spray particles, cloud octaves, cascades
+ * in the water's normals, cascades with persistent foam maps (0 = instantaneous whitecaps), and
+ * how much of the scene the water shows (0 nothing, 1 refraction and depth, 2 reflections too).
+ */
 const BUDGET: Record<
   OceanQuality,
-  { rain: number; spray: number; octaves: number; detail: number }
+  { rain: number; spray: number; octaves: number; detail: number; foam: number; scene: number }
 > = {
-  low: { rain: 1200, spray: 500, octaves: 3, detail: 3 },
-  medium: { rain: 3500, spray: 1400, octaves: 4, detail: 4 },
-  high: { rain: 7000, spray: 2600, octaves: 5, detail: 4 },
-  ultra: { rain: 11000, spray: 4000, octaves: 6, detail: 4 },
+  low: { rain: 1200, spray: 500, octaves: 3, detail: 3, foam: 0, scene: 0 },
+  medium: { rain: 3500, spray: 1400, octaves: 4, detail: 4, foam: 1, scene: 1 },
+  high: { rain: 7000, spray: 2600, octaves: 5, detail: 4, foam: 2, scene: 2 },
+  ultra: { rain: 11000, spray: 4000, octaves: 6, detail: 4, foam: 3, scene: 2 },
 };
 
 /** Brightness multiplier of the sharp sun glint and sun disc while bloom is on (HDR, > threshold). */
@@ -200,6 +207,7 @@ function attitudeToThree(q: Quat, out: THREE.Quaternion): THREE.Quaternion {
 }
 
 function rendererTier(gl: WebGL2RenderingContext): 'light' | 'full' {
+  if (gfxForcedFull()) return 'full';
   const ext = gl.getExtension('WEBGL_debug_renderer_info');
   const name = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
   const software = /swiftshader|llvmpipe|softpipe|software/i.test(name);
@@ -248,6 +256,7 @@ export class LabRenderer implements LabRendererApi {
   readonly stats: RendererStats = {
     fps: 0,
     frameMs: 0,
+    gpuMs: null,
     drawCalls: 0,
     triangles: 0,
     underwater: false,
@@ -380,6 +389,11 @@ export class LabRenderer implements LabRendererApi {
   private fpsFrames = 0;
   private fpsElapsed = 0;
   private lastFrameAt = 0;
+  private readonly gpuTimer: GpuTimer;
+  private readonly prepass = new ScenePrepass();
+  /** Phones and software GPUs: the scene prepass (refraction, reflections) stays off. */
+  private readonly lightTier: boolean;
+  private readonly bufferSize = new THREE.Vector2();
   private disposed = false;
   private hs = 1;
   private hasOcean = false;
@@ -388,6 +402,8 @@ export class LabRenderer implements LabRendererApi {
   private storminess: number | null = null;
   private calm = 1;
   private calmPrimed = false;
+  /** A whitecap change the foam maps may not have seen yet; see updateWeather. */
+  private whitecapPending = false;
   private wallT = 0;
   private lastRenderAt = 0;
   private readonly vesselPositions: THREE.Vector3[] = [];
@@ -414,6 +430,7 @@ export class LabRenderer implements LabRendererApi {
     });
     if (!gl) throw new Error('WebGL 2 is not available in this browser.');
     const texType = oceanTextureType(gl);
+    this.gpuTimer = new GpuTimer(gl);
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       context: gl,
@@ -434,8 +451,18 @@ export class LabRenderer implements LabRendererApi {
     this.post = new PostStack(this.renderer, this.scene, this.camera, tier);
     this.ocean = new GpuOcean(this.renderer, texType);
     this.quality = tier === 'light' ? 'medium' : 'high';
+    this.lightTier = tier === 'light';
     Object.assign(this.ocean.uniforms, {
       uMeshScale: { value: 1 },
+      uScene: { value: 0 },
+      uReflOn: { value: 0 },
+      uRefrTex: { value: this.prepass.refraction.texture },
+      uRefrDepth: { value: this.prepass.refraction.depthTexture },
+      uReflTex: { value: this.prepass.reflection.texture },
+      uReflMatrix: { value: this.prepass.reflectionMatrix },
+      uResolution: { value: new THREE.Vector2(1, 1) },
+      uDepthParams: { value: new THREE.Vector4(0.2, 40000, 1, 0) },
+      uTanHalf: { value: new THREE.Vector2(1, 1) },
       uDetailCascades: { value: 4 },
       uCloud: { value: 0.25 },
       uFlash: { value: 0 },
@@ -527,6 +554,7 @@ export class LabRenderer implements LabRendererApi {
     this.onRestored = () => {
       this.ocean.restore();
       this.post.restore();
+      this.gpuTimer.reset();
       opts.onContextRestored?.();
     };
     this.onPointerDown = (ev: PointerEvent) => {
@@ -687,6 +715,7 @@ export class LabRenderer implements LabRendererApi {
     const b = BUDGET[this.quality];
     this.ocean.uniforms.uCloudOctaves!.value = b.octaves;
     this.ocean.uniforms.uDetailCascades!.value = b.detail;
+    this.ocean.setFoamCascades(b.foam);
   }
 
   /** Gust modes for the water's cat's paws (same Fourier modes the vessels feel). */
@@ -743,7 +772,18 @@ export class LabRenderer implements LabRendererApi {
     u.uFlash!.value = flash;
     u.uRain!.value = rain;
     u.uWind!.value = wind;
-    u.uWhitecap!.value = whitecapFraction(wind);
+    const whitecap = whitecapFraction(wind);
+    if (whitecap !== u.uWhitecap!.value) {
+      u.uWhitecap!.value = whitecap;
+      this.whitecapPending = true;
+    }
+    // The foam maps integrate the whitecap fraction. While time runs the next scheduled refresh
+    // picks the change up; once paused nothing would (including a change made on the last running
+    // frame, after that frame's ocean update), so force one refresh on the first paused frame.
+    if (dt === 0 && this.whitecapPending) {
+      this.whitecapPending = false;
+      this.ocean.invalidate();
+    }
     u.uSkyTime!.value = t;
     const drift = u.uCloudDrift!.value as THREE.Vector2;
     // Cloud deck coordinates are in km; it drifts at ~1.5× the surface wind.
@@ -1192,12 +1232,11 @@ export class LabRenderer implements LabRendererApi {
     const gl = this.renderer.getContext();
     if (gl.isContextLost()) return;
     const t0 = performance.now();
+    this.gpuTimer.begin();
     const t = this.shownT || this.frame?.t || 0;
     this.poseAt(t);
     this.updateWakes(t);
     this.ocean.update(t);
-    // Count only the scene draw, not the FFT passes, so the numbers are steady frame to frame.
-    this.renderer.info.reset();
     this.tickWall(t0);
     this.updateCamera();
     this.constrainToSurface(t);
@@ -1215,8 +1254,14 @@ export class LabRenderer implements LabRendererApi {
     this.lastRenderT = t;
     this.updateWeather(t, dt);
     this.applyUnderwater();
+    this.drawPrepass();
+    // Count only the scene draw, not the FFT passes or the reflection and depth prepasses, so
+    // the numbers are steady frame to frame.
+    this.renderer.info.reset();
     if (this.post.active) this.post.render();
     else this.renderer.render(this.scene, this.camera);
+    this.gpuTimer.end();
+    this.stats.gpuMs = this.gpuTimer.ms;
     const now = performance.now();
     this.stats.frameMs = now - t0;
     this.stats.drawCalls = this.renderer.info.render.calls;
@@ -1232,6 +1277,38 @@ export class LabRenderer implements LabRendererApi {
       this.fpsFrames = 0;
       this.fpsElapsed = 0;
     }
+  }
+
+  /**
+   * Draw what the water refracts and reflects (see water/ScenePrepass.ts) and point the ocean
+   * shader at it. Skipped at quality low and while the camera is under the sea.
+   */
+  private drawPrepass(): void {
+    const u = this.ocean.uniforms;
+    const level = this.underwater || this.lightTier ? 0 : BUDGET[this.quality].scene;
+    u.uScene!.value = level > 0 ? 1 : 0;
+    u.uReflOn!.value = level > 1 ? 1 : 0;
+    if (level === 0) {
+      this.spray.setSceneDepth(null, this.bufferSize, u.uDepthParams!.value as THREE.Vector4);
+      return;
+    }
+    const cam = this.camera;
+    this.renderer.getDrawingBufferSize(this.bufferSize);
+    this.prepass.setSize(this.bufferSize.x, this.bufferSize.y);
+    this.prepass.render(this.renderer, this.scene, cam, {
+      hide: [this.oceanMesh, this.sky, this.rain.object, this.spray.object, this.smoke.object],
+      reflection: level > 1,
+    });
+    (u.uResolution!.value as THREE.Vector2).copy(this.bufferSize);
+    const reversed = this.renderer.state.buffers.depth.getReversed() ? 1 : 0;
+    (u.uDepthParams!.value as THREE.Vector4).set(cam.near, cam.far, reversed, 0);
+    const tan = Math.tan((cam.fov * Math.PI) / 360);
+    (u.uTanHalf!.value as THREE.Vector2).set(tan * cam.aspect, tan);
+    this.spray.setSceneDepth(
+      this.prepass.refraction.depthTexture,
+      this.bufferSize,
+      u.uDepthParams!.value as THREE.Vector4,
+    );
   }
 
   resize(width: number, height: number, pixelRatio: number): void {
@@ -1459,6 +1536,7 @@ export class LabRenderer implements LabRendererApi {
     this.lighting.dispose();
     this.setProbes([]);
     this.ocean.dispose();
+    this.prepass.dispose();
     this.oceanMesh.geometry.dispose();
     (this.oceanMesh.material as THREE.Material).dispose();
     this.sky.geometry.dispose();
