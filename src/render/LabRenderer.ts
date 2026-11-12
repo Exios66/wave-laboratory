@@ -58,6 +58,22 @@ import {
 } from './scenery/types';
 import { DEFAULT_WILDLIFE_SEED, WildlifeLayer } from './scenery/wildlife';
 import { MarineLifeLayer } from './underwater/marineLife';
+import {
+  applyWindows,
+  CONTAINER_TILE,
+  containerColor,
+  DECK_HEIGHT,
+  detailKit,
+  detailTextures,
+  paintBox,
+  PLATE_TILE,
+  setVesselNight,
+  VesselDetail,
+  WALL_UV,
+  WINDOW_TILES,
+  worldUvs,
+} from './vessel/detail';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { reefsNear, UnderwaterSceneryLayer } from './underwater/scenery';
 import { createRadialOceanGeometry, OCEAN_DENSITY, OCEAN_SLICES } from './scene/oceanMesh';
 import { RainField, SMOKE_STYLE, SprayPool } from './scene/particles';
@@ -187,6 +203,8 @@ interface VesselView {
   foreAft: ForeAftRigView | null;
   /** Anchor chain, drawn in world coordinates while an anchor is down. */
   chain: ChainView;
+  /** Railings, radar, navigation lights (render-only dressing; see vessel/detail.ts). */
+  detail: VesselDetail;
   /** Paint colours as built, darkened toward soot as the ship is damaged. */
   baseColors: THREE.Color[];
   /** Health the paint was last drawn for. */
@@ -1285,6 +1303,7 @@ export class LabRenderer implements LabRendererApi {
     }
     view.group.userData.capsized = state.capsized;
     view.rig?.update(state.sailSet, state.braceDeg, state.apparentWindAngleDeg, state.apparentWind);
+    view.detail.update(this.frame?.t ?? 0);
     view.foreAft?.update(state.sailSet, state.braceDeg, state.jibDeg, state.apparentWind);
     // The chain runs from the anchor to the hawse pipe of the hull as drawn.
     const bow = view.definition.points.bow;
@@ -1499,6 +1518,7 @@ export class LabRenderer implements LabRendererApi {
    * sea, where the sky above is not what lights a hull.
    */
   private updateEnvironment(): void {
+    setVesselNight(this.lightState?.night ?? 0, this.lightState?.dusk ?? 0);
     const on = !this.lightTier && !this.underwater && BUDGET[this.quality].ibl;
     if (!on) {
       this.scene.environment = null;
@@ -1810,6 +1830,11 @@ export class LabRenderer implements LabRendererApi {
     hullMat.vertexColors = true;
     hullMat.roughness = definition.sails ? 0.75 : 0.42;
     hullMat.metalness = definition.sails ? 0 : 0.12;
+    const kit = detailKit(definition.type);
+    if (kit.plating) {
+      hullMat.normalMap = detailTextures().plate;
+      hullMat.normalScale.set(0.35, 0.35);
+    }
     materials.push(hullMat);
     group.add(
       this.meshFromHull(
@@ -1860,6 +1885,18 @@ export class LabRenderer implements LabRendererApi {
           mat.color.set(0xffffff);
           mat.side = THREE.DoubleSide;
         }
+        if (box.material === 'superstructure' && !definition.sails && !definition.foreAft) {
+          applyWindows(mat);
+        }
+        if (box.material === 'cargo') {
+          const tex = detailTextures();
+          mat.map = tex.container;
+          mat.normalMap = tex.containerNormal;
+          mat.normalScale.set(0.6, 0.6);
+          mat.vertexColors = true;
+          mat.color.set(0xffffff);
+          mat.roughness = 0.7;
+        }
         if (box.material === 'flightdeck') {
           const tex = flightDeckTexture();
           textures.push(tex);
@@ -1892,10 +1929,29 @@ export class LabRenderer implements LabRendererApi {
         }
         boxMat = [deckSides, deckSides, mat, deckSides, deckSides, deckSides];
       }
-      const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(box.size.x + grow, sz, box.size.y + grow),
-        boxMat,
-      );
+      const w = box.size.x + grow;
+      const d = box.size.y + grow;
+      const minSide = Math.min(w, sz, d);
+      // Bevelled deckhouses and funnels catch the sun and the sky along their edges.
+      const bevel =
+        (box.material === 'superstructure' || box.material === 'accent') && minSide > 0.6;
+      const geo = bevel
+        ? new RoundedBoxGeometry(w, sz, d, 2, Math.min(0.25, 0.04 * minSide))
+        : new THREE.BoxGeometry(w, sz, d);
+      if (box.material === 'cargo') {
+        worldUvs(geo, CONTAINER_TILE[0], CONTAINER_TILE[1]);
+        paintBox(geo, containerColor(id, box.center));
+      } else if (mat.map && box.material === 'superstructure') {
+        // Window bays on real deckhouses; funnels, masts and lockers stay plain wall.
+        const windows = box.size.z >= 2.2 && box.size.x >= 3 && box.size.y >= 3;
+        if (windows) {
+          worldUvs(geo, DECK_HEIGHT * WINDOW_TILES, DECK_HEIGHT * WINDOW_TILES, WALL_UV);
+        } else {
+          const uv = geo.getAttribute('uv');
+          for (let k = 0; k < uv.count; k++) uv.setXY(k, WALL_UV[0], WALL_UV[1]);
+        }
+      }
+      const mesh = new THREE.Mesh(geo, boxMat);
       mesh.position.set(box.center.x, cz, -box.center.y);
       if (box.yawDeg) mesh.rotation.y = THREE.MathUtils.degToRad(box.yawDeg);
       mesh.userData.pickKind = 'vessel';
@@ -1952,10 +2008,16 @@ export class LabRenderer implements LabRendererApi {
         smokeFrom = { x: box.center.x, y: box.center.y, z };
       }
     }
+    const detail = new VesselDetail(definition, id, {
+      rail: kit.rails === 'wood' ? (palette.wood ?? HULL_COLORS.wood) : 0xd6dbe0,
+    });
+    materials.push(...detail.materials);
+    group.add(detail.group);
     const view: VesselView = {
       id,
       definition,
       group,
+      detail,
       materials,
       textures,
       rig,
@@ -1996,6 +2058,13 @@ export class LabRenderer implements LabRendererApi {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    // Plating coordinates: metres along the hull and up its side, in plate tiles.
+    const uvs = new Float32Array((src.length / 3) * 2);
+    for (let i = 0, j = 0; i < src.length; i += 3, j += 2) {
+      uvs[j] = src[i]! / PLATE_TILE[0];
+      uvs[j + 1] = src[i + 2]! / PLATE_TILE[1];
+    }
+    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
     geo.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, material);
