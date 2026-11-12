@@ -10,7 +10,8 @@ import {
   MARINE_RANGE,
   planMarineLife,
 } from './marineLifeModel';
-import { seabedDepthAt, underwaterFeaturesNear, UW_CELL } from './scenery';
+import { reefsNear, seabedDepthAt, underwaterFeaturesNear } from './scenery';
+import { floorDepthAt, HOME_REEF } from './seafloor';
 
 function frame(over: Partial<SceneryFrame> = {}): SceneryFrame {
   const camera = new THREE.PerspectiveCamera();
@@ -50,35 +51,26 @@ describe('MarineLifeLayer', () => {
     layer.dispose();
   });
 
-  it('finds reef sites by range and places their schools', () => {
+  it('renders a reef school at an in-range site outside the adjacent cells', () => {
     const current = frame();
-    current.camera.position.set(-4, -8, 320); // World (-4, -320).
-    const sites = underwaterFeaturesNear(-4, -320, MARINE_RANGE).map(({ id, x, y, seed }) => ({
-      id,
-      x,
-      y,
-      seed,
-    }));
-    const schools = planMarineLife(-4, -320, 'full', sites).schools.filter(
+    current.camera.position.set(-4, -8, 150); // World (-4, -150), on the home reef.
+    // Default 4000 m sea: the floor here is the home reef, as the underwater scenery draws it.
+    const reefs = reefsNear(-4, -150, { islands: false });
+    const seabed = (x: number, y: number) => seabedDepthAt(x, y, 4000, reefs);
+    const sites = underwaterFeaturesNear(-4, -150, MARINE_RANGE, 4000, reefs)
+      .filter((f) => f.kind !== 'grass' && f.kind !== 'rock')
+      .map(({ id, x, y, seed }) => ({ id, x, y, seed }));
+    const schools = planMarineLife(-4, -150, 'full', sites).schools.filter(
       (school) => school.species === 'reef',
     );
-    // Discovery goes by range, not by the camera's 3×3 cells: sites two or more cells away from
-    // the camera's cell are found too.
-    const cx = Math.floor(-4 / UW_CELL);
-    const cy = Math.floor(-320 / UW_CELL);
-    const far = (id: string) => {
-      const [, ix, iy] = id.split(':').map(Number);
-      return Math.max(Math.abs(ix! - cx), Math.abs(iy! - cy)) >= 2;
-    };
-    expect(sites.some((site) => far(site.id))).toBe(true);
-    // The layer places the last (farthest) planned reef school exactly where the model puts it.
-    const edge = schools[schools.length - 1];
+    // A school around a site beyond the cells next to the camera (cells are 48 m).
+    const edge = schools.find((school) => Math.hypot(school.hx + 4, school.hy + 150) > 60);
     expect(edge).toBeDefined();
     const slot = schools
       .slice(0, schools.indexOf(edge!))
       .reduce((sum, school) => sum + school.count, 0);
     const expected = makeFishPose();
-    fishPose(edge!, 0, current.t, seabedDepthAt, current.hs, expected);
+    fishPose(edge!, 0, current.t, seabed, current.hs, expected);
 
     const layer = new MarineLifeLayer();
     layer.update(current);
@@ -90,6 +82,35 @@ describe('MarineLifeLayer', () => {
     expect(matrix.elements[13]).toBeCloseTo(-expected.depth, 3);
     expect(matrix.elements[14]).toBeCloseTo(-expected.y, 3);
     layer.dispose();
+  });
+
+  it('follows the scenery reefs in a 4000 m sea: fish over the home reef, none in blue water', () => {
+    const reefCount = (layer: MarineLifeLayer) =>
+      (layer.object.getObjectByName('marine-reef') as THREE.InstancedMesh).count;
+    const home = new MarineLifeLayer();
+    const over = frame({ waterDepth: 4000, islands: false });
+    over.camera.position.set(HOME_REEF.x, -8, -HOME_REEF.y);
+    home.update(over);
+    expect(reefCount(home)).toBeGreaterThan(0);
+    // Every fish stays above the reef floor the scenery draws.
+    const mesh = home.object.getObjectByName('marine-reef') as THREE.InstancedMesh;
+    const m = new THREE.Matrix4();
+    for (let i = 0; i < mesh.count; i++) {
+      mesh.getMatrixAt(i, m);
+      const floor = floorDepthAt(m.elements[12], -m.elements[14], 4000, [HOME_REEF]);
+      if (floor !== null) expect(-m.elements[13]).toBeLessThan(floor);
+    }
+    home.dispose();
+
+    const blue = new MarineLifeLayer();
+    const away = frame({ waterDepth: 4000, islands: false });
+    away.camera.position.set(HOME_REEF.x + 5_000, -8, -HOME_REEF.y - 5_000);
+    blue.update(away);
+    expect(reefCount(blue)).toBe(0);
+    // A shallower sea gives the same spot a floor, and the layer replans for it.
+    blue.update({ ...away, waterDepth: 30 });
+    expect(reefCount(blue)).toBeGreaterThan(0);
+    blue.dispose();
   });
 
   it('respects draw-call and instance budgets per tier, with finite matrices', () => {

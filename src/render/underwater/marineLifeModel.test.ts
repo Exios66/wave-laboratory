@@ -6,28 +6,21 @@ import {
   marineInstanceCap,
   marineMinDepth,
   MARINE_BUDGET,
+  MARINE_RANGE,
   MARINE_SPECIES,
   marineSchoolsInCell,
   planMarineLife,
   reefSchoolForSite,
   type ReefSite,
 } from './marineLifeModel';
-import { seabedDepthAt, underwaterFeaturesInCell } from './scenery';
+import { seabedDepthAt, underwaterFeaturesNear } from './scenery';
 
 const TIERS: SceneryTier[] = ['full', 'mid', 'lite'];
 
 function sites(cx: number, cy: number): ReefSite[] {
-  const out: ReefSite[] = [];
-  const ix = Math.floor(cx / 160);
-  const iy = Math.floor(cy / 160);
-  for (let j = iy - 2; j <= iy + 2; j++) {
-    for (let i = ix - 2; i <= ix + 2; i++) {
-      for (const f of underwaterFeaturesInCell(i, j)) {
-        if (f.kind !== 'kelp') out.push({ id: f.id, x: f.x, y: f.y, seed: f.seed });
-      }
-    }
-  }
-  return out;
+  return underwaterFeaturesNear(cx, cy, MARINE_RANGE)
+    .filter((f) => f.kind !== 'kelp')
+    .map((f) => ({ id: f.id, x: f.x, y: f.y, seed: f.seed }));
 }
 
 describe('marine life model', () => {

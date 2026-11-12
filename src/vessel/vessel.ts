@@ -39,7 +39,8 @@ import {
   type ResistanceParams,
 } from './coefficients';
 import { Autopilot, rateLimit } from './control';
-import { DepthKeeper, MIN_KEEL_DEPTH, planeForce, type PlaneForce } from './depthKeeping';
+import { trimSubmarine } from './definition';
+import { DepthKeeper, keelDepthRange, planeForce, type PlaneForce } from './depthKeeping';
 import { DamageModel, steeringFactor, thrustFactor, type DamageCause } from './damage';
 import {
   buildCompartments,
@@ -55,7 +56,7 @@ import {
   type FloodLoads,
 } from './flooding';
 import { HullForces, type RigidState } from './hullForces';
-import { buildHydroModel, CROSS_FLOW_CD, type HydroModel } from './hydroModel';
+import { buildHydroModel, CROSS_FLOW_CD, stripImmersion, type HydroModel } from './hydroModel';
 import { quatToMat3, solveFloating } from './hydrostatics';
 import { meshBounds, meshVolume } from './mesh';
 import { Mooring, mooringGear, type MooringForce } from './mooring';
@@ -235,12 +236,17 @@ export class Vessel {
    * Starts dry and deploys the configured mooring only when available at the field's depth.
    * A submarine starts at equilibrium depth; `config.depthM`, if supplied, sets a keel-depth
    * order through `command` for the controller to approach during subsequent steps.
+   * A submarine's trim tanks are set for the water she is in: her mass is scaled by the ratio
+   * of the environment's water density to the design density, so she is neutrally buoyant at her
+   * design keel depth in any water the schema allows.
    * Errors from the wind provider propagate when initializing sails under autopilot.
-   * @throws {RangeError} If the effective mass matrix is singular during hydrodynamic setup.
+   * @throws {RangeError} If the effective mass matrix is singular during hydrodynamic setup, or
+   *   if a submarine is placed in water too shallow for her minimum keel depth plus the bottom
+   *   clearance.
    */
   constructor(
     id: string,
-    definition: VesselDefinition,
+    baseDefinition: VesselDefinition,
     config: Pick<
       VesselConfig,
       'x' | 'y' | 'headingDeg' | 'speedKn' | 'autopilot' | 'mooring' | 'depthM'
@@ -249,10 +255,20 @@ export class Vessel {
     options: VesselOptions = {},
   ) {
     this.id = id;
+    const rho = field.env.waterDensity;
+    const definition = baseDefinition.submarine
+      ? trimSubmarine(baseDefinition, rho)
+      : baseDefinition;
+    if (definition.submarine && !keelDepthRange(definition.draft, field.env.depth)) {
+      throw new RangeError(
+        `Water ${field.env.depth} m deep is too shallow for submarine "${id}": she needs ` +
+          `${keelDepthRange(definition.draft, Infinity)!.min.toFixed(0)} m of keel depth and ` +
+          '10 m of clearance under the keel.',
+      );
+    }
     this.definition = definition;
     this.wind = options.wind;
     this.damage = new DamageModel(definition.length, options.damage ?? true);
-    const rho = field.env.waterDensity;
     const g = field.env.gravity;
     const hydro = buildHydroModel(definition, rho, g);
     this.hydro = hydro;
@@ -476,8 +492,8 @@ export class Vessel {
    * If combined, repair, flood, and pump orders take effect in that order. Dropping an already
    * deployed anchor adjusts its line length when a length or scope is supplied.
    * Submarine `depthM` orders keel depth below the mean surface [m], independently of
-   * autopilot. It is clamped between min(10 m, loaded draft) and the greater of that minimum
-   * and sea depth minus 10 m. Surface ships ignore depth orders.
+   * autopilot. It is clamped to `keelDepthRange`: between min(10 m, loaded draft) and sea depth
+   * minus 10 m. Surface ships ignore depth orders.
    */
   command(cmd: VesselCommand): void {
     if (cmd.headingDeg !== undefined) this.headingCmdDeg = cmd.headingDeg;
@@ -488,9 +504,9 @@ export class Vessel {
       // Keel depth → CoG depth, within the physical limits: never shallower than the minimum
       // keel depth (crown clear of the swell), and the keel 10 m clear of the bottom.
       const d = this.definition;
-      const lo = Math.min(MIN_KEEL_DEPTH, d.draft);
-      const hi = Math.max(lo, this.seaDepth - 10);
-      this.diver.depthCmd = Math.max(lo, Math.min(hi, cmd.depthM)) - d.kg;
+      // The constructor rejects water too shallow for any order, so the range exists.
+      const r = keelDepthRange(d.draft, this.seaDepth)!;
+      this.diver.depthCmd = Math.max(r.min, Math.min(r.max, cmd.depthM)) - d.kg;
     }
     if (cmd.autopilot !== undefined && cmd.autopilot !== this.autopilotOn) {
       this.autopilotOn = cmd.autopilot;
@@ -621,6 +637,8 @@ export class Vessel {
       fy: R[3]! / fl,
       halfLength: def.length / 2,
       halfBeam: def.beam / 2,
+      zMin: s.pz + this.bodyBox.min.z,
+      zMax: s.pz + this.bodyBox.max.z,
       mass: def.mass,
       vx: R[0]! * s.u + R[1]! * s.v + R[2]! * s.w,
       vy: R[3]! * s.u + R[4]! * s.v + R[5]! * s.w,
@@ -920,11 +938,9 @@ export class Vessel {
       const wy = s.py + R[3]! * x + R[5]! * z;
       const wz = s.pz + R[6]! * x + R[8]! * z;
       const eta = water.surface(wx, wy);
-      // Immersion ratio of the strip: 1 at the design waterline, 0 when the keel emerges.
       const depthBelow = eta - wz; // depth of the sample point
       const draft = hy.stripDraft[i]!;
-      const keelDepth = depthBelow + (z - (hy.waterlineZ - draft));
-      const imm = Math.max(0, Math.min(1, keelDepth / draft));
+      const imm = stripImmersion(hy, z, draft, depthBelow);
       if (imm <= 0) continue;
       water.fluidBelow(wx, wy, Math.min(wz, eta - 0.01 * draft), eta, true);
       // Water velocity/acceleration → body frame.

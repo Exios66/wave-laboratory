@@ -67,6 +67,8 @@ export interface LightingState {
   hemiGround: THREE.Color;
   /** The clear-sky table the sky dome and the ocean read (see sky/atmosphere.ts). */
   skyTable: SkyTable;
+  /** The directional (shadow-casting) light is the moon, not the sun. */
+  lightIsMoon: boolean;
 }
 
 /**
@@ -198,6 +200,7 @@ export class SkyLighting {
     night: 0,
     dusk: 0,
     exposureScale: 1,
+    lightIsMoon: false,
     hemiSky: HEMI_SKY_DAY.clone(),
     hemiGround: HEMI_GROUND_DAY.clone(),
   };
@@ -324,6 +327,7 @@ export class SkyLighting {
     }
     // Sunlight on the scene carries the same colour as the sun's glint on the water.
     if (lightIsSun) sunLight.color.copy(SUN_WHITE).multiply(this.tint);
+    st.lightIsMoon = !lightIsSun;
     return st;
   }
 

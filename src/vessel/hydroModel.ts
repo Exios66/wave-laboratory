@@ -76,8 +76,13 @@ export interface HydroModel {
   /** Strips: station x (body), sample depth z (body), per-strip added mass & damping. */
   stripX: Float64Array;
   stripZ: Float64Array;
-  /** Local design draft of each strip [m] (for its immersion ratio). */
+  /**
+   * Local design draft of each strip [m] (for its immersion ratio). For a submarine, the
+   * section's equivalent radius about the hull axis, where the strip is sampled.
+   */
   stripDraft: Float64Array;
+  /** Strips are sampled on a submarine's hull axis (see `stripImmersion`). */
+  submerged: boolean;
   /** Strip heave/sway added mass [kg] (already × Δx × J) and heave damping [N·s/m]. */
   stripA33: Float64Array;
   stripA22: Float64Array;
@@ -161,10 +166,11 @@ export function buildHydroModel(def: VesselDefinition, rho: number, g: number): 
       // Deeply submerged section: heave added mass A33 = ρ · (section area) (ρπr² for the circular
       // hull, exact far below the surface). Sway uses the equivalent ellipse of the section's own
       // vertical extent, A22 = ρπ (h/2)², which is the circle's value for the bare hull but picks
-      // up the tall sail that a plain area term would miss. Sampled at
-      // the hull axis; the immersion ratio stays 1 while the section is under (tiny nominal draft).
+      // up the tall sail that a plain area term would miss. Sampled at the hull axis, with the
+      // section's equivalent radius as its "draft": the strip is fully immersed while the axis
+      // is at least that deep (see `stripImmersion`).
       stripX[i] = x;
-      stripDraft[i] = 0.5;
+      stripDraft[i] = Math.max(0.5, Math.sqrt(sec.area / Math.PI));
       stripZ[i] = subm.axisZ;
       stripA33[i] = J * rho * sec.area * dx;
       stripA22[i] = J * rho * Math.max(sec.area, Math.PI * (0.5 * sec.height) ** 2) * dx;
@@ -293,6 +299,7 @@ export function buildHydroModel(def: VesselDefinition, rho: number, g: number): 
     stripX,
     stripZ,
     stripDraft,
+    submerged: subm !== null,
     stripA33,
     stripA22,
     stripB33,
@@ -396,4 +403,23 @@ function swap(a: Float64Array, i: number, j: number): void {
   const t = a[i]!;
   a[i] = a[j]!;
   a[j] = t;
+}
+
+/**
+ * Immersion ratio (0–1) of a strip sampled at body z `z`, whose sample point is `depthBelow`
+ * under the local surface. A surface ship's strip is 1 at the design waterline and 0 once its
+ * keel emerges. A submarine's strip is sampled on the hull axis: it is the share of the
+ * section's equivalent diameter (2 × `draft`) under the surface, so it stays 1 at any keel depth
+ * that keeps the hull under and only falls as the hull breaks the surface.
+ */
+export function stripImmersion(
+  hy: Pick<HydroModel, 'submerged' | 'waterlineZ'>,
+  z: number,
+  draft: number,
+  depthBelow: number,
+): number {
+  const r = hy.submerged
+    ? (depthBelow + draft) / (2 * draft)
+    : (depthBelow + (z - (hy.waterlineZ - draft))) / draft;
+  return Math.max(0, Math.min(1, r));
 }

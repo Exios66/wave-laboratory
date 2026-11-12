@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { ExperimentSchema, SCHEMA_VERSION, type VesselConfig } from '../schema/experiment';
 import { env } from '../test/fixtures';
 import type { HullFootprint } from '../vessel/api';
-import { footprintContact, resolveContact } from './collisions';
+import { footprintContact, resolveContact, verticallyClear } from './collisions';
 import { Simulation } from './Simulation';
+import type { Vessel } from '../vessel/vessel';
 import { createSimVessel } from './vessels';
 
 // Real vessel dynamics: allow for a loaded machine running the validation suite alongside.
@@ -193,5 +194,37 @@ describe('vessel collisions in the simulation', () => {
     }
     expect(events).toBeGreaterThan(0);
     for (const v of sim.frame().vessels) expect(v.health).toBe(1);
+  });
+});
+
+describe('vertical separation', () => {
+  it('lets a hull pass under another only when their heights do not overlap', () => {
+    const ship = { ...hull({}), zMin: -21, zMax: 8 };
+    expect(verticallyClear(ship, { ...hull({}), zMin: -40, zMax: -25 })).toBe(true);
+    // A tanker's 21 m draft reaches a submarine at periscope depth.
+    expect(verticallyClear(ship, { ...hull({}), zMin: -15, zMax: 1 })).toBe(false);
+    // Without heights, hulls always meet.
+    expect(verticallyClear(ship, hull({}))).toBe(false);
+  });
+
+  it('a deep-draft tanker hits a submarine at periscope depth; a deep submarine passes under', () => {
+    for (const [depthM, hits] of [
+      [undefined, true],
+      [60, false],
+    ] as const) {
+      const sim = calmSim([
+        vessel('t', 'oil-tanker', { headingDeg: 90 }),
+        vessel('s', 'submarine', { headingDeg: 0, ...(depthM ? { depthM } : {}) }),
+      ]);
+      const sub = sim.vessels.find((v) => v.id === 's')! as Vessel;
+      // A deep order: start her at the ordered depth (the planes would take minutes to get there).
+      if (depthM) sub.applyOffset({ heave: sub.definition.draft - depthM });
+      const before = sub.hullFootprint();
+      sim.stepOnce();
+      const after = sub.hullFootprint();
+      const moved = Math.hypot(after.x - before.x, after.y - before.y);
+      if (hits) expect(moved).toBeGreaterThan(0.1);
+      else expect(moved).toBeLessThan(0.01);
+    }
   });
 });

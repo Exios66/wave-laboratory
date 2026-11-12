@@ -295,6 +295,12 @@ export interface HullFootprint {
   /** Half length and half beam of the hull rectangle [m]. */
   halfLength: number;
   halfBeam: number;
+  /**
+   * World heights of the hull's lowest and highest points (keel, and deck or sail top) [m].
+   * Absent: the hull spans all depths.
+   */
+  zMin?: number;
+  zMax?: number;
   /** Displacement mass [kg]. */
   mass: number;
   /** Horizontal CoG velocity [m/s]. */

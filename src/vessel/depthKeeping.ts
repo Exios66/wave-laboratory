@@ -40,6 +40,22 @@ const MIN_SPEED = 0.4;
 
 /** Shallowest keel depth that can be ordered [m]: the hull crown stays ≥ 3 m under the swell. */
 export const MIN_KEEL_DEPTH = 10;
+/** Clearance kept between the keel and the seabed [m]. */
+export const BOTTOM_CLEARANCE = 10;
+
+/**
+ * Keel depths [m] a submarine of loaded draft `draft` can be ordered to in water `seaDepth`
+ * deep: from min(MIN_KEEL_DEPTH, draft) to the seabed less BOTTOM_CLEARANCE. Null when the sea
+ * is too shallow to meet both.
+ */
+export function keelDepthRange(
+  draft: number,
+  seaDepth: number,
+): { min: number; max: number } | null {
+  const min = Math.min(MIN_KEEL_DEPTH, draft);
+  const max = seaDepth - BOTTOM_CLEARANCE;
+  return max >= min ? { min, max } : null;
+}
 
 /** Closed-loop design: heave and pitch natural frequencies [rad/s] and damping ratios. */
 export const DEPTH_OMEGA = 0.06;

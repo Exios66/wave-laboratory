@@ -93,6 +93,9 @@ export class SkyEnvironment {
     // HDR disc would be blurred into a hot patch on every reflective surface.
     const hdr = u.uSunHdr!.value as number;
     u.uSunHdr!.value = 0;
+    // Lightning is not part of the cached sky: a flash during the capture would stay in it.
+    const flash = u.uFlash?.value as number | undefined;
+    if (u.uFlash) u.uFlash.value = 0;
     const prevTarget = r.getRenderTarget();
     const prevXr = r.xr.enabled;
     r.xr.enabled = false;
@@ -101,6 +104,7 @@ export class SkyEnvironment {
     r.xr.enabled = prevXr;
     r.setRenderTarget(prevTarget);
     u.uSunHdr!.value = hdr;
+    if (u.uFlash) u.uFlash.value = flash;
   }
 
   dispose(): void {

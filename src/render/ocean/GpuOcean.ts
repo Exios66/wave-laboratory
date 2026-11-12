@@ -271,7 +271,10 @@ export class GpuOcean {
    * The maps start empty.
    */
   setFoamCascades(count: number): void {
-    this.foamWanted = Math.max(0, Math.min(MAX_FOAM_CASCADES, Math.floor(count)));
+    const wanted = Math.max(0, Math.min(MAX_FOAM_CASCADES, Math.floor(count)));
+    // Refresh the foam targets on the next frame even if simulated time is paused.
+    if (wanted !== this.foamWanted) this.dirty = true;
+    this.foamWanted = wanted;
     const available = this.data ? Math.min(this.data.cascades.length, MAX_CASCADES) : 0;
     this.foam.setCount(Math.min(this.foamWanted, available));
     if (this.foamWanted === 0) this.uniforms.uFoamCascades!.value = 0;

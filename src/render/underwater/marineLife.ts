@@ -28,7 +28,8 @@ import {
   type ReefSite,
   type SchoolSpec,
 } from './marineLifeModel';
-import { seabedDepthAt, underwaterFeaturesNear } from './scenery';
+import { reefsNear, seabedDepthAt, underwaterFeaturesNear } from './scenery';
+import type { ReefSource } from './seafloor';
 
 /** The plan is rebuilt once the camera is this far [m] from where it was last made. */
 const REPLAN_DISTANCE = 20;
@@ -197,6 +198,13 @@ export class MarineLifeLayer implements SceneryLayer {
   private planX = Number.NaN;
   private planY = Number.NaN;
   private planTier = '';
+  /** Water depth and island state the plan was made for (as the underwater scenery sees them). */
+  private planDepth = Number.NaN;
+  private planIslands = false;
+  private reefs: readonly ReefSource[] = [];
+  /** Seabed under a fish, from the same depth and reefs as the scenery layer. */
+  private readonly seabed = (x: number, y: number): number =>
+    seabedDepthAt(x, y, this.planDepth, this.reefs);
 
   constructor() {
     this.object.name = 'marine-life';
@@ -269,15 +277,26 @@ export class MarineLifeLayer implements SceneryLayer {
     return n;
   }
 
+  /** Reef sites: the coral, kelp and wrecks the underwater scenery draws around the camera. */
   private gatherSites(wx: number, wy: number): void {
     this.sites.length = 0;
-    for (const f of underwaterFeaturesNear(wx, wy, MARINE_RANGE)) {
+    for (const f of underwaterFeaturesNear(wx, wy, MARINE_RANGE, this.planDepth, this.reefs)) {
+      if (f.kind === 'grass' || f.kind === 'rock') continue;
       this.sites.push({ id: f.id, x: f.x, y: f.y, seed: f.seed });
     }
   }
 
-  private replan(wx: number, wy: number, tier: SceneryFrame['tier']): void {
+  private replan(
+    wx: number,
+    wy: number,
+    tier: SceneryFrame['tier'],
+    envDepth: number,
+    islands: boolean,
+  ): void {
     const t = tier ?? 'full';
+    this.planDepth = envDepth;
+    this.planIslands = islands;
+    this.reefs = reefsNear(wx, wy, { islands });
     this.gatherSites(wx, wy);
     this.plan = planMarineLife(wx, wy, t, this.sites);
     this.planX = wx;
@@ -310,7 +329,8 @@ export class MarineLifeLayer implements SceneryLayer {
 
   /**
    * Hide the layer when disabled or above water; otherwise update the visible instances.
-   * Replans when the tier changes or the camera moves more than 20 m horizontally.
+   * Replans when the tier, water depth or island toggle changes, or the camera moves more than
+   * 20 m horizontally.
    */
   update(frame: SceneryFrame): void {
     if (!this.enabled || !frame.underwater) {
@@ -323,12 +343,16 @@ export class MarineLifeLayer implements SceneryLayer {
     const wx = cam.x;
     const wy = -cam.z;
     const tier = frame.tier ?? 'full';
+    const envDepth = frame.waterDepth ?? 4000;
+    const islands = frame.islands === true;
     if (
       this.plan === null ||
       tier !== this.planTier ||
+      envDepth !== this.planDepth ||
+      islands !== this.planIslands ||
       Math.hypot(wx - this.planX, wy - this.planY) > REPLAN_DISTANCE
     ) {
-      this.replan(wx, wy, tier);
+      this.replan(wx, wy, tier, envDepth, islands);
     }
 
     // Time in a bounded range keeps float precision for the shader phase.
@@ -347,7 +371,7 @@ export class MarineLifeLayer implements SceneryLayer {
       let o = 0;
       for (const s of m.schools) {
         for (let i = 0; i < s.count; i++, o += 16) {
-          fishPose(s, i, t, seabedDepthAt, frame.hs, pose);
+          fishPose(s, i, t, this.seabed, frame.hs, pose);
           const yaw = upright ? s.phase : pose.yaw;
           const c = Math.cos(yaw) * pose.scale;
           const sn = Math.sin(yaw) * pose.scale;

@@ -10,7 +10,7 @@ const GPU_DISJOINT_EXT = 0x8fbb;
 export class GpuTimer {
   /** Smoothed GPU frame time [ms], or null before the first result or without the extension. */
   ms: number | null = null;
-  private readonly ext: unknown;
+  private ext: unknown;
   private readonly pending: WebGLQuery[] = [];
   private active: WebGLQuery | null = null;
 
@@ -47,8 +47,12 @@ export class GpuTimer {
     }
   }
 
-  /** Forget queries that belonged to a lost context. */
+  /**
+   * Forget queries that belonged to a lost context, and take the extension again from the
+   * restored one (timing stays off if it is gone).
+   */
   reset(): void {
+    this.ext = this.gl.getExtension('EXT_disjoint_timer_query_webgl2');
     this.pending.length = 0;
     this.active = null;
     this.ms = null;
