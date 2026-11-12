@@ -3,8 +3,16 @@ import type { VesselType } from '../../schema/experiment';
 import type { VesselDefinition, VisualBox } from '../../vessel/api';
 import { createVesselDefinition } from '../../vessel/definition';
 import {
+  CAPTAIN_VARIANTS,
+  OUTFITS,
+  PEOPLE,
   SAILOR_MARGIN,
   SAILOR_VARIANTS,
+  SHEET_SIZE,
+  SKIN_TONES,
+  outfitFor,
+  personFor,
+  sheetCell,
   SailorLayer,
   crewCount,
   deckHeightAt,
@@ -190,6 +198,57 @@ describe('planCrew', () => {
 
   it('is deterministic for a seed', () => {
     expect(planCrew(def('trawler'), 5)).toEqual(planCrew(def('trawler'), 5));
+  });
+});
+
+describe('crew looks', () => {
+  it('dresses each vessel type in its own outfit set', () => {
+    const kind = (t: VesselType) => OUTFITS[outfitFor(t)];
+    expect(kind('patrol-boat')).toBe('navy');
+    expect(kind('aircraft-carrier')).toBe('navy');
+    expect(kind('cargo-ship')).toBe('merchant');
+    expect(kind('oil-tanker')).toBe('merchant');
+    expect(kind('trawler')).toBe('fishing');
+    expect(kind('lifeboat')).toBe('rescue');
+    expect(kind('sloop-yacht')).toBe('yacht');
+    expect(kind('catamaran')).toBe('yacht');
+    expect(kind('pirate-ship')).toBe('pirate');
+    for (const t of TYPES) {
+      for (const m of planCrew(def(t), 7)) expect(m.outfit).toBe(outfitFor(t));
+    }
+  });
+
+  it('gives every crew all six skin tones and crewmates different faces', () => {
+    for (let o = 0; o < OUTFITS.length; o++) {
+      const crew = Array.from({ length: SAILOR_VARIANTS }, (_, v) => personFor(o, v));
+      expect(new Set(crew.map((p) => p.skin)).size).toBe(SKIN_TONES.length);
+      expect(new Set(crew).size).toBe(SAILOR_VARIANTS);
+    }
+    expect(new Set(PEOPLE.map((p) => p.hair)).size).toBeGreaterThanOrEqual(6);
+    const crew = planCrew(def('cargo-ship'), 3).filter((m) => m.role === 'sailor');
+    expect(crew.length).toBeGreaterThan(1);
+    expect(new Set(crew.map((m) => m.variant)).size).toBe(Math.min(crew.length, SAILOR_VARIANTS));
+  });
+
+  it('lays every outfit, look and frame on its own cell of a sheet within 2048 px', () => {
+    expect(SHEET_SIZE.width).toBeLessThanOrEqual(2048);
+    expect(SHEET_SIZE.height).toBeLessThanOrEqual(2048);
+    const seen = new Set<string>();
+    let cols = 0;
+    let rows = 0;
+    for (let o = 0; o < OUTFITS.length; o++) {
+      for (let v = 0; v < SAILOR_VARIANTS + CAPTAIN_VARIANTS; v++) {
+        for (let f = 0; f < 12; f++) {
+          const [c, r] = sheetCell(o, v, f);
+          seen.add(`${c},${r}`);
+          cols = Math.max(cols, c + 1);
+          rows = Math.max(rows, r + 1);
+        }
+      }
+    }
+    expect(seen.size).toBe(OUTFITS.length * (SAILOR_VARIANTS + CAPTAIN_VARIANTS) * 12);
+    expect(cols * 32).toBeLessThanOrEqual(SHEET_SIZE.width);
+    expect(rows * 48).toBeLessThanOrEqual(SHEET_SIZE.height);
   });
 });
 

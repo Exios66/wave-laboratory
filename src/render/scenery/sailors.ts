@@ -13,6 +13,7 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../../core/rng';
 import { smoothstep } from '../../core/mathUtil';
+import type { VesselType } from '../../schema/experiment';
 import type { VesselDefinition, VisualBox } from '../../vessel/api';
 import type { SceneryFrame, SceneryLayer, SceneryVessel } from './types';
 
@@ -65,7 +66,9 @@ export type CrewRole = 'captain' | 'sailor';
 
 export interface CrewMember {
   role: CrewRole;
-  /** Row of the sprite sheet (look: skin, hair, uniform). */
+  /** Outfit set (index into OUTFITS), from the vessel type. */
+  outfit: number;
+  /** Look within the outfit set: crew looks first, then captain looks (see `personFor`). */
   variant: number;
   /** One end of the patrol; the member starts here. */
   home: DeckSpot;
@@ -75,9 +78,33 @@ export interface CrewMember {
   scale: number;
 }
 
-/** Number of sailor looks and captain looks on the sprite sheet. */
-export const SAILOR_VARIANTS = 6;
+/** Number of sailor looks and captain looks per outfit set on the sprite sheet. */
+export const SAILOR_VARIANTS = 8;
 export const CAPTAIN_VARIANTS = 2;
+
+/** Outfit sets: what a vessel type's crew wears (see `garbFor`). */
+export const OUTFITS = ['navy', 'merchant', 'fishing', 'rescue', 'yacht', 'pirate'] as const;
+export type OutfitKind = (typeof OUTFITS)[number];
+
+const OUTFIT_OF: Record<VesselType, OutfitKind> = {
+  'patrol-boat': 'navy',
+  'aircraft-carrier': 'navy',
+  submarine: 'navy',
+  'cargo-ship': 'merchant',
+  'oil-tanker': 'merchant',
+  trawler: 'fishing',
+  lifeboat: 'rescue',
+  'sloop-yacht': 'yacht',
+  catamaran: 'yacht',
+  'pirate-ship': 'pirate',
+  'box-barge': 'merchant',
+  wigley: 'merchant',
+};
+
+/** Index into OUTFITS of the outfit set a vessel type's crew wears. */
+export function outfitFor(type: VesselType): number {
+  return OUTFITS.indexOf(OUTFIT_OF[type]);
+}
 
 /** Extract the walkable deck from a vessel definition. */
 export function deckSurface(def: VesselDefinition): DeckSurface {
@@ -384,6 +411,13 @@ export function planCrew(def: VesselDefinition, seed = 1): CrewMember[] {
   }
 
   const members: CrewMember[] = [];
+  const outfit = outfitFor(def.type);
+  const looks = Array.from({ length: SAILOR_VARIANTS }, (_, i) => i);
+  for (let i = looks.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [looks[i], looks[j]] = [looks[j]!, looks[i]!];
+  }
+  let sailors = 0;
   const reach = Math.min(10, Math.max(2, def.length * 0.12));
   for (const { spot, role } of chosen) {
     const maxLen = role === 'captain' ? Math.min(3.5, reach) : reach;
@@ -408,20 +442,23 @@ export function planCrew(def: VesselDefinition, seed = 1): CrewMember[] {
         break;
       }
     }
+    // Crewmates are different people: deal the crew looks out without repeats (until a crew
+    // larger than the pool wraps around).
     const variant =
       role === 'captain'
         ? SAILOR_VARIANTS + Math.floor(rand() * CAPTAIN_VARIANTS)
-        : Math.floor(rand() * SAILOR_VARIANTS);
-    members.push({ role, variant, home: spot, patrol, scale: 0.94 + 0.1 * rand() });
+        : looks[sailors++ % SAILOR_VARIANTS]!;
+    members.push({ role, outfit, variant, home: spot, patrol, scale: 0.94 + 0.1 * rand() });
   }
   return members;
 }
 
 // ============================================================================ sprite sheet
 
-const CELL_W = 16;
-const CELL_H = 24;
-/** Frames (columns) of the sheet. */
+/** Cell size of one figure on the sheet [px]: twice the old 16 × 24, for faces and cloth detail. */
+const CELL_W = 32;
+const CELL_H = 48;
+/** Frames (columns within an outfit block) of the sheet. */
 export const FRAME = {
   idle: 0,
   blink: 1,
@@ -431,36 +468,124 @@ export const FRAME = {
   look: 10,
   lantern: 11,
 } as const;
-const COLS = 12;
-const ROWS = SAILOR_VARIANTS + CAPTAIN_VARIANTS;
+const FRAMES = 12;
+/** Outfit blocks per sheet row of blocks (keeps the sheet under 2048 px on each side). */
+const BLOCKS_ACROSS = 3;
+/** Rows per outfit block: the crew looks, then the captain looks. */
+const LOOKS_PER_OUTFIT = SAILOR_VARIANTS + CAPTAIN_VARIANTS;
+const COLS = BLOCKS_ACROSS * FRAMES;
+const ROWS = Math.ceil(OUTFITS.length / BLOCKS_ACROSS) * LOOKS_PER_OUTFIT;
+/** Sheet size [px]. */
+export const SHEET_SIZE = { width: COLS * CELL_W, height: ROWS * CELL_H } as const;
 /** Pixel rows from the top of the cap to the soles (the sprite's drawn height). */
-const FIGURE_PX = 22;
+const FIGURE_PX = 44;
 
-interface Look {
-  skin: string;
-  skinShade: string;
-  hair: string;
-  captain: boolean;
-  beard?: string;
+/** Sheet cell (column, row) of an outfit's look `variant` in animation frame `frame`. */
+export function sheetCell(outfit: number, variant: number, frame: number): [number, number] {
+  const block = outfit % OUTFITS.length;
+  return [
+    (block % BLOCKS_ACROSS) * FRAMES + frame,
+    Math.floor(block / BLOCKS_ACROSS) * LOOKS_PER_OUTFIT + variant,
+  ];
 }
 
-const SKINS = [
-  ['#ffdcbd', '#ebb894'],
-  ['#f0bf98', '#d39a72'],
-  ['#c88c60', '#a56f48'],
-  ['#8a5838', '#6a3f26'],
+// ---------------------------------------------------------------------------- people
+
+type HairStyle = 'short' | 'crop' | 'long' | 'bun' | 'curly' | 'bald';
+
+/** Skin tones (base, shade, light), light to deep. */
+export const SKIN_TONES = [
+  ['#ffe0c4', '#efbd98', '#fff0e2'],
+  ['#f3c6a0', '#d9a07a', '#fbdcc0'],
+  ['#d9a274', '#b9804f', '#e9bc92'],
+  ['#b67a4f', '#935c36', '#c99369'],
+  ['#8c5a37', '#6c4024', '#a2704a'],
+  ['#5e3a24', '#452816', '#774d33'],
 ] as const;
 
-const LOOKS: readonly Look[] = [
-  { skin: SKINS[0][0], skinShade: SKINS[0][1], hair: '#6b3e1f', captain: false },
-  { skin: SKINS[1][0], skinShade: SKINS[1][1], hair: '#2a211c', captain: false },
-  { skin: SKINS[2][0], skinShade: SKINS[2][1], hair: '#1d1a18', captain: false },
-  { skin: SKINS[3][0], skinShade: SKINS[3][1], hair: '#141210', captain: false },
-  { skin: SKINS[0][0], skinShade: SKINS[0][1], hair: '#e3b65a', captain: false },
-  { skin: SKINS[1][0], skinShade: SKINS[1][1], hair: '#b5482a', captain: false },
-  { skin: SKINS[1][0], skinShade: SKINS[1][1], hair: '#a3a3a3', captain: true, beard: '#e4e4e4' },
-  { skin: SKINS[2][0], skinShade: SKINS[2][1], hair: '#1d1a18', captain: true },
+export interface Person {
+  skin: number;
+  hair: HairStyle;
+  hairColor: string;
+  beard?: string;
+  /** Broader shoulders and torso. */
+  broad: boolean;
+}
+
+/**
+ * The people crews are drawn from: every skin tone, hair style and build, men and women. Skin
+ * tones repeat in a period of six, so any eight consecutive entries show all six.
+ */
+export const PEOPLE: readonly Person[] = [
+  { skin: 0, hair: 'short', hairColor: '#6b3e1f', broad: true },
+  { skin: 3, hair: 'bun', hairColor: '#1d1a18', broad: false },
+  { skin: 5, hair: 'crop', hairColor: '#141210', broad: true },
+  { skin: 1, hair: 'long', hairColor: '#e3b65a', broad: false },
+  { skin: 4, hair: 'curly', hairColor: '#1d1a18', broad: false },
+  { skin: 2, hair: 'short', hairColor: '#2a211c', broad: true, beard: '#2a211c' },
+  { skin: 0, hair: 'curly', hairColor: '#b5482a', broad: false },
+  { skin: 3, hair: 'crop', hairColor: '#2a1d16', broad: true },
+  { skin: 5, hair: 'long', hairColor: '#141210', broad: false },
+  { skin: 1, hair: 'short', hairColor: '#8a5a2b', broad: true, beard: '#7a4e25' },
+  { skin: 4, hair: 'bun', hairColor: '#2a1d16', broad: false },
+  { skin: 2, hair: 'long', hairColor: '#3a2618', broad: false },
+  { skin: 0, hair: 'short', hairColor: '#a3a3a3', broad: true, beard: '#e4e4e4' },
+  { skin: 3, hair: 'bald', hairColor: '#1d1a18', broad: true, beard: '#1b1715' },
+  { skin: 5, hair: 'bun', hairColor: '#141210', broad: false },
+  { skin: 1, hair: 'crop', hairColor: '#c08a3e', broad: true },
+  { skin: 4, hair: 'short', hairColor: '#141210', broad: true },
+  { skin: 2, hair: 'curly', hairColor: '#1d1a18', broad: false },
 ];
+
+/**
+ * Person drawn for an outfit's look `variant`. A crew's eight looks are eight consecutive people
+ * (so every skin tone is aboard), starting at a different place for each outfit set.
+ */
+export function personFor(outfit: number, variant: number): Person {
+  const n = PEOPLE.length;
+  const i =
+    variant < SAILOR_VARIANTS
+      ? (variant + outfit * 5) % n
+      : ((variant - SAILOR_VARIANTS) * 7 + outfit * 3 + 12) % n;
+  return PEOPLE[i]!;
+}
+
+// ---------------------------------------------------------------------------- outfits
+
+type Hat =
+  'sailor' | 'peaked' | 'hardhat' | 'souwester' | 'beanie' | 'bandana' | 'cap' | 'tricorn' | 'none';
+
+interface Garb {
+  shirt: string;
+  shirtShade: string;
+  trousers: string;
+  trousersShade: string;
+  shoe: string;
+  cuff: string;
+  hat: Hat;
+  hatColor: string;
+  hatShade: string;
+  hatTrim?: string;
+  /** Short sleeves (forearms show) and shorts (calves show). */
+  shortSleeves?: boolean;
+  shorts?: boolean;
+  /** Tall boots over the trousers. */
+  boots?: boolean;
+  /** Torso details. */
+  sailorCollar?: boolean;
+  stripes?: string;
+  vest?: { color: string; band: string };
+  zip?: boolean;
+  buttons?: string;
+  epaulettes?: { color: string; stripe: string };
+  tie?: string;
+  shirtFront?: string;
+  sash?: string;
+  belt?: string;
+  coatTails?: boolean;
+  ribbed?: boolean;
+  polo?: string;
+}
 
 const C = {
   white: '#f7f9fc',
@@ -471,13 +596,235 @@ const C = {
   gold: '#f2c23c',
   shoe: '#262a33',
   outline: '#151a29',
-  cheek: '#f39a9a',
   eye: '#1a1c28',
+  eyeWhite: '#f4f1ea',
   red: '#d94848',
   visor: '#0f1220',
   lanternFrame: '#5b4526',
   lanternGlass: '#ffe08a',
 } as const;
+
+const pick = <T>(list: readonly T[], k: number): T => list[k % list.length]!;
+
+/** What a crew member of an outfit set wears; `k` varies colours between crewmates. */
+function garbFor(kind: OutfitKind, captain: boolean, k: number): Garb {
+  switch (kind) {
+    case 'navy':
+      return captain
+        ? {
+            shirt: C.navy,
+            shirtShade: C.navyShade,
+            trousers: C.navy,
+            trousersShade: C.navyShade,
+            shoe: C.shoe,
+            cuff: C.gold,
+            hat: 'peaked',
+            hatColor: C.white,
+            hatShade: C.whiteShade,
+            hatTrim: C.gold,
+            buttons: C.gold,
+            epaulettes: { color: C.navyShade, stripe: C.gold },
+            shirtFront: C.white,
+            tie: '#101520',
+          }
+        : {
+            shirt: C.white,
+            shirtShade: C.whiteShade,
+            trousers: C.white,
+            trousersShade: C.whiteShade,
+            shoe: C.shoe,
+            cuff: C.blue,
+            hat: 'sailor',
+            hatColor: C.white,
+            hatShade: C.whiteShade,
+            hatTrim: C.blue,
+            sailorCollar: true,
+          };
+    case 'merchant': {
+      if (captain)
+        return {
+          shirt: C.white,
+          shirtShade: C.whiteShade,
+          trousers: '#1f2a44',
+          trousersShade: '#151d31',
+          shoe: C.shoe,
+          cuff: C.white,
+          hat: 'peaked',
+          hatColor: C.white,
+          hatShade: C.whiteShade,
+          hatTrim: '#1f2a44',
+          shortSleeves: true,
+          epaulettes: { color: '#111522', stripe: C.gold },
+          tie: '#1f2a44',
+          belt: '#1a1a1a',
+        };
+      const suit = pick<readonly [string, string]>(
+        [
+          ['#e8702a', '#bf5719'],
+          ['#2f5fa8', '#234a85'],
+          ['#d84b2a', '#ad3a1f'],
+          ['#3f6f3a', '#2f552c'],
+        ],
+        k,
+      );
+      const helmet = pick<readonly [string, string]>(
+        [
+          ['#f6f6f2', '#c9cbc6'],
+          ['#f5c518', '#c99d0e'],
+          ['#f08a24', '#c46c15'],
+          ['#2f7bd8', '#235fa8'],
+        ],
+        k + 1,
+      );
+      return {
+        shirt: suit[0],
+        shirtShade: suit[1],
+        trousers: suit[0],
+        trousersShade: suit[1],
+        shoe: '#3b2a1c',
+        cuff: suit[1],
+        hat: 'hardhat',
+        hatColor: helmet[0],
+        hatShade: helmet[1],
+        vest: k % 3 === 2 ? undefined : { color: '#d6f03c', band: '#e8eef2' },
+        zip: true,
+        boots: true,
+      };
+    }
+    case 'fishing': {
+      if (captain)
+        return {
+          shirt: '#2b3a55',
+          shirtShade: '#1e2a40',
+          trousers: '#3a3a3a',
+          trousersShade: '#2a2a2a',
+          shoe: '#2d4a2c',
+          cuff: '#1e2a40',
+          hat: 'beanie',
+          hatColor: '#7a2f2f',
+          hatShade: '#5c2222',
+          ribbed: true,
+          boots: true,
+        };
+      const coat = pick<readonly [string, string]>(
+        [
+          ['#f5c518', '#c99d0e'],
+          ['#f07f1e', '#c66412'],
+          ['#f5c518', '#c99d0e'],
+          ['#2f8a5a', '#236a45'],
+        ],
+        k,
+      );
+      const souwester = k % 2 === 0;
+      return {
+        shirt: coat[0],
+        shirtShade: coat[1],
+        trousers: coat[0],
+        trousersShade: coat[1],
+        shoe: '#ece9e0',
+        cuff: coat[1],
+        hat: souwester ? 'souwester' : 'beanie',
+        hatColor: souwester ? coat[0] : pick(['#2b3a55', '#5a5a5a', '#7a2f2f'], k),
+        hatShade: souwester ? coat[1] : '#1e2430',
+        buttons: '#3a2a1a',
+        boots: true,
+      };
+    }
+    case 'rescue':
+      return {
+        shirt: captain ? '#1f2a44' : '#c8352e',
+        shirtShade: captain ? '#151d31' : '#9e2722',
+        trousers: captain ? '#1f2a44' : '#c8352e',
+        trousersShade: captain ? '#151d31' : '#9e2722',
+        shoe: '#202020',
+        cuff: '#202020',
+        hat: 'hardhat',
+        hatColor: captain ? '#f5c518' : '#f6f6f2',
+        hatShade: captain ? '#c99d0e' : '#c9cbc6',
+        vest: { color: '#f5c518', band: '#e8eef2' },
+        boots: true,
+      };
+    case 'yacht': {
+      if (captain)
+        return {
+          shirt: '#1f2a44',
+          shirtShade: '#151d31',
+          trousers: '#e9e3d2',
+          trousersShade: '#c9c1aa',
+          shoe: '#7a5532',
+          cuff: '#1f2a44',
+          hat: 'cap',
+          hatColor: C.white,
+          hatShade: C.whiteShade,
+          hatTrim: '#1f2a44',
+          shortSleeves: true,
+          shorts: true,
+          polo: C.white,
+          belt: '#5a3a22',
+        };
+      const polo = pick<readonly [string, string]>(
+        [
+          ['#e14b5a', '#b83845'],
+          ['#2fa3a0', '#21807d'],
+          ['#f2f2ee', '#c9cbc6'],
+          ['#f2b33d', '#c88f22'],
+          ['#5b7fd6', '#4262b0'],
+        ],
+        k,
+      );
+      return {
+        shirt: polo[0],
+        shirtShade: polo[1],
+        trousers: k % 2 === 0 ? '#d9c79c' : '#1f2a44',
+        trousersShade: k % 2 === 0 ? '#b8a57a' : '#151d31',
+        shoe: k % 2 === 0 ? '#f2f2ee' : '#7a5532',
+        cuff: polo[1],
+        hat: k % 3 === 1 ? 'none' : 'cap',
+        hatColor: pick(['#1f2a44', '#f2f2ee', '#c8352e'], k),
+        hatShade: '#141a2c',
+        shortSleeves: true,
+        shorts: true,
+        polo: C.white,
+      };
+    }
+    case 'pirate': {
+      if (captain)
+        return {
+          shirt: '#8e1f24',
+          shirtShade: '#6a161a',
+          trousers: '#2a2018',
+          trousersShade: '#1c150f',
+          shoe: '#141414',
+          cuff: C.gold,
+          hat: 'tricorn',
+          hatColor: '#1a1a1a',
+          hatShade: '#0d0d0d',
+          hatTrim: C.gold,
+          buttons: C.gold,
+          shirtFront: '#f2ead8',
+          coatTails: true,
+          belt: '#3a2a1a',
+          boots: true,
+        };
+      return {
+        shirt: '#efe8d8',
+        shirtShade: '#cfc5ae',
+        trousers: pick(['#5a4330', '#3a3a46', '#6b5a3a'], k),
+        trousersShade: '#2e2219',
+        shoe: '#1a1a1a',
+        cuff: '#cfc5ae',
+        hat: k % 4 === 3 ? 'none' : 'bandana',
+        hatColor: pick(['#c8352e', '#1f2a44', '#2f6b3a', '#d7a12a'], k),
+        hatShade: '#4a1414',
+        stripes: pick(['#c8352e', '#1f2a44', '#1a1a1a'], k),
+        sash: pick(['#c8352e', '#d7a12a', '#2f5fa8'], k + 1),
+        boots: k % 2 === 0,
+      };
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------- poses
 
 type Arm = 'down' | 'fwd' | 'up' | 'upOut' | 'brow' | 'out' | 'lantern';
 type Legs = 'stand' | 'stride' | 'passL' | 'passR' | 'wide';
@@ -511,211 +858,431 @@ const POSES: readonly Pose[] = [
 
 type Paint = (x: number, y: number, w: number, h: number, color: string) => void;
 
-function drawFigure(paint: Paint, look: Look, pose: Pose): void {
-  const cloth = look.captain ? C.navy : C.white;
-  const clothShade = look.captain ? C.navyShade : C.whiteShade;
-  const trousers = look.captain ? C.navy : C.white;
-  const trouserShade = look.captain ? C.navyShade : C.whiteShade;
-  const cuff = look.captain ? C.gold : C.blue;
-  const sx = pose.sway ?? 0;
-  const dy = pose.dy;
+/**
+ * Draw one figure in a 32 × 48 cell. Coordinates are sheet pixels; the silhouette keeps the
+ * old 16 × 24 figure's proportions at twice the resolution, which leaves room for eye whites,
+ * brows, a nose, shaded cloth, buttons, belts, collars and proper hats.
+ */
+function drawFigure(paint: Paint, person: Person, g: Garb, pose: Pose): void {
+  const [skin, skinShade, skinLight] = SKIN_TONES[person.skin]!;
+  const sx = 2 * (pose.sway ?? 0);
+  const X = sx;
+  const Y = 2 * pose.dy;
+  const wide = person.broad ? 1 : 0;
 
-  // ---- legs
+  // ---- legs: trousers (or shorts over bare calves), then shoes or boots
   const leg = (x: number, lift: number, toe: number): void => {
-    paint(x, 19, 2, 3 - lift, trousers);
-    paint(x + 1, 19, 1, 3 - lift, trouserShade);
-    paint(x - 1 + toe, 22 - lift, 3, 2, C.shoe);
+    const top = 38;
+    const len = 6 - 2 * lift;
+    if (g.shorts) {
+      paint(x, top, 4, 3, g.trousers);
+      paint(x + 3, top, 1, 3, g.trousersShade);
+      paint(x, top + 3, 4, len - 3, skin);
+      paint(x + 3, top + 3, 1, len - 3, skinShade);
+    } else {
+      paint(x, top, 4, len, g.trousers);
+      paint(x + 3, top, 1, len, g.trousersShade);
+    }
+    const foot = 44 - 2 * lift;
+    if (g.boots) {
+      paint(x, foot - 3, 4, 3, g.shoe);
+      paint(x, foot - 3, 4, 1, g.trousersShade);
+    }
+    paint(x - 2 + 2 * toe, foot, 6, 4, g.shoe);
+    paint(x - 1 + 2 * toe, foot, 3, 1, lighten(g.shoe));
   };
   switch (pose.legs) {
     case 'stand':
-      leg(5, 0, 0);
-      leg(9, 0, 1);
+      leg(10, 0, 0);
+      leg(18, 0, 1);
       break;
     case 'stride':
-      leg(4, 0, 1);
-      leg(10, 0, 1);
+      leg(8, 0, 1);
+      leg(20, 0, 1);
       break;
     case 'passL':
-      leg(6, 1, 1);
-      leg(8, 0, 1);
+      leg(12, 1, 1);
+      leg(16, 0, 1);
       break;
     case 'passR':
-      leg(6, 0, 1);
-      leg(8, 1, 1);
+      leg(12, 0, 1);
+      leg(16, 1, 1);
       break;
-    case 'wide':
-      paint(4 + sx, 19, 2, 1, trousers);
-      paint(3 + sx, 20, 2, 2, trousers);
-      paint(10 + sx, 19, 2, 1, trousers);
-      paint(11 + sx, 20, 2, 2, trousers);
-      paint(2 + sx, 22, 3, 2, C.shoe);
-      paint(11 + sx, 22, 3, 2, C.shoe);
+    case 'wide': {
+      const t = g.shorts ? skin : g.trousers;
+      paint(8 + sx, 38, 4, 2, g.trousers);
+      paint(6 + sx, 40, 4, 4, t);
+      paint(20 + sx, 38, 4, 2, g.trousers);
+      paint(22 + sx, 40, 4, 4, t);
+      paint(9 + sx, 40, 1, 4, g.shorts ? skinShade : g.trousersShade);
+      paint(25 + sx, 40, 1, 4, g.shorts ? skinShade : g.trousersShade);
+      paint(4 + sx, 44, 6, 4, g.shoe);
+      paint(22 + sx, 44, 6, 4, g.shoe);
       break;
+    }
   }
 
-  const X = sx;
-  const Y = dy;
   // ---- torso
-  paint(4 + X, 13 + Y, 8, 6, cloth);
-  paint(11 + X, 14 + Y, 1, 5, clothShade);
-  if (look.captain) {
-    paint(7 + X, 13 + Y, 2, 2, C.white);
-    paint(7 + X, 14 + Y, 2, 1, C.red);
-    paint(4 + X, 13 + Y, 1, 1, C.gold);
-    paint(11 + X, 13 + Y, 1, 1, C.gold);
-    paint(6 + X, 15 + Y, 1, 1, C.gold);
-    paint(9 + X, 15 + Y, 1, 1, C.gold);
-    paint(6 + X, 17 + Y, 1, 1, C.gold);
-    paint(9 + X, 17 + Y, 1, 1, C.gold);
-  } else {
-    paint(4 + X, 13 + Y, 8, 2, C.blue);
-    paint(4 + X, 14 + Y, 8, 1, C.white);
-    paint(4 + X, 14 + Y, 1, 1, C.blue);
-    paint(11 + X, 14 + Y, 1, 1, C.blue);
-    paint(7 + X, 13 + Y, 2, 1, look.skin);
-    paint(7 + X, 15 + Y, 2, 1, C.red);
-    paint(7 + X, 16 + Y, 1, 1, C.red);
+  const tx = 8 - wide;
+  const tw = 16 + 2 * wide;
+  paint(tx + X, 26 + Y, tw, 12, g.shirt);
+  paint(tx + tw - 2 + X, 27 + Y, 2, 11, g.shirtShade);
+  paint(tx + X, 27 + Y, 1, 10, lighten(g.shirt));
+  if (g.coatTails) {
+    paint(tx + X, 36 + Y, 4, 6, g.shirt);
+    paint(tx + tw - 4 + X, 36 + Y, 4, 6, g.shirtShade);
+    paint(tx + 4 + X, 36 + Y, 1, 4, g.cuff);
+    paint(tx + tw - 5 + X, 36 + Y, 1, 4, g.cuff);
+  }
+  if (g.stripes) {
+    for (let r = 28; r < 38; r += 3) paint(tx + X, r + Y, tw, 1, g.stripes);
+  }
+  if (g.ribbed) {
+    for (let c = tx + 2; c < tx + tw - 2; c += 3) paint(c + X, 30 + Y, 1, 7, g.shirtShade);
+    paint(tx + X, 26 + Y, tw, 2, g.shirtShade);
+  }
+  if (g.shirtFront) {
+    paint(14 + X, 26 + Y, 4, 6, g.shirtFront);
+    if (g.tie) paint(15 + X, 27 + Y, 2, 6, g.tie);
+    else paint(14 + X, 26 + Y, 4, 2, lighten(g.shirtFront));
+  } else if (g.tie) {
+    paint(14 + X, 26 + Y, 4, 2, skin);
+    paint(15 + X, 27 + Y, 2, 7, g.tie);
+  }
+  if (g.polo) {
+    paint(12 + X, 26 + Y, 8, 2, g.polo);
+    paint(15 + X, 26 + Y, 2, 4, skin);
+    paint(16 + X, 28 + Y, 1, 3, g.shirtShade);
+  }
+  if (g.sailorCollar) {
+    paint(tx + X, 26 + Y, tw, 4, C.blue);
+    paint(tx + 1 + X, 28 + Y, tw - 2, 1, C.white);
+    paint(14 + X, 26 + Y, 4, 2, skin);
+    paint(15 + X, 28 + Y, 2, 1, skin);
+    paint(14 + X, 30 + Y, 4, 2, C.red);
+    paint(15 + X, 32 + Y, 2, 2, C.red);
+  }
+  if (g.vest) {
+    paint(tx + 1 + X, 27 + Y, 5, 10, g.vest.color);
+    paint(tx + tw - 6 + X, 27 + Y, 5, 10, g.vest.color);
+    paint(tx + 1 + X, 32 + Y, 5, 1, g.vest.band);
+    paint(tx + tw - 6 + X, 32 + Y, 5, 1, g.vest.band);
+    paint(tx + 2 + X, 27 + Y, 1, 10, g.vest.band);
+    paint(tx + tw - 3 + X, 27 + Y, 1, 10, g.vest.band);
+  }
+  if (g.zip) paint(16 + X, 27 + Y, 1, 11, g.shirtShade);
+  if (g.buttons) {
+    for (const r of [29, 32, 35]) {
+      paint(13 + X, r + Y, 1, 1, g.buttons);
+      paint(18 + X, r + Y, 1, 1, g.buttons);
+    }
+  }
+  if (g.epaulettes) {
+    paint(tx - 1 + X, 26 + Y, 5, 2, g.epaulettes.color);
+    paint(tx + tw - 4 + X, 26 + Y, 5, 2, g.epaulettes.color);
+    paint(tx - 1 + X, 27 + Y, 5, 1, g.epaulettes.stripe);
+    paint(tx + tw - 4 + X, 27 + Y, 5, 1, g.epaulettes.stripe);
+  }
+  if (g.belt) {
+    paint(tx + X, 36 + Y, tw, 2, g.belt);
+    paint(15 + X, 36 + Y, 2, 2, C.gold);
+  }
+  if (g.sash) {
+    paint(tx + X, 35 + Y, tw, 3, g.sash);
+    paint(tx + 2 + X, 38 + Y, 2, 4, g.sash);
   }
 
-  // ---- arms (sleeve + cuff + hand); `side` −1 = left (low x), +1 = right
+  // ---- arms (sleeve, cuff and hand); `side` −1 = left (low x), +1 = right
+  const hand = (x: number, y: number, w = 4, h = 2): void => {
+    paint(x, y, w, h, skin);
+    paint(x, y + h - 1, w, 1, skinShade);
+  };
+  const sleeve = (x: number, y: number, w: number, h: number): void => {
+    if (g.shortSleeves && h > 3) {
+      paint(x, y, w, 3, g.shirt);
+      paint(x, y + 3, w, h - 3, skin);
+      paint(x + w - 1, y + 3, 1, h - 3, skinShade);
+    } else {
+      paint(x, y, w, h, g.shirt);
+      paint(x + w - 1, y, 1, h, g.shirtShade);
+    }
+  };
+  const cuff = (x: number, y: number, w: number): void => {
+    if (!g.shortSleeves) paint(x, y, w, 2, g.cuff);
+  };
   const arm = (kind: Arm, side: number): void => {
-    const sh = side < 0 ? 2 : 12; // shoulder column
-    const out = side < 0 ? -1 : 1;
+    const sh = side < 0 ? 4 - wide : 24 + wide; // shoulder column
+    const out = side < 0 ? -2 : 2;
     switch (kind) {
       case 'down':
-        paint(sh + X, 13 + Y, 2, 4, cloth);
-        paint(sh + X, 17 + Y, 2, 1, cuff);
-        paint(sh + X, 18 + Y, 2, 1, look.skin);
+        sleeve(sh + X, 26 + Y, 4, 8);
+        cuff(sh + X, 34 + Y, 4);
+        hand(sh + X, 36 + Y);
         break;
       case 'fwd':
-        paint(sh + X, 13 + Y, 2, 3, cloth);
-        paint(sh + out + X, 15 + Y, 2, 1, cloth);
-        paint(sh + out + X, 16 + Y, 2, 1, cuff);
-        paint(sh + out + X, 17 + Y, 2, 1, look.skin);
+        sleeve(sh + X, 26 + Y, 4, 6);
+        sleeve(sh + out + X, 30 + Y, 4, 2);
+        cuff(sh + out + X, 32 + Y, 4);
+        hand(sh + out + X, 34 + Y);
         break;
       case 'up':
-        paint(sh + X, 13 + Y, 2, 1, cloth);
-        paint(sh + X, 9 + Y, 2, 4, cloth);
-        paint(sh + X, 8 + Y, 2, 1, cuff);
-        paint(sh + X, 6 + Y, 2, 2, look.skin);
+        paint(sh + X, 26 + Y, 4, 2, g.shirt);
+        sleeve(sh + X, 18 + Y, 4, 8);
+        cuff(sh + X, 16 + Y, 4);
+        hand(sh + X, 12 + Y, 4, 4);
         break;
       case 'upOut':
-        paint(sh + X, 12 + Y, 2, 2, cloth);
-        paint(sh + out + X, 9 + Y, 2, 3, cloth);
-        paint(sh + out + X, 8 + Y, 2, 1, cuff);
-        paint(sh + out + X, 6 + Y, 2, 2, look.skin);
+        paint(sh + X, 24 + Y, 4, 4, g.shirt);
+        sleeve(sh + out + X, 18 + Y, 4, 6);
+        cuff(sh + out + X, 16 + Y, 4);
+        hand(sh + out + X, 12 + Y, 4, 4);
         break;
       case 'brow':
-        paint(sh + X, 10 + Y, 2, 4, cloth);
-        paint(sh + X, 9 + Y, 2, 1, cuff);
-        paint(sh - 3 + X, 8 + Y, 4, 1, look.skin);
+        sleeve(sh + X, 20 + Y, 4, 8);
+        cuff(sh + X, 18 + Y, 4);
+        hand(sh - 6 + X, 16 + Y, 8, 2);
         break;
       case 'out':
-        paint(sh + X, 13 + Y, 2, 2, cloth);
-        paint(sh + out + X, 15 + Y, 2, 1, cloth);
-        paint(sh + out + X, 16 + Y, 2, 1, cuff);
-        paint(sh + out + X, 17 + Y, 2, 1, look.skin);
+        sleeve(sh + X, 26 + Y, 4, 4);
+        sleeve(sh + out + X, 30 + Y, 4, 2);
+        cuff(sh + out + X, 32 + Y, 4);
+        hand(sh + out + X, 34 + Y);
         break;
       case 'lantern':
-        paint(sh + X, 13 + Y, 2, 4, cloth);
-        paint(sh + X, 17 + Y, 2, 1, cuff);
-        paint(sh + X, 18 + Y, 2, 1, look.skin);
-        paint(sh - 1 + X, 19 + Y, 3, 1, C.lanternFrame);
-        paint(sh - 1 + X, 20 + Y, 3, 2, C.lanternGlass);
-        paint(sh - 1 + X, 22 + Y, 3, 1, C.lanternFrame);
+        sleeve(sh + X, 26 + Y, 4, 8);
+        cuff(sh + X, 34 + Y, 4);
+        hand(sh + X, 36 + Y);
+        paint(sh - 2 + X, 38 + Y, 6, 2, C.lanternFrame);
+        paint(sh - 2 + X, 40 + Y, 6, 4, C.lanternGlass);
+        paint(sh - 1 + X, 41 + Y, 1, 2, '#fff6cf');
+        paint(sh - 2 + X, 44 + Y, 6, 2, C.lanternFrame);
         break;
     }
   };
-  if (pose.armL !== 'brow' && pose.armL !== 'up' && pose.armL !== 'upOut') arm(pose.armL, -1);
-  if (pose.armR !== 'brow' && pose.armR !== 'up' && pose.armR !== 'upOut') arm(pose.armR, 1);
+  const raised = (a: Arm): boolean => a === 'brow' || a === 'up' || a === 'upOut';
+  if (!raised(pose.armL)) arm(pose.armL, -1);
+  if (!raised(pose.armR)) arm(pose.armR, 1);
 
-  // ---- head (rounded block)
-  paint(4 + X, 5 + Y, 8, 8, look.skin);
-  paint(3 + X, 6 + Y, 10, 6, look.skin);
-  paint(12 + X, 7 + Y, 1, 4, look.skinShade);
-  // hair under the cap
-  paint(4 + X, 6 + Y, 8, 1, look.hair);
-  paint(3 + X, 6 + Y, 1, 3, look.hair);
-  paint(12 + X, 6 + Y, 1, 3, look.hair);
-  const f = pose.face + X;
-  // eyes
-  switch (pose.eyes) {
-    case 'open':
-      paint(5 + f, 9 + Y, 1, 2, C.eye);
-      paint(10 + f, 9 + Y, 1, 2, C.eye);
-      break;
-    case 'blink':
-      paint(5 + f, 10 + Y, 1, 1, C.eye);
-      paint(10 + f, 10 + Y, 1, 1, C.eye);
-      break;
-    case 'happy':
-      paint(4 + f, 10 + Y, 1, 1, C.eye);
-      paint(5 + f, 9 + Y, 1, 1, C.eye);
-      paint(6 + f, 10 + Y, 1, 1, C.eye);
-      paint(9 + f, 10 + Y, 1, 1, C.eye);
-      paint(10 + f, 9 + Y, 1, 1, C.eye);
-      paint(11 + f, 10 + Y, 1, 1, C.eye);
-      break;
-    case 'squint':
-      paint(4 + f, 10 + Y, 2, 1, C.eye);
-      paint(10 + f, 10 + Y, 2, 1, C.eye);
-      break;
+  // ---- hair behind the head (long hair falls to the shoulders)
+  const hc = person.hairColor;
+  const hcShade = darken(hc);
+  if (person.hair === 'long') {
+    paint(5 + X, 14 + Y, 4, 14, hc);
+    paint(23 + X, 14 + Y, 4, 14, hc);
+    paint(25 + X, 16 + Y, 2, 12, hcShade);
   }
-  if (look.beard) {
-    paint(4 + X, 11 + Y, 8, 2, look.beard);
-    paint(3 + X, 10 + Y, 1, 2, look.beard);
-    paint(12 + X, 10 + Y, 1, 2, look.beard);
-    paint(7 + f, 11 + Y, 2, 1, '#b86a5e');
-  } else {
-    paint(4 + f, 11 + Y, 1, 1, C.cheek);
-    paint(11 + f, 11 + Y, 1, 1, C.cheek);
-    paint(7 + f, 12 + Y, 2, 1, pose.eyes === 'happy' ? '#b8434a' : '#c27a6a');
+  if (person.hair === 'bun') {
+    paint(22 + X, 8 + Y, 6, 6, hc);
+    paint(25 + X, 9 + Y, 2, 4, hcShade);
   }
 
-  // ---- cap
-  if (look.captain) {
-    paint(3 + X, 1 + Y, 10, 2, C.white);
-    paint(4 + X, 1 + Y, 8, 1, C.white);
-    paint(3 + X, 2 + Y, 10, 1, C.whiteShade);
-    paint(4 + X, 3 + Y, 8, 2, C.navy);
-    paint(7 + X, 3 + Y, 2, 1, C.gold);
-    paint(3 + X, 5 + Y, 10, 1, C.visor);
+  // ---- head (rounded block), ears, neck
+  paint(14 + X, 24 + Y, 4, 2, skinShade);
+  paint(8 + X, 10 + Y, 16, 16, skin);
+  paint(6 + X, 12 + Y, 20, 12, skin);
+  paint(7 + X, 11 + Y, 18, 14, skin);
+  paint(24 + X, 14 + Y, 2, 9, skinShade);
+  paint(22 + X, 23 + Y, 2, 2, skinShade);
+  paint(10 + X, 25 + Y, 12, 1, skinShade);
+  paint(8 + X, 13 + Y, 2, 6, skinLight);
+  paint(5 + X, 17 + Y, 2, 4, skin);
+  paint(5 + X, 18 + Y, 1, 2, skinShade);
+  paint(25 + X, 17 + Y, 2, 4, skinShade);
+
+  // ---- hair on the head (the hat covers its top)
+  switch (person.hair) {
+    case 'short':
+    case 'long':
+    case 'bun':
+      paint(8 + X, 11 + Y, 16, 3, hc);
+      paint(6 + X, 12 + Y, 2, 6, hc);
+      paint(24 + X, 12 + Y, 2, 6, hc);
+      paint(10 + X, 14 + Y, 5, 1, hc);
+      paint(20 + X, 12 + Y, 3, 2, hcShade);
+      break;
+    case 'crop':
+      paint(8 + X, 11 + Y, 16, 2, hc);
+      paint(6 + X, 12 + Y, 2, 4, hc);
+      paint(24 + X, 12 + Y, 2, 4, hc);
+      break;
+    case 'curly':
+      paint(6 + X, 9 + Y, 20, 5, hc);
+      paint(5 + X, 11 + Y, 2, 9, hc);
+      paint(25 + X, 11 + Y, 2, 9, hc);
+      for (const [cx, cy] of [
+        [8, 10],
+        [12, 12],
+        [17, 10],
+        [21, 12],
+        [6, 15],
+        [25, 14],
+      ] as const)
+        paint(cx + X, cy + Y, 2, 1, hcShade);
+      break;
+    case 'bald':
+      paint(10 + X, 11 + Y, 4, 1, skinLight);
+      break;
+  }
+
+  // ---- face
+  const f = 2 * pose.face + X;
+  const brow = person.hair === 'bald' ? skinShade : hc;
+  for (const ex of [10, 19]) {
+    const x = ex + f;
+    paint(x, 16 + Y, 4, 1, brow);
+    switch (pose.eyes) {
+      case 'open':
+        paint(x, 18 + Y, 3, 3, C.eyeWhite);
+        paint(x + 1, 18 + Y, 2, 3, C.eye);
+        paint(x + 1, 18 + Y, 1, 1, C.eyeWhite);
+        break;
+      case 'blink':
+        paint(x, 20 + Y, 3, 1, C.eye);
+        break;
+      case 'happy':
+        paint(x, 20 + Y, 1, 1, C.eye);
+        paint(x + 1, 19 + Y, 2, 1, C.eye);
+        paint(x + 3, 20 + Y, 1, 1, C.eye);
+        break;
+      case 'squint':
+        paint(x, 20 + Y, 4, 1, C.eye);
+        break;
+    }
+  }
+  paint(15 + f, 21 + Y, 2, 2, skinShade);
+  if (person.beard) {
+    paint(8 + X, 21 + Y, 16, 5, person.beard);
+    paint(6 + X, 18 + Y, 2, 5, person.beard);
+    paint(24 + X, 18 + Y, 2, 5, person.beard);
+    paint(12 + f, 22 + Y, 8, 1, person.beard);
+    paint(14 + f, 23 + Y, 4, 1, '#8a4a40');
   } else {
-    paint(5 + X, 2 + Y, 6, 1, C.white);
-    paint(4 + X, 3 + Y, 8, 2, C.white);
-    paint(3 + X, 5 + Y, 10, 1, C.whiteShade);
-    paint(4 + X, 4 + Y, 8, 1, C.blue);
+    paint(8 + f, 22 + Y, 2, 1, 'rgba(232,112,112,0.45)');
+    paint(22 + f, 22 + Y, 2, 1, 'rgba(232,112,112,0.45)');
+    paint(14 + f, 24 + Y, 4, 1, pose.eyes === 'happy' ? '#a8343c' : '#b06a5c');
+    if (pose.eyes === 'happy') paint(15 + f, 25 + Y, 2, 1, '#a8343c');
+  }
+
+  // ---- hat
+  const hat = g.hatColor;
+  const hatS = g.hatShade;
+  switch (g.hat) {
+    case 'sailor':
+      paint(10 + X, 4 + Y, 12, 2, hat);
+      paint(8 + X, 6 + Y, 16, 4, hat);
+      paint(6 + X, 10 + Y, 20, 2, hatS);
+      paint(8 + X, 8 + Y, 16, 1, g.hatTrim ?? C.blue);
+      paint(11 + X, 5 + Y, 4, 1, C.white);
+      break;
+    case 'peaked':
+      paint(6 + X, 2 + Y, 20, 4, hat);
+      paint(6 + X, 5 + Y, 20, 1, hatS);
+      paint(8 + X, 6 + Y, 16, 4, C.navy);
+      paint(14 + X, 6 + Y, 4, 2, g.hatTrim ?? C.gold);
+      paint(6 + X, 10 + Y, 20, 2, C.visor);
+      paint(8 + X, 10 + Y, 8, 1, '#2b3150');
+      break;
+    case 'hardhat':
+      paint(10 + X, 3 + Y, 12, 2, hat);
+      paint(8 + X, 5 + Y, 16, 5, hat);
+      paint(5 + X, 10 + Y, 22, 2, hat);
+      paint(5 + X, 11 + Y, 22, 1, hatS);
+      paint(20 + X, 5 + Y, 4, 5, hatS);
+      paint(15 + X, 3 + Y, 2, 7, hatS);
+      paint(11 + X, 4 + Y, 3, 2, lighten(hat));
+      break;
+    case 'souwester':
+      paint(10 + X, 4 + Y, 12, 3, hat);
+      paint(8 + X, 7 + Y, 16, 4, hat);
+      paint(4 + X, 11 + Y, 24, 2, hat);
+      paint(3 + X, 12 + Y, 3, 3, hatS);
+      paint(26 + X, 12 + Y, 3, 3, hatS);
+      paint(20 + X, 6 + Y, 3, 5, hatS);
+      paint(11 + X, 5 + Y, 3, 1, lighten(hat));
+      break;
+    case 'beanie':
+      paint(9 + X, 4 + Y, 14, 3, hat);
+      paint(7 + X, 7 + Y, 18, 4, hat);
+      paint(7 + X, 10 + Y, 18, 3, hatS);
+      for (let c = 8; c < 25; c += 3) paint(c + X, 10 + Y, 1, 3, hat);
+      paint(14 + X, 1 + Y, 4, 3, lighten(hat));
+      break;
+    case 'bandana':
+      paint(8 + X, 8 + Y, 16, 5, hat);
+      paint(7 + X, 10 + Y, 18, 3, hat);
+      paint(24 + X, 11 + Y, 4, 3, hat);
+      paint(26 + X, 14 + Y, 2, 4, hatS);
+      for (const [cx, cy] of [
+        [10, 9],
+        [15, 11],
+        [20, 9],
+      ] as const)
+        paint(cx + X, cy + Y, 1, 1, C.white);
+      break;
+    case 'cap':
+      paint(10 + X, 5 + Y, 12, 2, hat);
+      paint(8 + X, 7 + Y, 16, 4, hat);
+      paint(7 + X, 11 + Y, 18, 2, hatS);
+      paint(15 + X, 5 + Y, 2, 1, hatS);
+      if (g.hatTrim) paint(14 + X, 8 + Y, 4, 2, g.hatTrim);
+      break;
+    case 'tricorn':
+      paint(4 + X, 7 + Y, 24, 4, hat);
+      paint(7 + X, 3 + Y, 18, 4, hat);
+      paint(2 + X, 6 + Y, 4, 3, hat);
+      paint(26 + X, 6 + Y, 4, 3, hat);
+      paint(4 + X, 10 + Y, 24, 1, g.hatTrim ?? C.gold);
+      paint(14 + X, 4 + Y, 4, 3, hatS);
+      paint(15 + X, 7 + Y, 2, 2, '#f2ead8');
+      break;
+    case 'none':
+      break;
   }
 
   // raised arms go in front of the head
-  if (pose.armL === 'brow' || pose.armL === 'up' || pose.armL === 'upOut') arm(pose.armL, -1);
-  if (pose.armR === 'brow' || pose.armR === 'up' || pose.armR === 'upOut') arm(pose.armR, 1);
+  if (raised(pose.armL)) arm(pose.armL, -1);
+  if (raised(pose.armR)) arm(pose.armR, 1);
 }
 
-/** Paint the whole sheet (COLS × ROWS cells) and outline every figure. */
-function paintSheet(): HTMLCanvasElement {
+/** A hex colour moved toward white or black by `t`. */
+function mixHex(hex: string, toward: number, t: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const ch = (s: number) => Math.round(((n >> s) & 255) * (1 - t) + toward * t);
+  return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
+}
+const lighten = (hex: string): string => (hex.startsWith('#') ? mixHex(hex, 255, 0.28) : hex);
+const darken = (hex: string): string => (hex.startsWith('#') ? mixHex(hex, 0, 0.3) : hex);
+
+/** Paint the whole sheet (every outfit block, look and frame) and outline every figure. */
+export function paintSailorSheet(): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
-  canvas.width = COLS * CELL_W;
-  canvas.height = ROWS * CELL_H;
+  canvas.width = SHEET_SIZE.width;
+  canvas.height = SHEET_SIZE.height;
   const ctx = canvas.getContext('2d');
   if (!ctx) return canvas;
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      const ox = c * CELL_W;
-      const oy = r * CELL_H;
-      const paint: Paint = (x, y, w, h, color) => {
-        // Clip to the cell so a figure never bleeds into its neighbour.
-        const x0 = Math.max(0, x);
-        const y0 = Math.max(0, y);
-        const x1 = Math.min(CELL_W, x + w);
-        const y1 = Math.min(CELL_H, y + h);
-        if (x1 <= x0 || y1 <= y0) return;
-        ctx.fillStyle = color;
-        ctx.fillRect(ox + x0, oy + y0, x1 - x0, y1 - y0);
-      };
-      drawFigure(paint, LOOKS[r]!, POSES[c]!);
+  OUTFITS.forEach((kind, o) => {
+    for (let v = 0; v < LOOKS_PER_OUTFIT; v++) {
+      const captain = v >= SAILOR_VARIANTS;
+      const person = personFor(o, v);
+      const garb = garbFor(kind, captain, captain ? v - SAILOR_VARIANTS : v);
+      for (let fr = 0; fr < FRAMES; fr++) {
+        const [col, row] = sheetCell(o, v, fr);
+        const ox = col * CELL_W;
+        const oy = row * CELL_H;
+        const paint: Paint = (x, y, w, h, color) => {
+          // Clip to the cell so a figure never bleeds into its neighbour.
+          const x0 = Math.max(0, x);
+          const y0 = Math.max(0, y);
+          const x1 = Math.min(CELL_W, x + w);
+          const y1 = Math.min(CELL_H, y + h);
+          if (x1 <= x0 || y1 <= y0) return;
+          ctx.fillStyle = color;
+          ctx.fillRect(ox + x0, oy + y0, x1 - x0, y1 - y0);
+        };
+        drawFigure(paint, person, garb, POSES[fr]!);
+      }
     }
-  }
+  });
   // Outline: transparent pixels next to the figure (within its cell) become dark.
   const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const d = img.data;
@@ -978,8 +1545,13 @@ export class SailorLayer implements SceneryLayer {
       if (cx * cx + cy * cy + cz * cz < cull * cull) continue;
       mesh.setMatrixAt(n, this.world);
       const lit = sailor.lantern ? night * 0.75 : 0;
-      arr[4 * n] = this.frameOf(sailor, night);
-      arr[4 * n + 1] = sailor.member.variant;
+      const [col, row] = sheetCell(
+        sailor.member.outfit,
+        sailor.member.variant,
+        this.frameOf(sailor, night),
+      );
+      arr[4 * n] = col;
+      arr[4 * n + 1] = row;
       arr[4 * n + 2] = sailor.flip ? 1 : 0;
       arr[4 * n + 3] = lit;
       n++;
@@ -1106,7 +1678,7 @@ export class SailorLayer implements SceneryLayer {
   private ensureGpu(capacity: number, lanterns: number): void {
     if (typeof document === 'undefined') return;
     if (!this.sheet) {
-      const tex = new THREE.CanvasTexture(paintSheet());
+      const tex = new THREE.CanvasTexture(paintSailorSheet());
       tex.magFilter = THREE.NearestFilter;
       tex.minFilter = THREE.LinearFilter;
       tex.generateMipmaps = false;
