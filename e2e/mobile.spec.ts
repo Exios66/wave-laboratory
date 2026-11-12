@@ -1,14 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
-
-function trackErrors(page: Page): string[] {
-  const errors: string[] = [];
-  page.on('console', (msg) => {
-    if (msg.type() === 'error') errors.push(msg.text());
-  });
-  page.on('pageerror', (err) => errors.push(err.message));
-  return errors;
-}
+import type { Page } from '@playwright/test';
+import { expect, test, trackErrors } from './fixtures';
 
 async function ready(page: Page): Promise<void> {
   await page.goto('/');
