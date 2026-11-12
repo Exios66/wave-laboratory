@@ -503,6 +503,8 @@ test.describe('Wave Laboratory app', () => {
   });
 
   test('keeps the flooding compartment valid across hull changes', async ({ page }) => {
+    // Two hull changes, each restarting the simulation under software GL.
+    test.slow();
     const errors = trackErrors(page);
     await page.goto('/');
     await waitForSimulation(page);
@@ -520,8 +522,14 @@ test.describe('Wave Laboratory app', () => {
     // A hull change reloads the whole simulation (new ocean, new vessel); allow for software GL.
     await expect(bay.locator('option')).toHaveCount(4, { timeout: 30_000 });
     await expect(bay).toHaveValue('3');
-    await page.getByRole('button', { name: 'Flood compartment' }).click();
-    await expect(page.getByText('1 breach(es) open.', { exact: true })).toBeVisible();
+    // The hull change restarts the simulation; a click that lands before the new vessel is
+    // in is lost, so retry until a breach shows.
+    await expect(async () => {
+      await page.getByRole('button', { name: 'Flood compartment' }).click();
+      await expect(page.getByText(/^[1-9]\d* breach\(es\) open\.$/)).toBeVisible({
+        timeout: 5_000,
+      });
+    }).toPass({ timeout: 45_000 });
     await expect
       .poll(
         async () => {
@@ -612,6 +620,8 @@ test.describe('Wave Laboratory app', () => {
   test('post-processing: bloom, grain and vignette persist and render cleanly', async ({
     page,
   }) => {
+    // Boots the app twice (before and after the reload) under software GL.
+    test.slow();
     const errors = trackErrors(page);
     await page.goto('/');
     await waitForSimulation(page);
@@ -648,6 +658,8 @@ test.describe('Wave Laboratory app', () => {
   test('scenery toggles: ambient world defaults on, hostiles opt-in and persisted', async ({
     page,
   }) => {
+    // Boots the app twice (before and after the reload) under software GL.
+    test.slow();
     const errors = trackErrors(page);
     await page.goto('/');
     await waitForSimulation(page);
