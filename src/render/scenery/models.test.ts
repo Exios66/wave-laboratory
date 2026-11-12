@@ -61,6 +61,25 @@ describe('scenery models', () => {
     expect(lib.get('rock-a')).toBeNull();
   });
 
+  it('frees a model that finishes loading after the library is disposed', async () => {
+    let resolve!: (o: THREE.Object3D) => void;
+    const lib = new ModelLibrary('/models/', () => new Promise((r) => (resolve = r)));
+    const loading = lib.request('buoy');
+    lib.dispose();
+    const scene = quantizedScene();
+    const geos: THREE.BufferGeometry[] = [];
+    const spy = vi.spyOn(THREE.BufferGeometry.prototype, 'dispose').mockImplementation(function (
+      this: THREE.BufferGeometry,
+    ) {
+      geos.push(this);
+    });
+    resolve(scene);
+    await loading;
+    expect(lib.get('buoy')).toBeNull();
+    expect(geos.length).toBeGreaterThan(0);
+    spy.mockRestore();
+  });
+
   it('keeps the procedural look, with one warning, when a model fails to load', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const load = vi.fn(() => Promise.reject(new Error('404')));

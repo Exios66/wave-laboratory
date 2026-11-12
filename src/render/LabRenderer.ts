@@ -1806,6 +1806,9 @@ export class LabRenderer implements LabRendererApi {
       this.scene.remove(layer.object);
       layer.dispose();
     }
+    // After the layers: their instanced meshes draw the library's geometry and materials.
+    this.models?.dispose();
+    this.models = null;
     this.lighting.dispose();
     this.setProbes([]);
     this.ocean.dispose();
