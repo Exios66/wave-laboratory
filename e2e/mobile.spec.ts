@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { Page } from '@playwright/test';
-import { expect, test, trackErrors } from './fixtures';
+import { expect, frames, test, trackErrors } from './fixtures';
 
 async function ready(page: Page): Promise<void> {
   await page.goto('/');
@@ -28,6 +28,18 @@ test.describe('mobile layout', () => {
     await expect(page.getByRole('tablist', { name: 'Panels' })).toBeVisible();
     await expectNoHorizontalScroll(page);
     await page.screenshot({ path: `test-results/mobile-${info.project.name}.png` });
+    expect(errors).toEqual([]);
+  });
+
+  test('underwater view renders on a phone without errors', async ({ page }) => {
+    const errors = trackErrors(page);
+    await ready(page);
+    const underwater = page.getByRole('radio', { name: 'Underwater' });
+    await underwater.click();
+    await expect(underwater).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByText(/^Underwater · \d+\.\d m$/)).toBeVisible({ timeout: 10_000 });
+    await frames(page, 6);
+    await expectNoHorizontalScroll(page);
     expect(errors).toEqual([]);
   });
 
