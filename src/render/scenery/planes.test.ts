@@ -6,6 +6,8 @@ import {
   PLANE_SCHEDULE,
   RIDE,
   crossingInterval,
+  buildAirframe,
+  buildPropDiscs,
   crossingPose,
   memberOpacity,
   meanCrossingInterval,
@@ -370,5 +372,42 @@ describe('recon passes (opt-in hostiles)', () => {
       reconWhenOn += on.active.filter((x) => x.recon).length;
     }
     expect(reconWhenOn).toBeGreaterThan(0);
+  });
+});
+
+describe('airframes', () => {
+  const kinds = ['avenger', 'mariner', 'dc3', 'tudor'] as const;
+
+  it('carries atlas UVs and a body and a glass group', () => {
+    for (const kind of kinds) {
+      const { geometry } = buildAirframe(kind);
+      expect(geometry.getAttribute('uv'), kind).toBeDefined();
+      expect(geometry.groups.length, kind).toBe(2);
+      expect(geometry.groups.map((g) => g.materialIndex)).toEqual([0, 1]);
+      for (const g of geometry.groups) expect(g.count, kind).toBeGreaterThan(0);
+    }
+  });
+
+  it('draws each aircraft in at most three calls: body, glass, propeller discs', () => {
+    for (const kind of kinds) {
+      const layout = buildAirframe(kind);
+      const discs = buildPropDiscs(layout.props);
+      expect(discs.groups.length).toBe(0);
+      expect(layout.geometry.groups.length + 1, kind).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it('gives every propeller one disc at its hub', () => {
+    const layout = buildAirframe('tudor');
+    const discs = buildPropDiscs(layout.props);
+    const pos = discs.getAttribute('position');
+    for (const hub of layout.props) {
+      let near = 0;
+      for (let i = 0; i < pos.count; i++) {
+        const d = Math.hypot(pos.getY(i) - hub.y, pos.getZ(i) - hub.z);
+        if (Math.abs(pos.getX(i) - hub.x) < 1e-6 && d <= hub.r + 1e-6) near++;
+      }
+      expect(near).toBeGreaterThan(8);
+    }
   });
 });
