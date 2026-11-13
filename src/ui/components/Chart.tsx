@@ -46,7 +46,16 @@ function plotSize(host: HTMLElement): { width: number; height: number } {
   };
 }
 
-export default function Chart({ title, series, getData, xLabel, yLabel, logX, logY, summary }: ChartProps) {
+export default function Chart({
+  title,
+  series,
+  getData,
+  xLabel,
+  yLabel,
+  logX,
+  logY,
+  summary,
+}: ChartProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   const getDataRef = useRef(getData);

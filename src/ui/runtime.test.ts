@@ -263,7 +263,10 @@ describe('LabRuntime.attach with an async renderer', () => {
   }
 
   beforeEach(() => {
-    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+    vi.stubGlobal(
+      'requestAnimationFrame',
+      vi.fn(() => 1),
+    );
     vi.stubGlobal(
       'ResizeObserver',
       class {
