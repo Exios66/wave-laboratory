@@ -336,6 +336,40 @@ test.describe('Wave Laboratory app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('plane view: switch cameras, change aircraft, read telemetry', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto('/');
+    await waitForSimulation(page);
+    await page.getByRole('button', { name: 'Plane' }).click();
+    await expect(page.getByText(/^Riding with /)).toBeVisible({ timeout: 10_000 });
+    const views = page.getByRole('radiogroup', { name: 'Plane camera' });
+    await expect(views.getByRole('radio', { name: 'Chase' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await page.locator('#viewport-canvas').focus();
+    for (const name of ['Cockpit', 'Wing', 'Fly-by']) {
+      await page.keyboard.press('c');
+      await expect(views.getByRole('radio', { name })).toHaveAttribute('aria-checked', 'true');
+      await frames(page, 4);
+      await page.screenshot({ path: `test-results/plane-${name.toLowerCase()}.png` });
+    }
+    await expect(
+      page.getByText(/ALT \d+ m · [\d,]+ ft · IAS \d+ kn · HDG \d{3}° · BANK \d+°/),
+    ).toBeVisible();
+    const label = page.getByText(/^Riding with /);
+    const before = await label.textContent();
+    await page.getByRole('button', { name: 'Next aircraft' }).click();
+    await expect(label).not.toHaveText(before!, { timeout: 15_000 });
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: 'Plane' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    await expect(page.getByText(/^Riding with /)).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
   test('top, follow and bridge cameras engage without errors and return to orbit', async ({
     page,
   }) => {

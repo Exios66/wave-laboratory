@@ -12,7 +12,8 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-export type ModelName = 'rock-a' | 'rock-b' | 'buoy' | 'lifebuoy';
+export type ModelName =
+  'rock-a' | 'rock-b' | 'buoy' | 'lifebuoy' | 'lateral-marker' | 'crate' | 'lantern' | 'tall-ship';
 
 /**
  * Per-model albedo lift. The scenery around these models (sand, grass, huts) is bright, flat
@@ -25,12 +26,30 @@ const LOOK: Record<ModelName, { tint: number; lift: number }> = {
   'rock-b': { tint: 1.4, lift: 0.08 },
   buoy: { tint: 1, lift: 0 },
   lifebuoy: { tint: 1.2, lift: 0.05 },
+  'lateral-marker': { tint: 1, lift: 0 },
+  crate: { tint: 1.3, lift: 0.05 },
+  lantern: { tint: 1.2, lift: 0.05 },
+  'tall-ship': { tint: 1.3, lift: 0.05 },
 };
 
 /** One material's share of a model, with every node transform baked in. */
 export interface ModelPart {
   geometry: THREE.BufferGeometry;
   material: THREE.Material;
+}
+
+/**
+ * Uniform scale that makes a model's longest horizontal (x or z) extent equal `length` [m], for
+ * models that stand in for something of a known size.
+ */
+export function fitLength(parts: readonly ModelPart[], length: number): number {
+  const box = new THREE.Box3();
+  for (const p of parts) {
+    p.geometry.computeBoundingBox();
+    box.union(p.geometry.boundingBox!);
+  }
+  const extent = Math.max(box.max.x - box.min.x, box.max.z - box.min.z);
+  return extent > 0 ? length / extent : 1;
 }
 
 /**

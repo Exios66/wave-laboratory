@@ -18,6 +18,7 @@ import {
   type VesselConfig,
   type WaveSystem,
 } from '../schema/experiment';
+import { RIDE_VIEWS, type RideView } from '../render/rideViews';
 import { presetExperiment } from '../schema/presets';
 import type { SeaDiagnostics, SimFrame } from '../sim/types';
 import type { VesselDefinition } from '../vessel/api';
@@ -81,6 +82,8 @@ export interface LabState {
   cameraTarget: string | null;
   /** The camera to go back to when leaving the plane view (never `plane`). */
   groundCamera: CameraMode;
+  /** Where the Plane view sits aboard (viewer preference, persisted, not saved in files). */
+  rideView: RideView;
 
   theme: ThemePreference;
   performance: PerformanceMode;
@@ -114,6 +117,7 @@ export interface LabState {
   setCamera(mode: CameraMode, target?: string | null): void;
   /** Ride one of the lost flights over the lab, or come back down to the previous view. */
   togglePlaneView(): void;
+  setRideView(view: RideView): void;
   setTheme(theme: ThemePreference): void;
   setPerformance(mode: PerformanceMode): void;
   setAmbience(patch: Partial<AmbienceSettings>): void;
@@ -196,6 +200,19 @@ function readAmbience(): AmbienceSettings {
   }
 }
 
+/** A stored Plane view camera, or the chase seat for anything unknown (old or hand-edited). */
+export function sanitizeRideView(raw: unknown): RideView {
+  return RIDE_VIEWS.find((v) => v === raw) ?? 'chase';
+}
+
+export function readRideView(): RideView {
+  try {
+    return sanitizeRideView(localStorage.getItem('wave-lab:rideView'));
+  } catch {
+    return 'chase';
+  }
+}
+
 export function readDisplay(): DisplaySettings {
   try {
     const raw = localStorage.getItem('wave-lab:display');
@@ -247,6 +264,7 @@ export const useLab = create<LabState>()((set, get) => ({
   camera: 'orbit',
   cameraTarget: null,
   groundCamera: 'orbit',
+  rideView: readRideView(),
 
   theme: readTheme(),
   performance: readPerformance(),
@@ -380,6 +398,15 @@ export const useLab = create<LabState>()((set, get) => ({
     const back = s.groundCamera;
     const needsVessel = back === 'follow' || back === 'bridge';
     s.setCamera(needsVessel && !s.cameraTarget ? 'orbit' : back);
+  },
+  setRideView(view) {
+    const rideView = sanitizeRideView(view);
+    try {
+      localStorage.setItem('wave-lab:rideView', rideView);
+    } catch {
+      /* storage unavailable: preference lasts for this session only */
+    }
+    set({ rideView });
   },
   setTheme(theme) {
     try {

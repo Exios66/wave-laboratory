@@ -1028,14 +1028,26 @@ input[type='range'] {
 .hud__ride {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
-.hud__ride span {
+.hud__ride-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.hud__telemetry {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.hud__ride-tip {
   opacity: 0.75;
   font-size: 12px;
 }
-@media (max-width: 600px) {
-  .hud__ride span {
+@media (max-width: 640px) {
+  .hud__ride-tip {
     display: none;
   }
 }
@@ -1717,5 +1729,13 @@ kbd {
     min-height: 32px;
     padding: 2px 8px;
     font-size: 16px;
+  }
+}
+
+/* The Plane view's own controls are the main thing to tap while riding: full touch size. */
+@media (pointer: coarse) {
+  .hud .hud__ride .segmented button,
+  .hud .hud__ride .hud__plane {
+    min-height: 44px;
   }
 }

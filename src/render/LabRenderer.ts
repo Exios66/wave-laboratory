@@ -37,6 +37,7 @@ import type {
   PickResult,
   PostSettings,
   RendererStats,
+  RideTelemetry,
 } from './api';
 import { buildDuck } from './effects/duck';
 import { GpuOcean } from './ocean/GpuOcean';
@@ -48,6 +49,15 @@ import { SeabirdLayer, SHIP_VESSELS } from './scenery/birds';
 import { IslandLayer } from './scenery/islands';
 import { clearHorizonToward, SkyLighting, type LightingState } from './scenery/lighting';
 import { PlaneLayer, type PlanePose } from './scenery/planes';
+import {
+  RIDE_VIEWS,
+  compassDeg,
+  easeChaseSeat,
+  newRideCameraState,
+  rideCameraPose,
+  type RideFlight,
+  type RideView,
+} from './rideCamera';
 import { SailorLayer } from './scenery/sailors';
 import { TrafficLayer } from './scenery/traffic';
 import {
@@ -323,8 +333,11 @@ const PLANE_LOOK = {
   chase: 110,
   minChase: 30,
   maxChase: 1500,
-  /** Seat height above the gaze line through the aircraft, per metre of chase. */
-  lift: 0.24,
+  /** Pilot's look-around [rad]: straight ahead, a little below the horizon. */
+  cockpitDip: 0.1,
+  maxCockpitYaw: (100 * Math.PI) / 180,
+  /** How quickly the chase seat settles after the aircraft wanders or the view is turned [s]. */
+  chaseHalfLife: 0.25,
 } as const;
 
 export class LabRenderer implements LabRendererApi {
@@ -463,6 +476,23 @@ export class LabRenderer implements LabRendererApi {
   private planeChase: number = PLANE_LOOK.chase;
   private readonly ridePose: PlanePose = { x: 0, y: 0, z: 0, heading: 0, bank: 0 };
   private readonly rideCentre = { x: 0, z: 0 };
+  private rideView: RideView = 'chase';
+  private readonly rideCam = newRideCameraState();
+  private readonly rideOut = {
+    pos: new THREE.Vector3(),
+    target: new THREE.Vector3(),
+    up: new THREE.Vector3(),
+    roll: 0,
+  };
+  private readonly rideFlight: RideFlight = {
+    kind: 'avenger',
+    speed: 0,
+    turnRate: 0,
+    centre: { x: 0, z: 0 },
+  };
+  /** Chase seat relative to the aircraft, eased; null until the first frame aboard. */
+  private chaseOffset: THREE.Vector3 | null = null;
+  private readonly telemetryPose: PlanePose = { x: 0, y: 0, z: 0, heading: 0, bank: 0 };
   private wallDt = 0;
   private userMoved = false;
   private dragging = false;
@@ -1336,6 +1366,7 @@ export class LabRenderer implements LabRendererApi {
   }
 
   setCamera(mode: CameraMode, targetId?: string | null): void {
+    if (mode !== this.mode) this.freshRideCamera();
     this.mode = mode;
     if (mode === 'follow' || mode === 'bridge') this.explore = null;
     if (targetId !== undefined) this.cameraTarget = targetId ?? null;
@@ -1354,8 +1385,48 @@ export class LabRenderer implements LabRendererApi {
     if (surface) this.surface = { eta: surface.eta, etaT: surface.etaT, t };
   }
 
-  planeRide(): string | null {
-    return this.mode === 'plane' ? this.planes.rideLabel : null;
+  planeTelemetry(): RideTelemetry | null {
+    const ride = this.mode === 'plane' ? this.planes.rideFlight : null;
+    const label = this.planes.rideLabel;
+    if (!ride || !label) return null;
+    const p = this.planes.ridePose(this.wallT, this.telemetryPose);
+    if (!p) return null;
+    return {
+      label,
+      kind: ride.kind,
+      altitudeM: p.y,
+      speedMs: ride.speed,
+      headingDeg: compassDeg(p.heading),
+      bankDeg: (p.bank * 180) / Math.PI,
+    };
+  }
+
+  setRideView(view: RideView): void {
+    if (!RIDE_VIEWS.includes(view) || view === this.rideView) return;
+    this.rideView = view;
+    this.resetRideLook();
+    this.freshRideCamera();
+  }
+
+  nextRide(): void {
+    if (this.mode !== 'plane') return;
+    this.planes.nextRide(this.wallT, this.rideCentre, this.calm);
+    this.freshRideCamera();
+  }
+
+  /** Gaze back to the view's resting direction (and the chase seat back to its distance). */
+  private resetRideLook(): void {
+    this.planeYaw = 0;
+    this.planeDip = this.rideView === 'chase' ? PLANE_LOOK.dip : PLANE_LOOK.cockpitDip;
+    if (this.rideView === 'flyby' || this.rideView === 'wing') this.planeDip = 0;
+    this.planeChase = PLANE_LOOK.chase;
+  }
+
+  /** A cut: the chase seat and the fly-by point start over instead of easing from the last shot. */
+  private freshRideCamera(): void {
+    this.chaseOffset = null;
+    this.rideCam.placed = false;
+    this.rideCam.passing = false;
   }
 
   getNavigation(): NavigationView {
@@ -1761,9 +1832,7 @@ export class LabRenderer implements LabRendererApi {
     this.userMoved = action !== 'reset';
     if (action === 'reset') {
       if (this.mode === 'plane') {
-        this.planeYaw = 0;
-        this.planeDip = PLANE_LOOK.dip;
-        this.planeChase = PLANE_LOOK.chase;
+        this.resetRideLook();
         return;
       }
       this.yaw = 0.65;
@@ -1788,6 +1857,13 @@ export class LabRenderer implements LabRendererApi {
   private turn(yaw: number, polar: number): void {
     if (this.mode === 'plane') {
       this.planeYaw += yaw;
+      if (this.rideView === 'cockpit') {
+        this.planeYaw = THREE.MathUtils.clamp(
+          this.planeYaw,
+          -PLANE_LOOK.maxCockpitYaw,
+          PLANE_LOOK.maxCockpitYaw,
+        );
+      }
       this.planeDip = THREE.MathUtils.clamp(
         this.planeDip - polar,
         PLANE_LOOK.minDip,
@@ -2257,30 +2333,31 @@ export class LabRenderer implements LabRendererApi {
     if (!riding) return false;
     const p = this.planes.ridePose(this.wallT, this.ridePose);
     if (!p) return false;
-    // Gaze toward the circuit's centre (the fleet), turned and dipped by the viewer.
-    const az = Math.atan2(c.z - p.z, c.x - p.x) + this.planeYaw;
-    const dip = this.planeDip;
-    const gx = Math.cos(dip) * Math.cos(az);
-    const gy = -Math.sin(dip);
-    const gz = Math.cos(dip) * Math.sin(az);
-    // Screen-up, square to the gaze: the seat is a little above it so the aircraft rides
-    // low in the frame and the view past it stays clear.
-    const ux = Math.sin(dip) * Math.cos(az);
-    const uy = Math.cos(dip);
-    const uz = Math.sin(dip) * Math.sin(az);
-    const back = this.planeChase;
-    const lift = back * PLANE_LOOK.lift;
-    this.camera.up.set(ux, uy, uz);
-    this.camera.position.set(
-      p.x - gx * back + ux * lift,
-      p.y - gy * back + uy * lift,
-      p.z - gz * back + uz * lift,
+    const ride = this.planes.rideFlight;
+    if (!ride) return false;
+    const f = this.rideFlight;
+    f.kind = ride.kind;
+    f.speed = ride.speed;
+    f.turnRate = ride.turnRate;
+    f.centre.x = c.x;
+    f.centre.z = c.z;
+    const o = this.rideOut;
+    rideCameraPose(
+      this.rideView,
+      p,
+      f,
+      { yaw: this.planeYaw, dip: this.planeDip, chase: this.planeChase },
+      this.rideCam,
+      o,
     );
-    this.camera.lookAt(
-      this.camera.position.x + gx,
-      this.camera.position.y + gy,
-      this.camera.position.z + gz,
-    );
+    if (this.rideView === 'chase') {
+      // The first frame aboard sits straight in the seat; after that the seat eases.
+      this.chaseOffset ??= new THREE.Vector3(o.pos.x - p.x, o.pos.y - p.y, o.pos.z - p.z);
+      easeChaseSeat(o, p, this.chaseOffset, PLANE_LOOK.chaseHalfLife, this.wallDt);
+    }
+    this.camera.up.copy(o.up);
+    this.camera.position.copy(o.pos);
+    this.camera.lookAt(o.target);
     return true;
   }
 
@@ -2292,7 +2369,14 @@ export class LabRenderer implements LabRendererApi {
   private fitNearPlane(): void {
     let near = 0.2;
     if (this.mode === 'plane') {
-      near = THREE.MathUtils.clamp(this.planeChase * 0.05, 0.5, 6);
+      near =
+        this.rideView === 'cockpit'
+          ? 0.15
+          : this.rideView === 'wing'
+            ? 0.3
+            : this.rideView === 'flyby'
+              ? 1
+              : THREE.MathUtils.clamp(this.planeChase * 0.05, 0.5, 6);
     } else if (this.mode !== 'bridge') {
       const hs = (this.ocean.uniforms.uHs?.value as number | undefined) ?? 0;
       // Never clip the nearest crest: stay well inside the camera's height above the waves.

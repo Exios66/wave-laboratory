@@ -27,12 +27,20 @@ import {
 import { MeshoptEncoder, MeshoptSimplifier } from 'meshoptimizer';
 import sharp from 'sharp';
 
-/** Poly Haven id → output name, triangle budget, texture size [px]. */
+/**
+ * Poly Haven id → output name, triangle budget, texture size [px], and optionally the
+ * simplifier's error allowance (default 0.01 of the model's size) for dense models that would
+ * otherwise stop short of their budget.
+ */
 const ASSETS = [
   { id: 'coast_rocks_01', name: 'rock-a', tris: 3000, tex: 512 },
   { id: 'coast_rocks_05', name: 'rock-b', tris: 3000, tex: 512 },
   { id: 'ocean_buoy', name: 'buoy', tris: 4000, tex: 512 },
   { id: 'lifebuoy', name: 'lifebuoy', tris: 800, tex: 256 },
+  { id: 'lateral_sea_marker', name: 'lateral-marker', tris: 3000, tex: 512 },
+  { id: 'wooden_crate_01', name: 'crate', tris: 600, tex: 256 },
+  { id: 'Lantern_01', name: 'lantern', tris: 2000, tex: 256 },
+  { id: 'dutch_ship_medium', name: 'tall-ship', tris: 9000, tex: 512, error: 0.2 },
 ];
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -86,7 +94,7 @@ for (const a of ASSETS) {
   const before = triangles(doc);
   const ratio = Math.min(1, a.tris / before);
   await doc.transform(
-    simplify({ simplifier: MeshoptSimplifier, ratio, error: 0.01, lockBorder: false }),
+    simplify({ simplifier: MeshoptSimplifier, ratio, error: a.error ?? 0.01, lockBorder: false }),
     center({ pivot: 'below' }),
     textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [a.tex, a.tex], quality: 80 }),
     prune(),
