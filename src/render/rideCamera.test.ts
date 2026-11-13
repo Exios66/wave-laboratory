@@ -12,8 +12,10 @@ import {
 } from './scenery/planes';
 import {
   COCKPIT,
+  compassDeg,
   RIDE_VIEWS,
   dampVec,
+  easeChaseSeat,
   newRideCameraState,
   rideCameraPose,
   rolledUp,
@@ -164,5 +166,45 @@ describe('planRide kind', () => {
     for (const kind of KINDS) {
       expect(planRide(new Pcg32(3), { x: 0, z: 0 }, 0, 1, 0, 0, kind).kind).toBe(kind);
     }
+  });
+});
+
+describe('compassDeg', () => {
+  it('turns a Three.js heading into a compass bearing (0 north, 90 east)', () => {
+    expect(compassDeg(0)).toBeCloseTo(90, 9);
+    expect(compassDeg(-Math.PI / 2)).toBeCloseTo(0, 9);
+    expect(compassDeg(Math.PI / 2)).toBeCloseTo(180, 9);
+    expect(compassDeg(Math.PI)).toBeCloseTo(270, 9);
+    expect(compassDeg(-Math.PI / 2 + 4 * Math.PI)).toBeCloseTo(0, 6);
+  });
+});
+
+describe('easeChaseSeat', () => {
+  const pose: PlanePose = { x: 50, y: 300, z: -800, heading: 0.3, bank: 0.2 };
+  const f: RideFlight = { kind: 'dc3', speed: 72, turnRate: 0.09, centre: { x: 0, z: 0 } };
+
+  it('leaves a settled seat exactly where the chase view puts it, gazing the same way', () => {
+    const want = out();
+    rideCameraPose('chase', pose, f, LOOK, newRideCameraState(), want);
+    const o = out();
+    rideCameraPose('chase', pose, f, LOOK, newRideCameraState(), o);
+    const offset = want.pos.clone().sub(new THREE.Vector3(pose.x, pose.y, pose.z));
+    easeChaseSeat(o, pose, offset, 0.25, 1 / 60);
+    expect(o.pos.distanceTo(want.pos)).toBeLessThan(1e-9);
+    expect(o.target.distanceTo(want.target)).toBeLessThan(1e-9);
+  });
+
+  it('eases a seat that is out of place toward the chase view, keeping the gaze', () => {
+    const want = out();
+    rideCameraPose('chase', pose, f, LOOK, newRideCameraState(), want);
+    const o = out();
+    rideCameraPose('chase', pose, f, LOOK, newRideCameraState(), o);
+    const offset = new THREE.Vector3(0, 0, 0);
+    easeChaseSeat(o, pose, offset, 0.25, 0.25);
+    const at = new THREE.Vector3(pose.x, pose.y, pose.z);
+    // Halfway from the aircraft to the settled seat.
+    expect(o.pos.distanceTo(at.clone().lerp(want.pos, 0.5))).toBeLessThan(1e-9);
+    const gaze = want.target.clone().sub(want.pos);
+    expect(o.target.clone().sub(o.pos).distanceTo(gaze)).toBeLessThan(1e-9);
   });
 });

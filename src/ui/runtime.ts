@@ -94,6 +94,7 @@ export class LabRuntime {
         if (s.camera !== prev.camera || s.cameraTarget !== prev.cameraTarget) {
           this.renderer.setCamera(s.camera, s.cameraTarget);
         }
+        if (s.rideView !== prev.rideView) this.renderer.setRideView(s.rideView);
         if (s.selection !== prev.selection) {
           this.renderer.setSelection(selectionId(s.selection));
         }
@@ -204,6 +205,7 @@ export class LabRuntime {
     this.renderer.setOverlay(s.overlay);
     this.renderer.setDuckMode(s.duckMode);
     this.renderer.setCamera(s.camera, s.cameraTarget);
+    this.renderer.setRideView(s.rideView);
     this.renderer.setSelection(selectionId(s.selection));
     this.renderer.setAmbience(s.ambience);
     this.pushPost();

@@ -31,6 +31,28 @@ test.describe('mobile layout', () => {
     expect(errors).toEqual([]);
   });
 
+  test('plane view controls fit a phone and are easy to tap', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await ready(page);
+    await page.getByRole('button', { name: 'Plane' }).click();
+    const card = page.locator('.hud__ride');
+    await expect(card.getByText(/^Riding with /)).toBeVisible({ timeout: 10_000 });
+    const fits = await card.evaluate((el) => el.scrollWidth <= el.clientWidth);
+    expect(fits).toBe(true);
+    const box = await card.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+    for (const radio of await card.getByRole('radio').all()) {
+      expect((await radio.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    }
+    expect(
+      (await card.getByRole('button', { name: 'Next aircraft' }).boundingBox())!.height,
+    ).toBeGreaterThanOrEqual(44);
+    await expectNoHorizontalScroll(page);
+    expect(errors).toEqual([]);
+  });
+
   test('underwater view renders on a phone without errors', async ({ page }) => {
     const errors = trackErrors(page);
     await ready(page);

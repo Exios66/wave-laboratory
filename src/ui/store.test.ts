@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { presetExperiment } from '../schema/presets';
 import { DEFAULT_AMBIENCE } from '../render/scenery/types';
-import { readDisplay, sanitizeAmbience, useLab } from './store';
+import { readDisplay, readRideView, sanitizeAmbience, sanitizeRideView, useLab } from './store';
 
 const lab = useLab.getState;
 
@@ -105,6 +105,34 @@ describe('display preferences', () => {
     expect(readDisplay()).toEqual({ bloom: 'auto', grain: false, vignette: false });
     saved.set('wave-lab:display', JSON.stringify({ bloom: 7, grain: true }));
     expect(readDisplay()).toEqual({ bloom: 'auto', grain: true, vignette: false });
+  });
+});
+
+describe('plane view camera preference', () => {
+  const saved = new Map<string, string>();
+  beforeEach(() => {
+    saved.clear();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => saved.get(k) ?? null,
+      setItem: (k: string, v: string) => void saved.set(k, v),
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('falls back to the chase seat for anything it does not know', () => {
+    expect(sanitizeRideView('barrel-roll')).toBe('chase');
+    expect(sanitizeRideView(undefined)).toBe('chase');
+    expect(sanitizeRideView('cockpit')).toBe('cockpit');
+    saved.set('wave-lab:rideView', 'loop-the-loop');
+    expect(readRideView()).toBe('chase');
+  });
+
+  it('persists the chosen view', () => {
+    useLab.getState().setRideView('wing');
+    expect(useLab.getState().rideView).toBe('wing');
+    expect(saved.get('wave-lab:rideView')).toBe('wing');
+    expect(readRideView()).toBe('wing');
+    useLab.getState().setRideView('chase');
   });
 });
 

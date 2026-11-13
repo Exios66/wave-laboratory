@@ -37,6 +37,7 @@ import type {
   PickResult,
   PostSettings,
   RendererStats,
+  RideTelemetry,
 } from './api';
 import { buildDuck } from './effects/duck';
 import { GpuOcean } from './ocean/GpuOcean';
@@ -50,7 +51,8 @@ import { clearHorizonToward, SkyLighting, type LightingState } from './scenery/l
 import { PlaneLayer, type PlanePose } from './scenery/planes';
 import {
   RIDE_VIEWS,
-  dampVec,
+  compassDeg,
+  easeChaseSeat,
   newRideCameraState,
   rideCameraPose,
   type RideFlight,
@@ -490,7 +492,7 @@ export class LabRenderer implements LabRendererApi {
   };
   /** Chase seat relative to the aircraft, eased; null until the first frame aboard. */
   private chaseOffset: THREE.Vector3 | null = null;
-  private readonly rideTmp = new THREE.Vector3();
+  private readonly telemetryPose: PlanePose = { x: 0, y: 0, z: 0, heading: 0, bank: 0 };
   private wallDt = 0;
   private userMoved = false;
   private dragging = false;
@@ -1383,8 +1385,20 @@ export class LabRenderer implements LabRendererApi {
     if (surface) this.surface = { eta: surface.eta, etaT: surface.etaT, t };
   }
 
-  planeRide(): string | null {
-    return this.mode === 'plane' ? this.planes.rideLabel : null;
+  planeTelemetry(): RideTelemetry | null {
+    const ride = this.mode === 'plane' ? this.planes.rideFlight : null;
+    const label = this.planes.rideLabel;
+    if (!ride || !label) return null;
+    const p = this.planes.ridePose(this.wallT, this.telemetryPose);
+    if (!p) return null;
+    return {
+      label,
+      kind: ride.kind,
+      altitudeM: p.y,
+      speedMs: ride.speed,
+      headingDeg: compassDeg(p.heading),
+      bankDeg: (p.bank * 180) / Math.PI,
+    };
   }
 
   setRideView(view: RideView): void {
@@ -2337,13 +2351,9 @@ export class LabRenderer implements LabRendererApi {
       o,
     );
     if (this.rideView === 'chase') {
-      // Ease the seat (relative to the aircraft, so it never lags behind a 70 m/s flight).
-      const want = this.rideTmp.set(o.pos.x - p.x, o.pos.y - p.y, o.pos.z - p.z);
-      if (!this.chaseOffset) this.chaseOffset = want.clone();
-      else dampVec(this.chaseOffset, want, PLANE_LOOK.chaseHalfLife, this.wallDt);
-      const gaze = o.target.sub(o.pos);
-      o.pos.set(p.x, p.y, p.z).add(this.chaseOffset);
-      o.target.copy(o.pos).add(gaze);
+      // The first frame aboard sits straight in the seat; after that the seat eases.
+      this.chaseOffset ??= new THREE.Vector3(o.pos.x - p.x, o.pos.y - p.y, o.pos.z - p.z);
+      easeChaseSeat(o, p, this.chaseOffset, PLANE_LOOK.chaseHalfLife, this.wallDt);
     }
     this.camera.up.copy(o.up);
     this.camera.position.copy(o.pos);

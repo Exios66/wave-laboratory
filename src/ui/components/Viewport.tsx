@@ -1,6 +1,7 @@
 import { beaufortFromWind } from '../../core/units';
 import { useEffect, useRef, useState } from 'react';
-import type { CameraMode, OverlayMode } from '../../render/api';
+import type { CameraMode, OverlayMode, RideTelemetry } from '../../render/api';
+import { RIDE_VIEW_LABELS, RIDE_VIEWS } from '../../render/rideViews';
 import { errorText, isChunkLoadError } from '../errorText';
 import { getRuntime } from '../runtime';
 import { useLab } from '../store';
@@ -8,6 +9,7 @@ import { dayPhase, formatClock } from './clock';
 import { fmt } from './fields';
 import { Icon } from './icons';
 import { Minimap } from './Minimap';
+import { formatRideTelemetry } from './rideHud';
 import { ExpandViewButton, RevealButtons } from './Splitters';
 
 const CAMERAS: { mode: CameraMode; label: string; needsVessel: boolean }[] = [
@@ -247,7 +249,7 @@ function Hud() {
           {status === 'error' && `Simulation error: ${error ?? 'unknown'}`}
           {status === 'ready' && 'Simulation running'}
         </div>
-        {camera === 'plane' && <RideCaption />}
+        {camera === 'plane' && <RideHud />}
         <DepthBadge />
         <div className="hud__corner">
           {overlay !== 'none' && <Legend mode={overlay} />}
@@ -285,19 +287,62 @@ function DepthBadge() {
   );
 }
 
-/** Which flight the plane view is riding, and how to look around from it. */
-function RideCaption() {
-  const [label, setLabel] = useState<string | null>(null);
+/** Which flight the plane view is riding, where the camera sits, and how it is flying. */
+function RideHud() {
+  const rideView = useLab((s) => s.rideView);
+  const [telemetry, setTelemetry] = useState<RideTelemetry | null>(null);
   useEffect(() => {
-    const read = () => setLabel(getRuntime().rendererApi?.planeRide() ?? null);
+    const read = () => setTelemetry(getRuntime().rendererApi?.planeTelemetry() ?? null);
     read();
-    const id = window.setInterval(read, 500);
+    const id = window.setInterval(read, 250);
     return () => window.clearInterval(id);
   }, []);
   return (
-    <div className="hud__card hud__ride" role="status">
-      <strong>{label ? `Riding with ${label}` : 'Joining a lost flight…'}</strong>
-      <span>Drag to look around · scroll to sit further back</span>
+    <div className="hud__card hud__ride">
+      <strong role="status">
+        {telemetry ? `Riding with ${telemetry.label}` : 'Joining a lost flight…'}
+      </strong>
+      <div className="hud__ride-controls">
+        <div className="segmented" role="radiogroup" aria-label="Plane camera">
+          {RIDE_VIEWS.map((v) => (
+            <button
+              key={v}
+              type="button"
+              role="radio"
+              aria-checked={rideView === v}
+              tabIndex={rideView === v ? 0 : -1}
+              onClick={() => useLab.getState().setRideView(v)}
+              onKeyDown={(e) => {
+                if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+                e.preventDefault();
+                const i = RIDE_VIEWS.indexOf(rideView);
+                const step = e.key === 'ArrowRight' ? 1 : -1;
+                useLab
+                  .getState()
+                  .setRideView(RIDE_VIEWS[(i + step + RIDE_VIEWS.length) % RIDE_VIEWS.length]!);
+                const group = e.currentTarget.parentElement;
+                requestAnimationFrame(() =>
+                  group?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus(),
+                );
+              }}
+            >
+              {RIDE_VIEW_LABELS[v]}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="hud__plane"
+          onClick={() => getRuntime().rendererApi?.nextRide()}
+          title="Change to the next aircraft (N)"
+        >
+          Next aircraft
+        </button>
+      </div>
+      {telemetry && <code className="hud__telemetry">{formatRideTelemetry(telemetry)}</code>}
+      <span className="hud__ride-tip">
+        C changes camera · Drag to look around · scroll to sit further back · Esc lands
+      </span>
     </div>
   );
 }

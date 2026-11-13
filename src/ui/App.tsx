@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import type { CameraMode, OverlayMode } from '../render/api';
+import { RIDE_VIEW_LABELS, RIDE_VIEWS } from '../render/rideViews';
 import { Dialogs } from './components/Dialogs';
 import { Dock } from './components/Dock';
 import { Inspector } from './components/Inspector';
@@ -70,6 +71,12 @@ function useGlobalShortcuts(): void {
           break;
         case 'c':
         case 'C': {
+          if (lab.camera === 'plane') {
+            const next = RIDE_VIEWS[(RIDE_VIEWS.indexOf(lab.rideView) + 1) % RIDE_VIEWS.length]!;
+            lab.setRideView(next);
+            lab.notify('info', `Plane camera: ${RIDE_VIEW_LABELS[next]}`);
+            break;
+          }
           const vesselId =
             lab.selection?.kind === 'vessel'
               ? lab.selection.id
@@ -102,8 +109,15 @@ function useGlobalShortcuts(): void {
             useLab.getState().layout.sceneCollapsed ? '3D view enlarged' : 'Panels restored',
           );
           break;
+        case 'n':
+        case 'N':
+          if (lab.camera !== 'plane') return;
+          getRuntime().rendererApi?.nextRide();
+          break;
         case 'Escape':
-          lab.select(null);
+          // From a plane, Esc lands; elsewhere it clears the selection.
+          if (lab.camera === 'plane' && !lab.dialog) lab.togglePlaneView();
+          else lab.select(null);
           break;
         case 'Delete':
         case 'Backspace': {

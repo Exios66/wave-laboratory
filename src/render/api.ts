@@ -8,7 +8,8 @@ import type { CameraSurface, SimFrame } from '../sim/types';
 import type { VesselDefinition } from '../vessel/api';
 import type { AmbienceSettings } from './scenery/types';
 import type { GpuPass } from './gpuTimer';
-import type { RideView } from './rideCamera';
+import type { RideView } from './rideViews';
+import type { AircraftKind } from './scenery/planes';
 
 export type { AmbienceSettings } from './scenery/types';
 export { DAY_LENGTH_RANGE, DEFAULT_AMBIENCE } from './scenery/types';
@@ -77,6 +78,20 @@ export interface RendererStats {
   cameraDepth: number;
 }
 
+/** Plane view readout: which flight, and how it is flying. */
+export interface RideTelemetry {
+  label: string;
+  kind: AircraftKind;
+  /** Above sea level [m]. */
+  altitudeM: number;
+  /** Airspeed [m/s] (still air: the ground speed it flies). */
+  speedMs: number;
+  /** Compass heading [deg, 0 north, clockwise]. */
+  headingDeg: number;
+  /** Bank [deg], positive right wing down. */
+  bankDeg: number;
+}
+
 export interface LabRendererApi {
   /** Upload a new spectral sea (called after every experiment load). */
   setOcean(data: GpuOceanData): void;
@@ -115,8 +130,8 @@ export interface LabRendererApi {
   cameraProbePoint(): { x: number; y: number } | null;
   /** Sea surface under the camera from the worker, at simulation time `t`. */
   setCameraSurface(surface: CameraSurface | null, t: number): void;
-  /** Name of the flight the Plane camera is riding, or null (not riding, or not yet aboard). */
-  planeRide(): string | null;
+  /** The flight the Plane camera is riding, or null (not riding, or not yet aboard). */
+  planeTelemetry(): RideTelemetry | null;
   /** Plane view: ride in the chase seat, the cockpit, out on the wing, or watch a fly-by. */
   setRideView(view: RideView): void;
   /** Plane view: swap the ride for the next kind of aircraft, at the same point on the circuit. */

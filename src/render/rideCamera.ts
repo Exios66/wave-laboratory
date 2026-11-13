@@ -16,9 +16,15 @@ import {
   type PlanePose,
 } from './scenery/planes';
 
-export type RideView = 'chase' | 'cockpit' | 'wing' | 'flyby';
+import type { RideView } from './rideViews';
 
-export const RIDE_VIEWS: readonly RideView[] = ['chase', 'cockpit', 'wing', 'flyby'];
+export { RIDE_VIEWS, type RideView } from './rideViews';
+
+/** Compass bearing [deg, 0 north, 90 east] of a Three.js heading (atan2(z, x); north is −z). */
+export function compassDeg(heading: number): number {
+  const d = (Math.atan2(Math.cos(heading), -Math.sin(heading)) * 180) / Math.PI;
+  return ((d % 360) + 360) % 360;
+}
 
 /** The flight being ridden, as far as the cameras need it. */
 export interface RideFlight {
@@ -278,4 +284,26 @@ export function dampVec(
 ): THREE.Vector3 {
   const k = halfLifeS > 0 ? 1 - Math.pow(2, -Math.max(0, dt) / halfLifeS) : 1;
   return current.lerp(target, k);
+}
+
+const GAZE = new THREE.Vector3();
+const WANT = new THREE.Vector3();
+
+/**
+ * Ease the chase seat: `offset` (the seat relative to the aircraft, carried between frames)
+ * moves toward where `out` puts it, and `out` is moved there with its gaze kept. Easing the
+ * offset rather than the world position keeps the seat from trailing a 70 m/s aircraft.
+ */
+export function easeChaseSeat(
+  out: RideCameraOut,
+  pose: PlanePose,
+  offset: THREE.Vector3,
+  halfLifeS: number,
+  dt: number,
+): void {
+  GAZE.subVectors(out.target, out.pos);
+  WANT.set(out.pos.x - pose.x, out.pos.y - pose.y, out.pos.z - pose.z);
+  dampVec(offset, WANT, halfLifeS, dt);
+  out.pos.set(pose.x, pose.y, pose.z).add(offset);
+  out.target.copy(out.pos).add(GAZE);
 }
