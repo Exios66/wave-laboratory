@@ -63,6 +63,22 @@ test('production build runs under its Content-Security-Policy', async ({ page })
     document.addEventListener('securitypolicyviolation', (e) =>
       seen.push(`${e.violatedDirective} ${e.blockedURI}`),
     );
+    // GLTFLoader revokes an embedded texture's blob URL only once it has decoded, so a revoked
+    // image URL is proof the texture path ran to the end under the policy.
+    const images = new Set<string>();
+    const decoded = { count: 0 };
+    (window as unknown as { __texturesDecoded: { count: number } }).__texturesDecoded = decoded;
+    const create = URL.createObjectURL.bind(URL);
+    const revoke = URL.revokeObjectURL.bind(URL);
+    URL.createObjectURL = (obj: Blob | MediaSource) => {
+      const url = create(obj);
+      if (obj instanceof Blob && obj.type.startsWith('image/')) images.add(url);
+      return url;
+    };
+    URL.revokeObjectURL = (url: string) => {
+      if (images.delete(url)) decoded.count++;
+      revoke(url);
+    };
   });
   // Scenery models (meshopt WebAssembly, glTF textures) load on the full tier.
   const model = page.waitForResponse((r) => /\/models\/[\w-]+\.glb$/.test(r.url()), {
@@ -86,8 +102,17 @@ test('production build runs under its Content-Security-Policy', async ({ page })
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: /^Save/ }).click();
   await download;
-  // Give the textures a moment to decode, then check nothing was blocked.
-  await page.waitForTimeout(3000);
+  // Wait until a model texture has decoded, then check nothing was blocked.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            (window as unknown as { __texturesDecoded: { count: number } }).__texturesDecoded.count,
+        ),
+      { timeout: 120_000 },
+    )
+    .toBeGreaterThan(0);
   const violations = await page.evaluate(
     () => (window as unknown as { __cspViolations: string[] }).__cspViolations,
   );
