@@ -36,7 +36,7 @@ import { hullDesign, type HullDesign } from '../../vessel/hulls';
 import { loftHull } from '../../vessel/mesh';
 import type { WakeSource } from '../scene/wakes';
 import { ISLAND_CLEAR_RADIUS, islandsNear } from './islands';
-import { ModelInstances, type ModelLibrary } from './models';
+import { fitLength, ModelInstances, type ModelLibrary, type ModelName } from './models';
 import type { SceneryFrame, SceneryLayer, SceneryTier } from './types';
 import { KN, type WildVessel } from './wildlife';
 
@@ -925,10 +925,31 @@ const TRAFFIC_KINDS: readonly TrafficKind[] = [
   'pirate',
 ];
 const STRUCTURE_KINDS: readonly StructureKind[] = ['buoy'];
-/** The buoy model: height of its top [m], scale to the procedural buoy's size, depth sunk [m]. */
-const BUOY_MODEL_TOP = 2.7;
-const BUOY_MODEL_SCALE = 1.9;
-const BUOY_MODEL_SINK = 1.5;
+/** A navigation-marker model: its top [m], scale to the procedural buoy's size, depth sunk [m]. */
+interface MarkerFit {
+  top: number;
+  scale: number;
+  sink: number;
+}
+export type MarkerModel = 'buoy' | 'lateral-marker';
+const MARKER_FIT: Readonly<Record<MarkerModel, MarkerFit>> = {
+  buoy: { top: 2.7, scale: 1.9, sink: 1.5 },
+  'lateral-marker': { top: 6.84, scale: 0.8, sink: 1.2 },
+};
+const MARKER_MODELS: readonly MarkerModel[] = ['buoy', 'lateral-marker'];
+
+/** Which marker model stands for the buoy with this seed: an even mix of the two. */
+export function markerModel(seed: number): MarkerModel {
+  let h = Math.imul(seed ^ (seed >>> 16), 0x45d9f3b);
+  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+  return ((h ^ (h >>> 16)) & 1) === 0 ? 'buoy' : 'lateral-marker';
+}
+
+/**
+ * Draught of the tall-ship model [m]: its keel is the model's floor. The model is fitted to the
+ * pirate lugger's hull length (CLASS_DIMS.pirate).
+ */
+const TALL_SHIP_SINK = 2.2;
 const MAX_LIGHTS = 64;
 
 /** Soft round light sprite (white, alpha falloff) so night lamps are glows, not hard squares. */
@@ -964,9 +985,10 @@ export class TrafficLayer implements SceneryLayer {
   });
   private readonly shipMeshes: Record<TrafficKind, THREE.InstancedMesh>;
   private readonly structMeshes: Record<StructureKind, THREE.InstancedMesh>;
-  /** Sea buoys drawn from the CC0 buoy model when it is loaded (see scenery/models.ts). */
+  /** Sea buoys and the pirate drawn from CC0 models once loaded (see scenery/models.ts). */
   private library: ModelLibrary | null = null;
-  private buoyModel: ModelInstances | null = null;
+  private readonly markerModels = new Map<MarkerModel, ModelInstances>();
+  private tallShip: { inst: ModelInstances; scale: number } | null = null;
   private readonly lightPoints: THREE.Points;
   private readonly lightPos: THREE.BufferAttribute;
   private readonly lightCol: THREE.BufferAttribute;
@@ -1027,23 +1049,39 @@ export class TrafficLayer implements SceneryLayer {
     this.library = library;
   }
 
-  /** The buoy model's instances when it is in use this frame, else null. */
-  private buoyInstances(tier: SceneryTier): ModelInstances | null {
+  /**
+   * Instances of model `name` when it can be drawn this frame, else null (no library, lite tier,
+   * still loading, or failed: the procedural mesh stands in).
+   */
+  private modelParts(name: ModelName, tier: SceneryTier) {
     const lib = this.library;
-    if (!lib || tier === 'lite') {
-      this.buoyModel?.commit(0);
-      return null;
+    if (!lib || tier === 'lite') return null;
+    const parts = lib.get(name);
+    if (!parts && !lib.hasFailed(name)) void lib.request(name);
+    return parts;
+  }
+
+  private markerInstances(name: MarkerModel, tier: SceneryTier): ModelInstances | null {
+    let inst = this.markerModels.get(name) ?? null;
+    if (!inst) {
+      const parts = this.modelParts(name, tier);
+      if (!parts) return null;
+      inst = new ModelInstances(parts, 16, `structure-${name}-model`);
+      this.markerModels.set(name, inst);
+      this.object.add(inst.object);
     }
-    if (!this.buoyModel) {
-      const parts = lib.get('buoy');
-      if (!parts) {
-        void lib.request('buoy');
-        return null;
-      }
-      this.buoyModel = new ModelInstances(parts, 16, 'structure-buoy-model');
-      this.object.add(this.buoyModel.object);
+    return this.library && tier !== 'lite' ? inst : null;
+  }
+
+  private tallShipInstances(tier: SceneryTier): { inst: ModelInstances; scale: number } | null {
+    if (!this.tallShip) {
+      const parts = this.modelParts('tall-ship', tier);
+      if (!parts) return null;
+      const inst = new ModelInstances(parts, 1, 'traffic-tall-ship');
+      this.tallShip = { inst, scale: fitLength(parts, CLASS_DIMS.pirate.length) };
+      this.object.add(inst.object);
     }
-    return this.buoyModel;
+    return this.library && tier !== 'lite' ? this.tallShip : null;
   }
 
   setEnabled(enabled: boolean): void {
@@ -1157,6 +1195,8 @@ export class TrafficLayer implements SceneryLayer {
       lights++;
     };
 
+    const tallShip = this.tallShipInstances(tier);
+    let tallShips = 0;
     for (const s of poses) {
       const mesh = this.shipMeshes[s.kind];
       const idx = mesh.count;
@@ -1164,9 +1204,18 @@ export class TrafficLayer implements SceneryLayer {
       this.tmpP.set(s.x, s.heave, -s.y);
       this.tmpE.set(s.roll, s.heading, s.pitch, 'YXZ');
       this.tmpQ.setFromEuler(this.tmpE);
-      this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
-      mesh.setMatrixAt(idx, this.tmpM);
-      mesh.count = idx + 1;
+      if (s.kind === 'pirate' && tallShip && tallShips < tallShip.inst.capacity) {
+        // The CC0 tall ship stands in for the procedural lugger: bow along +x, fitted to 34 m.
+        this.tmpP.y -= TALL_SHIP_SINK;
+        this.tmpS.setScalar(tallShip.scale);
+        this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
+        this.tmpS.set(1, 1, 1);
+        tallShip.inst.set(tallShips++, this.tmpM);
+      } else {
+        this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
+        mesh.setMatrixAt(idx, this.tmpM);
+        mesh.count = idx + 1;
+      }
 
       if (nightVis > 0.05) {
         // Masthead / deck lamp + port/starboard nav lights.
@@ -1192,55 +1241,64 @@ export class TrafficLayer implements SceneryLayer {
         }
       }
     }
+    this.tallShip?.inst.commit(tallShips);
     for (const k of TRAFFIC_KINDS) {
       if (this.shipMeshes[k].count > 0) this.shipMeshes[k].instanceMatrix.needsUpdate = true;
     }
 
-    // With structures off, empty the model buoys too (traffic may still keep this group shown).
-    if (!this.structuresEnabled) this.buoyModel?.commit(0);
-    const buoys = this.structuresEnabled ? this.buoyInstances(tier) : null;
-    let buoyCount = 0;
+    // With structures off, empty the model markers too (traffic may keep this group shown).
+    const markers = new Map<MarkerModel, ModelInstances>();
+    if (this.structuresEnabled) {
+      for (const name of MARKER_MODELS) {
+        const inst = this.markerInstances(name, tier);
+        if (inst) markers.set(name, inst);
+      }
+    }
+    const markerCount = new Map<MarkerModel, number>();
     if (this.structuresEnabled) {
       const cells = structuresNear(camX, camY, tier);
       for (const cell of cells) {
         for (const item of cell.items) {
-          const mesh = this.structMeshes[item.kind];
-          const idx = mesh.count;
-          if (idx >= 16) continue;
           const bob = 0.25 * Math.sin(frame.t * 1.7 + item.seed);
           this.tmpP.set(item.x, bob, -item.y);
           this.tmpE.set(0, item.yaw, 0);
           this.tmpQ.setFromEuler(this.tmpE);
-          this.tmpS.setScalar(item.scale);
-          this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
-          mesh.setMatrixAt(idx, this.tmpM);
-          mesh.count = idx + 1;
-          if (buoys) {
-            // The model buoy (2.7 m) scaled to the procedural one's size, its skirt under water.
-            this.tmpP.y = bob - BUOY_MODEL_SINK * item.scale;
-            this.tmpS.setScalar(item.scale * BUOY_MODEL_SCALE);
+          // The buoy's own marker model, or the other one while it loads, or the procedural buoy.
+          const want = markerModel(item.seed);
+          const name = markers.has(want) ? want : markers.has('buoy') ? 'buoy' : null;
+          let top = 5.2;
+          if (name) {
+            const fit = MARKER_FIT[name];
+            const i = markerCount.get(name) ?? 0;
+            if (i >= 16) continue;
+            // Scaled to the procedural buoy's size, its skirt under water.
+            this.tmpP.y = bob - fit.sink * item.scale;
+            this.tmpS.setScalar(item.scale * fit.scale);
             this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
-            buoys.set(buoyCount++, this.tmpM);
+            markers.get(name)!.set(i, this.tmpM);
+            markerCount.set(name, i + 1);
+            top = (fit.top * fit.scale - fit.sink) * item.scale;
+          } else {
+            const mesh = this.structMeshes[item.kind];
+            const idx = mesh.count;
+            if (idx >= 16) continue;
+            this.tmpS.setScalar(item.scale);
+            this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
+            mesh.setMatrixAt(idx, this.tmpM);
+            mesh.count = idx + 1;
           }
 
           const beacon = structureBeaconIntensity(frame.t, item.seed, frame.calm);
-          if (beacon > 0.1) {
-            const h = buoys
-              ? (BUOY_MODEL_TOP * BUOY_MODEL_SCALE - BUOY_MODEL_SINK) * item.scale
-              : 5.2;
-            pushLight(item.x, h + bob, -item.y, beacon, beacon * 0.7, 0.1);
-          }
+          if (beacon > 0.1) pushLight(item.x, top + bob, -item.y, beacon, beacon * 0.7, 0.1);
         }
       }
       this.tmpS.set(1, 1, 1);
-      if (buoys) {
-        buoys.commit(buoyCount);
-        this.structMeshes.buoy.count = 0;
-      }
       for (const k of STRUCTURE_KINDS) {
         if (this.structMeshes[k].count > 0) this.structMeshes[k].instanceMatrix.needsUpdate = true;
       }
     }
+
+    for (const [name, inst] of this.markerModels) inst.commit(markerCount.get(name) ?? 0);
 
     this.lightPoints.geometry.setDrawRange(0, lights);
     if (lights > 0) {
@@ -1258,8 +1316,10 @@ export class TrafficLayer implements SceneryLayer {
       this.structMeshes[k].geometry.dispose();
       this.structMeshes[k].dispose();
     }
-    this.buoyModel?.dispose();
-    this.buoyModel = null;
+    for (const inst of this.markerModels.values()) inst.dispose();
+    this.markerModels.clear();
+    this.tallShip?.inst.dispose();
+    this.tallShip = null;
     this.material.dispose();
     this.lightPoints.geometry.dispose();
     this.lightMat.map?.dispose();

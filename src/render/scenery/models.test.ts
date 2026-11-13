@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ModelInstances, ModelLibrary, partsFromScene, type ModelPart } from './models';
+import { fitLength, ModelInstances, ModelLibrary, partsFromScene, type ModelPart } from './models';
 
 /** A scene shaped like a decoded meshopt file: quantized positions, scale in the node. */
 function quantizedScene(): THREE.Object3D {
@@ -108,5 +108,12 @@ describe('scenery models', () => {
     inst.commit(0);
     expect(inst.drawCalls).toBe(0);
     inst.dispose();
+  });
+
+  it('scales a model so its longest horizontal side has a given length', () => {
+    const parts: ModelPart[] = [
+      { geometry: new THREE.BoxGeometry(2, 1, 8), material: new THREE.MeshBasicMaterial() },
+    ];
+    expect(fitLength(parts, 34)).toBeCloseTo(4.25, 6);
   });
 });

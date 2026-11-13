@@ -500,13 +500,20 @@ export interface IslandProp {
 }
 
 /** Models the islands use when scenery models are on. */
-export const ISLAND_MODELS = ['rock-b', 'rock-a'] as const;
+export const ISLAND_MODELS = ['rock-b', 'rock-a', 'crate', 'lantern'] as const;
 export type IslandModel = (typeof ISLAND_MODELS)[number];
-/** Most copies of each model across all visible islands. */
+/** The models islands switch over on: the rocks replace baked geometry; the rest is dressing. */
+const ROCK_MODELS = ['rock-b', 'rock-a'] as const;
+/** Most copies of each model on one island (instance capacity is this × the island pool). */
 const MODEL_PER_ISLAND: Record<IslandModel, number> = {
   'rock-b': 24,
   'rock-a': 3,
+  crate: 3,
+  lantern: 1,
 };
+/** Uniform scales for the dressing models (CC0 sizes: lantern 0.23 m tall, crate 0.82 m long). */
+const LANTERN_SCALE = 3;
+const CRATE_SCALE = 1.6;
 
 interface IslandBuild {
   maxH: number;
@@ -514,6 +521,10 @@ interface IslandBuild {
   palms: number[];
   /** Lighthouse lamp, island-local, or null. */
   lamp: THREE.Vector3 | null;
+}
+
+function uniform(k: number): { sx: number; sy: number; sz: number } {
+  return { sx: k, sy: k, sz: k };
 }
 
 /**
@@ -590,6 +601,29 @@ function buildIsland(
     part(T.box, 1.62, 1.45, 1.0, 0.12, 0.55, 0.55, C.window, 1);
     part(T.box, 0, 1.45, 1.62, 0.6, 0.6, 0.12, C.window, 1);
     part(T.box, 0, 1.45, -1.62, 0.6, 0.6, 0.12, C.window, 1);
+    if (props) {
+      // A lantern on the step beside the door and one or two stacked crates on the platform.
+      // Placed without the random stream, so the island's layout is the same either way.
+      const local = (lx: number, lz: number): [number, number] => [
+        x + k * (lx * ca + lz * sa),
+        z + k * (-lx * sa + lz * ca),
+      ];
+      const [lx, lz] = local(2.2, -0.9);
+      props.push({ model: 'lantern', x: lx, y: floor, z: lz, yaw, ...uniform(LANTERN_SCALE) });
+      const [cx, cz] = local(1.9, 1.3);
+      const crates = 1 + (spec.seed & 1);
+      for (let i = 0; i < crates; i++) {
+        const y = floor + i * 0.35 * CRATE_SCALE;
+        props.push({
+          model: 'crate',
+          x: cx,
+          y,
+          z: cz,
+          yaw: yaw + i * 0.4,
+          ...uniform(CRATE_SCALE),
+        });
+      }
+    }
     maxH = Math.max(maxH, floor + 4.6 * k);
     spots.push({ x, z, r: 3 * k });
   }
@@ -612,6 +646,18 @@ function buildIsland(
       }
     }
     spots.push({ x: (coast - 2) * cx, z: (coast - 2) * cz, r: 3 });
+    if (props) {
+      // A crate waiting at the end of the dock, on the deck.
+      const end = start + len + 5 - 2.5;
+      props.push({
+        model: 'crate',
+        x: end * cx,
+        y: deck + 0.11,
+        z: end * cz,
+        yaw: -theta,
+        ...uniform(CRATE_SCALE),
+      });
+    }
   }
 
   let lamp: THREE.Vector3 | null = null;
@@ -1190,23 +1236,30 @@ gl_Position = projectionMatrix * mvPosition;`,
     const want = lib !== null && frame.tier !== 'lite';
     if (want && !this.modelsRequested) {
       this.modelsRequested = true;
-      void lib.request(...ISLAND_MODELS);
+      void lib.request(...ISLAND_MODELS).catch(() => {});
     }
-    const on = want && lib.ready(...ISLAND_MODELS);
-    if (on === this.modelMode) return;
-    this.modelMode = on;
+    const on = want && lib.ready(...ROCK_MODELS);
+    // Dressing models join as they arrive; one that fails is simply left out.
+    let added = false;
     if (on) {
       for (const name of ISLAND_MODELS) {
-        if (this.modelInstances.has(name)) continue;
+        const parts = lib!.get(name);
+        if (this.modelInstances.has(name) || !parts) continue;
         const inst = new ModelInstances(
-          lib!.get(name)!,
+          parts,
           POOL_SIZE * MODEL_PER_ISLAND[name],
           `island-${name}`,
         );
         this.modelInstances.set(name, inst);
         this.object.add(inst.object);
+        added = true;
       }
     }
+    if (on === this.modelMode) {
+      if (added) this.rebuildInstances();
+      return;
+    }
+    this.modelMode = on;
     for (const slot of this.active.values()) this.assign(slot, slot.spec!);
     this.rebuildInstances();
   }

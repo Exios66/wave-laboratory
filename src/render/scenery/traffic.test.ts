@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { islandsNear } from './islands';
 import {
   createHostileState,
@@ -21,7 +21,9 @@ import {
   TrafficLayer,
   trafficNear,
   lanePoint,
+  markerModel,
 } from './traffic';
+import { ModelLibrary } from './models';
 import type { SceneryFrame } from './types';
 
 function makeFrame(overrides: Partial<SceneryFrame> = {}): SceneryFrame {
@@ -337,6 +339,19 @@ describe('offshore static structures', () => {
     expect(seen).toBeGreaterThan(0);
   });
 
+  it('alternates the two buoy models across the buoy cells', () => {
+    const count = { buoy: 0, 'lateral-marker': 0 };
+    for (let ix = -20; ix < 20; ix++) {
+      for (let iy = -20; iy < 20; iy++) {
+        for (const s of structuresInCell(ix, iy)?.items ?? []) count[markerModel(s.seed)]++;
+      }
+    }
+    const total = count.buoy + count['lateral-marker'];
+    expect(total).toBeGreaterThan(20);
+    expect(count.buoy / total).toBeLessThanOrEqual(0.7);
+    expect(count['lateral-marker'] / total).toBeLessThanOrEqual(0.7);
+  });
+
   it('places deterministic navigation buoys outside the clear radius', () => {
     const a = structuresNear(5000, -4000, 'full', 12_000);
     const b = structuresNear(5000, -4000, 'full', 12_000);
@@ -478,5 +493,52 @@ describe('TrafficLayer', () => {
     layer.appendWakeSources(wakes);
     expect(wakes.length).toBeGreaterThan(0);
     layer.dispose();
+  });
+
+  /** Step a hostile-enabled layer until the pirate lugger appears (or give up). */
+  function meetPirate(layer: TrafficLayer): boolean {
+    const cam = new THREE.PerspectiveCamera();
+    cam.position.set(0, 20, 0);
+    layer.setFlags({ traffic: false, structures: false, hostiles: true });
+    for (let i = 0; i < 4000; i++) {
+      layer.update(makeFrame({ camera: cam, t: 120 + i * 0.5, wallT: 120 + i * 0.5, dt: 0.5 }));
+      if (layer.ships.some((s) => s.kind === 'pirate')) return true;
+    }
+    return false;
+  }
+
+  const shipModel = () => new THREE.Mesh(new THREE.BoxGeometry(23, 25, 6).translate(0, 12.5, 0));
+
+  it('draws the pirate as the tall-ship model once it has loaded', async () => {
+    const lib = new ModelLibrary('/models/', () => Promise.resolve(shipModel()));
+    await lib.request('tall-ship');
+    const layer = new TrafficLayer();
+    layer.setModels(lib);
+    expect(meetPirate(layer)).toBe(true);
+    const procedural = layer.object.getObjectByName('traffic-pirate') as THREE.InstancedMesh;
+    const model = layer.object.getObjectByName('traffic-tall-ship-0') as THREE.InstancedMesh;
+    expect(model?.count).toBe(1);
+    expect(procedural.count).toBe(0);
+    layer.dispose();
+    lib.dispose();
+  });
+
+  it('keeps the procedural pirate hull when the tall-ship model fails to load', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const lib = new ModelLibrary('/models/', (url) =>
+      url.includes('tall-ship') ? Promise.reject(new Error('404')) : Promise.resolve(shipModel()),
+    );
+    await lib.request('tall-ship');
+    expect(lib.get('tall-ship')).toBeNull();
+    expect(lib.hasFailed('tall-ship')).toBe(true);
+    const layer = new TrafficLayer();
+    layer.setModels(lib);
+    expect(meetPirate(layer)).toBe(true);
+    const procedural = layer.object.getObjectByName('traffic-pirate') as THREE.InstancedMesh;
+    expect(procedural.visible).toBe(true);
+    expect(procedural.count).toBe(1);
+    layer.dispose();
+    lib.dispose();
+    warn.mockRestore();
   });
 });

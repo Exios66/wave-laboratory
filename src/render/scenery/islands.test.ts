@@ -214,13 +214,51 @@ describe('IslandLayer scenery models', () => {
     expect(counts['rock-b']).toBeGreaterThan(0);
     // One draw call per model, whatever the number of islands.
     const models = dressed.object.children.filter((c) => c.name.startsWith('island-rock'));
-    expect(models).toHaveLength(ISLAND_MODELS.length);
+    expect(models).toHaveLength(2); // rock-a and rock-b
     // Palms are laid out from the same random stream either way.
     const palms = (l: IslandLayer) =>
       (l.object.children.find((c) => c.name === 'island-palms') as THREE.InstancedMesh).count;
     expect(palms(dressed)).toBe(palms(plain));
     plain.dispose();
     dressed.dispose();
+    lib.dispose();
+  });
+
+  it('dresses huts and docks with lanterns and crates, all on their own island', async () => {
+    const layer = new IslandLayer();
+    const lib = library();
+    layer.setModels(lib);
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(-3_100, 80, -900);
+    const f = { ...frame(camera), tier: 'full' as const };
+    layer.update(f);
+    await lib.request(...ISLAND_MODELS);
+    layer.update(f);
+    const islands = layer.visibleIslands;
+    const huts = islands.filter((i) => i.hut).length;
+    const docks = islands.filter((i) => i.dock).length;
+    expect(huts).toBeGreaterThan(0);
+    expect(docks).toBeGreaterThan(0);
+    const counts = layer.modelCounts;
+    expect(counts.lantern).toBe(huts);
+    // One or two crates on each hut's platform, one at the end of each dock.
+    expect(counts.crate).toBeGreaterThanOrEqual(huts + docks);
+    expect(counts.crate).toBeLessThanOrEqual(2 * huts + docks);
+    // Every prop stands on (or off the dock of) its own island.
+    const at = new THREE.Vector3();
+    const m = new THREE.Matrix4();
+    for (const name of ['lantern', 'crate']) {
+      const mesh = layer.object.getObjectByName(`island-${name}-0`) as THREE.InstancedMesh;
+      for (let i = 0; i < mesh.count; i++) {
+        mesh.getMatrixAt(i, m);
+        at.setFromMatrixPosition(m);
+        const near = Math.min(
+          ...islands.map((s) => Math.hypot(at.x - s.x, -at.z - s.y) - s.radius),
+        );
+        expect(near, name).toBeLessThanOrEqual(35);
+      }
+    }
+    layer.dispose();
     lib.dispose();
   });
 
