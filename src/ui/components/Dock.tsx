@@ -8,6 +8,7 @@ import {
 } from '../../instruments/analysis';
 import { downloadText, slug } from '../fileOps';
 import { getRuntime } from '../runtime';
+import { renderCostText, renderCostTitle } from '../renderCost';
 import { useLab, type DockTab } from '../store';
 import { telemetry } from '../telemetry';
 import type { ChartSeries } from './Chart';
@@ -184,18 +185,18 @@ function Transport() {
 /** Frame rate and, where the browser can measure it, GPU time per frame. */
 function RenderCost() {
   const [text, setText] = useState('');
+  const [title, setTitle] = useState(renderCostTitle(null));
   useEffect(() => {
     const read = () => {
       const stats = getRuntime().rendererApi?.stats;
-      if (!stats || stats.fps <= 0) return setText('');
-      const gpu = stats.gpuMs === null ? '' : ` · GPU ${stats.gpuMs.toFixed(1)} ms`;
-      setText(`${Math.round(stats.fps)} fps${gpu}`);
+      setText(stats ? renderCostText(stats.fps, stats.gpuMs) : '');
+      setTitle(renderCostTitle(stats?.gpuPasses ?? null));
     };
     const id = window.setInterval(read, 500);
     return () => window.clearInterval(id);
   }, []);
   return (
-    <span className="field__hint" title="Frames drawn per second and GPU time per frame">
+    <span className="field__hint" title={title}>
       {text}
     </span>
   );

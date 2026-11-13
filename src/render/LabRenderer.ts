@@ -332,6 +332,7 @@ export class LabRenderer implements LabRendererApi {
     fps: 0,
     frameMs: 0,
     gpuMs: null,
+    gpuPasses: null,
     drawCalls: 0,
     triangles: 0,
     underwater: false,
@@ -474,6 +475,11 @@ export class LabRenderer implements LabRendererApi {
   private fpsElapsed = 0;
   private lastFrameAt = 0;
   private readonly gpuTimer: GpuTimer;
+  /** Inside the post chain: closes the scene's GPU timing and opens the post chain's. */
+  private readonly afterScenePass = (): void => {
+    this.gpuTimer.end();
+    this.gpuTimer.begin('post');
+  };
   private readonly prepass = new ScenePrepass();
   private readonly fogLook = new THREE.Vector3();
   private shadowSize = 0;
@@ -1380,11 +1386,14 @@ export class LabRenderer implements LabRendererApi {
     const gl = this.renderer.getContext();
     if (gl.isContextLost()) return;
     const t0 = performance.now();
-    this.gpuTimer.begin();
     const t = this.shownT || this.frame?.t || 0;
     this.poseAt(t);
     this.updateWakes(t);
+    // GPU stages are timed one after another (timer queries cannot nest): the FFT ocean update,
+    // the scene prepasses, the scene, and the post chain that follows it.
+    this.gpuTimer.begin('ocean');
     this.ocean.update(t);
+    this.gpuTimer.end();
     this.tickWall(t0);
     this.updateCamera();
     this.constrainToSurface(t);
@@ -1404,14 +1413,18 @@ export class LabRenderer implements LabRendererApi {
     this.applyUnderwater();
     this.updateEnvironment();
     this.updateShadows();
+    this.gpuTimer.begin('prepass');
     this.drawPrepass();
+    this.gpuTimer.end();
     // Count only the scene draw, not the FFT passes or the reflection and depth prepasses, so
     // the numbers are steady frame to frame.
     this.renderer.info.reset();
-    if (this.post.active) this.post.render();
+    this.gpuTimer.begin('scene');
+    if (this.post.active) this.post.render(this.afterScenePass);
     else this.renderer.render(this.scene, this.camera);
     this.gpuTimer.end();
     this.stats.gpuMs = this.gpuTimer.ms;
+    this.stats.gpuPasses = this.gpuTimer.passes;
     const now = performance.now();
     this.stats.frameMs = now - t0;
     this.stats.drawCalls = this.renderer.info.render.calls;
