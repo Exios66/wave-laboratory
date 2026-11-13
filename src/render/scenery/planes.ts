@@ -16,7 +16,8 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Pcg32 } from '../../core/rng';
 import { smoothstep } from '../../core/mathUtil';
-import type { SceneryFrame, SceneryLayer } from './types';
+import type { SceneryFrame, SceneryLayer, SceneryTier } from './types';
+import { liveryFor, paintAtlas, projectUv, remapUv, type AtlasRegion } from './aircraftLivery';
 
 // ---------------------------------------------------------------------------------------------
 // Aircraft
@@ -568,16 +569,27 @@ export class CrossingScheduler {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Geometry (stylised low-poly, nose along +x, up +y, starboard +z)
+// Geometry (nose along +x, up +y, starboard +z). Every part carries atlas UVs (see
+// aircraftLivery.ts); an airframe is one geometry with a body group and a glass group.
 // ---------------------------------------------------------------------------------------------
 
-interface AirframeLayout {
+/** Propeller hub and radius. */
+export interface PropHub {
+  x: number;
+  y: number;
+  z: number;
+  r: number;
+}
+
+export interface AirframeLayout {
+  /** Group 0: painted body; group 1: canopy and turret glass. */
   geometry: THREE.BufferGeometry;
-  /** Propeller hubs and radii. */
-  props: { x: number; y: number; z: number; r: number }[];
+  props: PropHub[];
   /** Port wingtip, starboard wingtip, tail light. */
   lights: [THREE.Vector3, THREE.Vector3, THREE.Vector3];
 }
+
+const SIDES = 16;
 
 function box(
   w: number,
@@ -590,19 +602,72 @@ function box(
   return new THREE.BoxGeometry(w, h, d).translate(x, y, z);
 }
 
-/** Cylinder along x: `rNose` at the +x end. */
-function tube(
+/**
+ * Small parts painted one colour: the part's own UVs squeezed into a 2 % patch around (u, v),
+ * which must lie on plain paint. (A patch, not a point, keeps the normal map's tangent frame
+ * well defined.)
+ */
+function solid(geo: THREE.BufferGeometry, region: AtlasRegion, u: number, v: number) {
+  return projectUv(geo, (_p, _n, uv) => ({
+    region,
+    u: u + (uv.x - 0.5) * 0.02,
+    v: v + (uv.y - 0.5) * 0.02,
+  }));
+}
+
+/**
+ * Streamlined hull along x, `rNose` at the +x end, rounded off at both ends. The lathe seam
+ * runs along the keel, where nobody looks.
+ */
+function hull(
   length: number,
   rNose: number,
   rTail: number,
   x: number,
   y: number,
   z: number,
-  segments = 8,
 ): THREE.BufferGeometry {
-  return new THREE.CylinderGeometry(rNose, rTail, length, segments)
+  const pts: THREE.Vector2[] = [new THREE.Vector2(0, -length / 2)];
+  const n = 16;
+  for (let k = 0; k <= n; k++) {
+    const s = k / n;
+    const tail = 0.5 + 0.5 * Math.sqrt(Math.min(1, s / 0.1));
+    const nose = 0.72 + 0.28 * Math.sqrt(Math.min(1, (1 - s) / 0.07));
+    pts.push(new THREE.Vector2((rTail + (rNose - rTail) * s) * tail * nose, (s - 0.5) * length));
+  }
+  pts.push(new THREE.Vector2(0, length / 2));
+  const x0 = x - length / 2;
+  const geo = new THREE.LatheGeometry(pts, SIDES, Math.PI / 2, Math.PI * 2)
     .rotateZ(-Math.PI / 2)
     .translate(x, y, z);
+  return projectUv(geo, (p, _n, uv) => ({ region: 'fuselage', u: uv.x, v: (p.x - x0) / length }));
+}
+
+/** Engine nacelle or cowling along x, `rNose` at the +x end. */
+function nacelle(
+  length: number,
+  rNose: number,
+  rTail: number,
+  x: number,
+  y: number,
+  z: number,
+): THREE.BufferGeometry {
+  const geo = new THREE.CylinderGeometry(rNose, rTail, length, SIDES)
+    .rotateZ(-Math.PI / 2)
+    .translate(x, y, z);
+  return remapUv(geo, 'engine');
+}
+
+/** Wing, tailplane or float: top and bottom skins mapped by chord and by span out of `half`. */
+function lifting(geo: THREE.BufferGeometry, half: number): THREE.BufferGeometry {
+  geo.computeBoundingBox();
+  const b = geo.boundingBox!;
+  const dx = Math.max(1e-6, b.max.x - b.min.x);
+  return projectUv(geo, (p, n) => ({
+    region: n.y < -0.3 ? 'wingBottom' : 'wingTop',
+    u: (p.x - b.min.x) / dx,
+    v: Math.abs(p.z) / half,
+  }));
 }
 
 /** One wing panel from z = zRoot outward to ±span, with dihedral. */
@@ -615,44 +680,74 @@ function wingPanel(
   x: number,
   y: number,
   zRoot: number,
+  half: number,
 ): THREE.BufferGeometry {
-  return new THREE.BoxGeometry(chord, thick, span)
+  const geo = new THREE.BoxGeometry(chord, thick, span)
     .translate(0, 0, (side * span) / 2)
     .rotateX((side * dihedralDeg * Math.PI) / 180)
     .translate(x, y, side * zRoot);
+  return lifting(geo, half);
 }
 
-function merge(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+/** Vertical fin: mapped front-to-back so markings read the right way round from both sides. */
+function fin(geo: THREE.BufferGeometry): THREE.BufferGeometry {
+  geo.computeBoundingBox();
+  const b = geo.boundingBox!;
+  const dx = Math.max(1e-6, b.max.x - b.min.x);
+  const dy = Math.max(1e-6, b.max.y - b.min.y);
+  return projectUv(geo, (p, n) => {
+    const s = (p.x - b.min.x) / dx;
+    return { region: 'tail', u: n.z < 0 ? 1 - s : s, v: (p.y - b.min.y) / dy };
+  });
+}
+
+/** Merge parts that all carry position, normal and uv into one ungrouped geometry. */
+function mergeParts(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
   const flat = parts.map((g) => {
+    if (!g.index) return g;
     const n = g.toNonIndexed();
-    n.deleteAttribute('uv');
     g.dispose();
     return n;
   });
   const out = mergeGeometries(flat, false);
   for (const g of flat) g.dispose();
   if (!out) throw new Error('planes: failed to merge airframe geometry');
-  out.computeVertexNormals();
   out.computeBoundingSphere();
   return out;
 }
 
-function buildAirframe(kind: AircraftKind): AirframeLayout {
+/** Body (material 0) and glass (material 1) in one geometry: two draw calls. */
+function airframe(body: THREE.BufferGeometry[], glass: THREE.BufferGeometry[]) {
+  const a = mergeParts(body);
+  const b = mergeParts(glass.map((g) => solid(g, 'fuselage', 0.5, 0.9)));
+  const out = mergeGeometries([a, b], true);
+  a.dispose();
+  b.dispose();
+  if (!out) throw new Error('planes: failed to merge airframe groups');
+  out.computeBoundingSphere();
+  return out;
+}
+
+export function buildAirframe(kind: AircraftKind): AirframeLayout {
   const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
   switch (kind) {
     case 'avenger': {
       const half = 8.25;
       return {
-        geometry: merge([
-          tube(11.5, 0.9, 0.35, -0.2, 0, 0),
-          tube(1.2, 0.85, 1.0, 5.6, 0, 0, 10),
-          box(4.4, 0.9, 1.0, 1.1, 0.95, 0), // long greenhouse canopy
-          new THREE.SphereGeometry(0.6, 8, 6).translate(-1.6, 1.05, 0), // dorsal turret
-          wingPanel(half - 0.6, 2.7, 0.3, 1, 4, 0.9, -0.45, 0.6),
-          wingPanel(half - 0.6, 2.7, 0.3, -1, 4, 0.9, -0.45, 0.6),
-          box(1.6, 0.18, 5.8, -5.5, 0.25, 0),
-          box(1.9, 2.3, 0.16, -5.7, 1.3, 0),
-        ]),
+        geometry: airframe(
+          [
+            hull(11.5, 0.9, 0.35, -0.2, 0, 0),
+            nacelle(1.2, 0.85, 1.0, 5.6, 0, 0),
+            wingPanel(half - 0.6, 2.7, 0.3, 1, 4, 0.9, -0.45, 0.6, half),
+            wingPanel(half - 0.6, 2.7, 0.3, -1, 4, 0.9, -0.45, 0.6, half),
+            lifting(box(1.6, 0.18, 5.8, -5.5, 0.25, 0), half),
+            fin(box(1.9, 2.3, 0.16, -5.7, 1.3, 0)),
+          ],
+          [
+            box(4.4, 0.9, 1.0, 1.1, 0.95, 0), // long greenhouse canopy
+            new THREE.SphereGeometry(0.6, 16, 8).translate(-1.6, 1.05, 0), // dorsal turret
+          ],
+        ),
         props: [{ x: 6.3, y: 0, z: 0, r: 2 }],
         lights: [v(0.9, 0.1, -half), v(0.9, 0.1, half), v(-6.6, 0.5, 0)],
       };
@@ -662,24 +757,27 @@ function buildAirframe(kind: AircraftKind): AirframeLayout {
       const inner = 5.5;
       const gull = 16; // steep inner panel of the gull wing
       return {
-        geometry: merge([
-          tube(21, 1.3, 0.45, -0.5, 0, 0).scale(1, 1.35, 1),
-          box(6, 0.8, 1.6, 6.5, -0.9, 0), // planing bottom forward
-          wingPanel(inner, 3.9, 0.45, 1, gull, 1.2, 1.3, 0.8),
-          wingPanel(inner, 3.9, 0.45, -1, gull, 1.2, 1.3, 0.8),
-          wingPanel(half - inner - 0.8, 3.4, 0.35, 1, 2, 1.2, 2.8, inner + 0.5),
-          wingPanel(half - inner - 0.8, 3.4, 0.35, -1, 2, 1.2, 2.8, inner + 0.5),
-          tube(5, 0.8, 0.5, 2.2, 2.6, inner),
-          tube(5, 0.8, 0.5, 2.2, 2.6, -inner),
-          box(2.2, 0.6, 0.6, 1.0, 1.1, 14.8), // wingtip floats
-          box(2.2, 0.6, 0.6, 1.0, 1.1, -14.8),
-          box(0.3, 1.6, 0.15, 1.0, 1.9, 14.8),
-          box(0.3, 1.6, 0.15, 1.0, 1.9, -14.8),
-          wingPanel(5.6, 1.9, 0.2, 1, 18, -10, 1.5, 0),
-          wingPanel(5.6, 1.9, 0.2, -1, 18, -10, 1.5, 0),
-          box(2.1, 3.2, 0.18, -10.2, 3.2, 5.3), // twin fins at the tailplane tips
-          box(2.1, 3.2, 0.18, -10.2, 3.2, -5.3),
-        ]),
+        geometry: airframe(
+          [
+            hull(21, 1.3, 0.45, -0.5, 0, 0).scale(1, 1.35, 1),
+            solid(box(6, 0.8, 1.6, 6.5, -0.9, 0), 'fuselage', 0.1, 0.98), // planing bottom
+            wingPanel(inner, 3.9, 0.45, 1, gull, 1.2, 1.3, 0.8, half),
+            wingPanel(inner, 3.9, 0.45, -1, gull, 1.2, 1.3, 0.8, half),
+            wingPanel(half - inner - 0.8, 3.4, 0.35, 1, 2, 1.2, 2.8, inner + 0.5, half),
+            wingPanel(half - inner - 0.8, 3.4, 0.35, -1, 2, 1.2, 2.8, inner + 0.5, half),
+            nacelle(5, 0.8, 0.5, 2.2, 2.6, inner),
+            nacelle(5, 0.8, 0.5, 2.2, 2.6, -inner),
+            solid(box(2.2, 0.6, 0.6, 1.0, 1.1, 14.8), 'fuselage', 0.25, 0.98), // wingtip floats
+            solid(box(2.2, 0.6, 0.6, 1.0, 1.1, -14.8), 'fuselage', 0.25, 0.98),
+            solid(box(0.3, 1.6, 0.15, 1.0, 1.9, 14.8), 'fuselage', 0.25, 0.98),
+            solid(box(0.3, 1.6, 0.15, 1.0, 1.9, -14.8), 'fuselage', 0.25, 0.98),
+            wingPanel(5.6, 1.9, 0.2, 1, 18, -10, 1.5, 0, half),
+            wingPanel(5.6, 1.9, 0.2, -1, 18, -10, 1.5, 0, half),
+            fin(box(2.1, 3.2, 0.18, -10.2, 3.2, 5.3)), // twin fins at the tailplane tips
+            fin(box(2.1, 3.2, 0.18, -10.2, 3.2, -5.3)),
+          ],
+          [box(2.0, 0.55, 1.5, 7.2, 1.55, 0)],
+        ),
         props: [
           { x: 4.9, y: 2.6, z: inner, r: 2.3 },
           { x: 4.9, y: 2.6, z: -inner, r: 2.3 },
@@ -690,16 +788,24 @@ function buildAirframe(kind: AircraftKind): AirframeLayout {
     case 'dc3': {
       const half = 14.5;
       return {
-        geometry: merge([
-          tube(17, 1.25, 0.3, -0.6, 0, 0, 10),
-          new THREE.SphereGeometry(1.25, 10, 6).scale(1.5, 1, 1).translate(7.9, 0, 0),
-          wingPanel(half - 1, 3.4, 0.38, 1, 6, 0.7, -0.75, 1),
-          wingPanel(half - 1, 3.4, 0.38, -1, 6, 0.7, -0.75, 1),
-          tube(4.2, 0.75, 0.4, 1.9, -0.45, 2.9),
-          tube(4.2, 0.75, 0.4, 1.9, -0.45, -2.9),
-          box(2.1, 0.2, 8.6, -8.3, 0.2, 0),
-          box(2.4, 2.9, 0.18, -8.5, 1.6, 0),
-        ]),
+        geometry: airframe(
+          [
+            hull(17, 1.25, 0.3, -0.6, 0, 0),
+            solid(
+              new THREE.SphereGeometry(1.25, 16, 8).scale(1.5, 1, 1).translate(7.9, 0, 0),
+              'fuselage',
+              0.4, // above the cheatline, on the seamless nose band
+              0.98,
+            ),
+            wingPanel(half - 1, 3.4, 0.38, 1, 6, 0.7, -0.75, 1, half),
+            wingPanel(half - 1, 3.4, 0.38, -1, 6, 0.7, -0.75, 1, half),
+            nacelle(4.2, 0.75, 0.4, 1.9, -0.45, 2.9),
+            nacelle(4.2, 0.75, 0.4, 1.9, -0.45, -2.9),
+            lifting(box(2.1, 0.2, 8.6, -8.3, 0.2, 0), half),
+            fin(box(2.4, 2.9, 0.18, -8.5, 1.6, 0)),
+          ],
+          [box(1.3, 0.5, 1.5, 7.4, 0.95, 0)],
+        ),
         props: [
           { x: 4.1, y: -0.45, z: 2.9, r: 1.8 },
           { x: 4.1, y: -0.45, z: -2.9, r: 1.8 },
@@ -710,19 +816,32 @@ function buildAirframe(kind: AircraftKind): AirframeLayout {
     case 'tudor': {
       const half = 18;
       return {
-        geometry: merge([
-          tube(22, 1.6, 0.35, -0.8, 0, 0, 10),
-          new THREE.SphereGeometry(1.6, 10, 6).scale(1.4, 1, 1).translate(10.2, 0, 0),
-          wingPanel(half - 1.3, 3.9, 0.42, 1, 5, 1, -0.8, 1.3),
-          wingPanel(half - 1.3, 3.9, 0.42, -1, 5, 1, -0.8, 1.3),
-          tube(4.4, 0.75, 0.4, 2.1, -0.4, 4.6),
-          tube(4.4, 0.75, 0.4, 2.1, -0.4, -4.6),
-          tube(4.4, 0.7, 0.4, 2.0, -0.05, 9.4),
-          tube(4.4, 0.7, 0.4, 2.0, -0.05, -9.4),
-          box(2.6, 0.22, 13, -10.6, 0.4, 0),
-          box(3.0, 4.2, 0.2, -10.9, 2.3, 0), // the Tudor's big fin
-          new THREE.SphereGeometry(1.5, 8, 4).scale(1, 0.8, 0.07).translate(-10.9, 4.2, 0),
-        ]),
+        geometry: airframe(
+          [
+            hull(22, 1.6, 0.35, -0.8, 0, 0),
+            solid(
+              new THREE.SphereGeometry(1.6, 16, 8).scale(1.4, 1, 1).translate(10.2, 0, 0),
+              'fuselage',
+              0.4, // above the cheatline, on the seamless nose band
+              0.98,
+            ),
+            wingPanel(half - 1.3, 3.9, 0.42, 1, 5, 1, -0.8, 1.3, half),
+            wingPanel(half - 1.3, 3.9, 0.42, -1, 5, 1, -0.8, 1.3, half),
+            nacelle(4.4, 0.75, 0.4, 2.1, -0.4, 4.6),
+            nacelle(4.4, 0.75, 0.4, 2.1, -0.4, -4.6),
+            nacelle(4.4, 0.7, 0.4, 2.0, -0.05, 9.4),
+            nacelle(4.4, 0.7, 0.4, 2.0, -0.05, -9.4),
+            lifting(box(2.6, 0.22, 13, -10.6, 0.4, 0), half),
+            fin(box(3.0, 4.2, 0.2, -10.9, 2.3, 0)), // the Tudor's big fin
+            solid(
+              new THREE.SphereGeometry(1.5, 16, 4).scale(1, 0.8, 0.07).translate(-10.9, 4.2, 0),
+              'tail',
+              0.5,
+              0.97,
+            ),
+          ],
+          [box(1.5, 0.55, 1.8, 9.6, 1.25, 0)],
+        ),
         props: [
           { x: 4.4, y: -0.4, z: 4.6, r: 1.9 },
           { x: 4.4, y: -0.4, z: -4.6, r: 1.9 },
@@ -735,15 +854,94 @@ function buildAirframe(kind: AircraftKind): AirframeLayout {
   }
 }
 
-/** Unit-radius propeller: three thin blades in the y-z plane, spinning about x. */
-function buildPropGeometry(): THREE.BufferGeometry {
-  const blades: THREE.BufferGeometry[] = [];
-  for (let i = 0; i < 3; i++) {
-    blades.push(
-      new THREE.BoxGeometry(0.05, 1, 0.16).translate(0, 0.5, 0).rotateX((i * 2 * Math.PI) / 3),
-    );
+/** One propeller disc per hub, facing along x, in a single ungrouped geometry (one draw call). */
+export function buildPropDiscs(props: readonly PropHub[]): THREE.BufferGeometry {
+  return mergeParts(
+    props.map((h) =>
+      new THREE.CircleGeometry(h.r, 24).rotateY(Math.PI / 2).translate(h.x, h.y, h.z),
+    ),
+  );
+}
+
+/**
+ * Spinning-propeller disc: three motion-blurred blades with yellow tips over a faint disc.
+ * Spun by rotating the texture about its centre, which is each disc's hub.
+ */
+function buildPropTexture(): THREE.DataTexture {
+  const n = 128;
+  const data = new Uint8Array(n * n * 4);
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      const dx = (i + 0.5) / n - 0.5;
+      const dy = (j + 0.5) / n - 0.5;
+      const r = Math.sqrt(dx * dx + dy * dy) * 2;
+      const k = (j * n + i) * 4;
+      if (r > 1) continue;
+      const th = Math.atan2(dy, dx);
+      // Distance to the nearest of three blades, as an angle, widened into a blur trail.
+      const a = ((((th * 3) / (2 * Math.PI)) % 1) + 1) % 1;
+      const blade = Math.exp(-((Math.min(a, 1 - a) * 2 * Math.PI) ** 2) / 0.18);
+      const tip = r > 0.88;
+      const hub = r < 0.14;
+      const alpha = hub ? 0.95 : 0.1 + 0.55 * blade * smoothstep(0.1, 0.4, r);
+      data[k] = tip ? 230 : 40;
+      data[k + 1] = tip ? 190 : 44;
+      data[k + 2] = tip ? 40 : 48;
+      data[k + 3] = Math.round(255 * alpha * (1 - smoothstep(0.96, 1, r)));
+    }
   }
-  return merge(blades);
+  const tex = new THREE.DataTexture(data, n, n, THREE.RGBAFormat);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.center.set(0.5, 0.5);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+interface Skin {
+  map: THREE.DataTexture;
+  roughnessMap: THREE.DataTexture;
+  normalMap: THREE.DataTexture;
+}
+
+function atlasTexture(data: Uint8Array, size: number, srgb: boolean, anisotropy: number) {
+  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.anisotropy = anisotropy;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** Paint `kind`'s livery and upload it as albedo, roughness and normal maps. */
+function buildSkin(kind: AircraftKind, tier: SceneryTier): Skin {
+  const size = tier === 'full' ? 512 : 256;
+  const px = paintAtlas(liveryFor(kind), size);
+  const n = size * size;
+  const rough = new Uint8Array(n * 4);
+  const normal = new Uint8Array(n * 4);
+  for (let i = 0; i < n; i++) {
+    const r = px.roughness[i]!;
+    // three.js reads roughness from green; fill all three so either convention works.
+    rough[i * 4] = r;
+    rough[i * 4 + 1] = r;
+    rough[i * 4 + 2] = r;
+    rough[i * 4 + 3] = 255;
+    normal[i * 4] = px.normal[i * 3]!;
+    normal[i * 4 + 1] = px.normal[i * 3 + 1]!;
+    normal[i * 4 + 2] = px.normal[i * 3 + 2]!;
+    normal[i * 4 + 3] = 255;
+  }
+  const aniso = tier === 'full' ? 4 : 1;
+  return {
+    map: atlasTexture(px.albedo, size, true, aniso),
+    roughnessMap: atlasTexture(rough, size, false, aniso),
+    normalMap: atlasTexture(normal, size, false, aniso),
+  };
 }
 
 /** Soft radial glow (white, alpha falling off) for lights and the shimmer. */
@@ -774,12 +972,13 @@ function buildGlowTexture(): THREE.DataTexture {
 // Layer
 // ---------------------------------------------------------------------------------------------
 
-/** One pooled aircraft: a body, up to four propellers, three nav lights and its shimmer. */
+/** One pooled aircraft: a body with glass, its propeller discs, three nav lights, a shimmer. */
 interface Slot {
   group: THREE.Group;
   body: THREE.Mesh;
-  bodyMat: THREE.MeshLambertMaterial;
-  props: THREE.Mesh[];
+  bodyMat: THREE.MeshStandardMaterial;
+  glassMat: THREE.MeshStandardMaterial;
+  prop: THREE.Mesh;
   propMat: THREE.MeshBasicMaterial;
   lights: THREE.Sprite[];
   lightMats: THREE.SpriteMaterial[];
@@ -793,7 +992,11 @@ const GHOST_COLOR = new THREE.Color(0x8f9a9c);
 const GHOST_EMISSIVE = new THREE.Color(0x1c2427);
 const SHIMMER_COLOR = new THREE.Color(0xcfe0e6);
 const LIGHT_COLORS = [0xff3a2a, 0x3aff6a, 0xfff6e8] as const;
-const BASE_OPACITY = 0.9;
+/** How far a sky crossing's paint is washed toward GHOST_COLOR (the ridden flight: none). */
+const GHOST_TINT = 0.35;
+const GLASS_OPACITY = 0.55;
+/** Propeller disc spin [rad/s]: one radian a frame at 60 fps. */
+const PROP_SPIN = 60;
 /** Navigation lights keep about this angular size [rad] whatever the distance. */
 const LIGHT_ANGULAR = 0.0045;
 
@@ -802,7 +1005,11 @@ export class PlaneLayer implements SceneryLayer {
 
   private readonly scheduler: CrossingScheduler;
   private readonly airframes: Record<AircraftKind, AirframeLayout>;
-  private readonly propGeometry = buildPropGeometry();
+  private readonly propDiscs: Record<AircraftKind, THREE.BufferGeometry>;
+  private readonly propTexture = buildPropTexture();
+  /** Liveries, painted the first time each kind is shown. */
+  private readonly skins: Partial<Record<AircraftKind, Skin>> = {};
+  private tier: SceneryTier = 'full';
   private readonly glow = buildGlowTexture();
   private readonly slots: Slot[] = [];
   private enabled = true;
@@ -821,6 +1028,12 @@ export class PlaneLayer implements SceneryLayer {
       dc3: buildAirframe('dc3'),
       tudor: buildAirframe('tudor'),
     };
+    this.propDiscs = {
+      avenger: buildPropDiscs(this.airframes.avenger.props),
+      mariner: buildPropDiscs(this.airframes.mariner.props),
+      dc3: buildPropDiscs(this.airframes.dc3.props),
+      tudor: buildPropDiscs(this.airframes.tudor.props),
+    };
     // One flight more than the sky schedules, for the one the camera may be riding.
     const poolSize = (PLANE_SCHEDULE.maxConcurrent + 1) * MAX_FLIGHT_SIZE;
     for (let i = 0; i < poolSize; i++) this.slots.push(this.createSlot());
@@ -830,31 +1043,38 @@ export class PlaneLayer implements SceneryLayer {
     const group = new THREE.Group();
     group.rotation.order = 'YXZ';
     group.visible = false;
-    const bodyMat = new THREE.MeshLambertMaterial({
-      color: GHOST_COLOR,
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
       emissive: GHOST_EMISSIVE,
-      flatShading: true,
+      roughness: 1,
+      metalness: 0.1,
       transparent: true,
-      opacity: BASE_OPACITY,
+      opacity: 1,
+      fog: false,
+    });
+    const glassMat = new THREE.MeshStandardMaterial({
+      color: 0x24343c,
+      roughness: 0.05,
+      metalness: 0,
+      transparent: true,
+      opacity: GLASS_OPACITY,
       fog: false,
     });
     group.scale.setScalar(AIRCRAFT_DRAW_SCALE);
-    const body = new THREE.Mesh(this.airframes.avenger.geometry, bodyMat);
+    const body = new THREE.Mesh(this.airframes.avenger.geometry, [bodyMat, glassMat]);
+    body.name = 'plane-body';
     group.add(body);
     const propMat = new THREE.MeshBasicMaterial({
-      color: 0x30383a,
+      map: this.propTexture,
       transparent: true,
-      opacity: 0.5,
+      opacity: 0.9,
       fog: false,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
-    const props: THREE.Mesh[] = [];
-    for (let i = 0; i < 4; i++) {
-      const p = new THREE.Mesh(this.propGeometry, propMat);
-      props.push(p);
-      group.add(p);
-    }
+    const prop = new THREE.Mesh(this.propDiscs.avenger, propMat);
+    prop.name = 'plane-props';
+    group.add(prop);
     const lightMats: THREE.SpriteMaterial[] = [];
     const lights: THREE.Sprite[] = [];
     for (const color of LIGHT_COLORS) {
@@ -887,7 +1107,8 @@ export class PlaneLayer implements SceneryLayer {
       group,
       body,
       bodyMat,
-      props,
+      glassMat,
+      prop,
       propMat,
       lights,
       lightMats,
@@ -951,7 +1172,9 @@ export class PlaneLayer implements SceneryLayer {
     this.view.forwardX = this.fwd.x;
     this.view.forwardZ = this.fwd.z;
     this.scheduler.update(t, this.view, frame.calm, this.enabled, Boolean(frame.hostiles));
+    this.tier = frame.tier ?? 'full';
     this.bindSlots();
+    this.propTexture.rotation = (t * PROP_SPIN) % (Math.PI * 2);
 
     const fog = (this.object.parent as THREE.Scene | null)?.fog;
     if (fog) this.haze.copy(fog.color);
@@ -983,19 +1206,20 @@ export class PlaneLayer implements SceneryLayer {
       const dy = p.y - cam.position.y;
       const dz = p.z - cam.position.z;
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      // Own altitude-appropriate haze: always a little ghostly, more so far away.
-      const hazeK = 0.18 + 0.4 * (1 - Math.exp(-dist / 6000));
-      slot.bodyMat.color.copy(GHOST_COLOR).lerp(this.haze, hazeK);
-      slot.bodyMat.emissive.copy(GHOST_EMISSIVE).multiplyScalar(0.4 + 0.6 * daylight);
-      slot.bodyMat.opacity = BASE_OPACITY * o * bodyVis;
+      // Sky crossings stay a little ghostly and wash into the haze with distance; the flight
+      // being ridden shows its paint as it is.
+      const ghost = c === this.scheduler.ride ? 0 : GHOST_TINT;
+      const hazeK = (ghost > 0 ? 0.18 : 0) + 0.4 * (1 - Math.exp(-dist / 6000));
+      slot.bodyMat.color.setRGB(1, 1, 1).lerp(GHOST_COLOR, ghost).lerp(this.haze, hazeK);
+      slot.bodyMat.emissive
+        .copy(GHOST_EMISSIVE)
+        .multiplyScalar(((0.4 + 0.6 * daylight) * ghost) / GHOST_TINT);
+      slot.bodyMat.opacity = o * bodyVis;
+      slot.glassMat.opacity = GLASS_OPACITY * o * bodyVis;
       // Shimmer: the body wavers slightly as it condenses out of (or into) the haze.
       const waver = 1 + 0.035 * sh * Math.sin(t * 23 + slot.member);
       slot.body.scale.set(1, waver, 2 - waver);
-      slot.propMat.opacity = 0.45 * o * bodyVis;
-      for (let i = 0; i < slot.props.length; i++) {
-        const prop = slot.props[i]!;
-        prop.rotation.x = t * 41 + i * 0.9;
-      }
+      slot.propMat.opacity = 0.9 * o * bodyVis;
 
       const lightScale =
         (Math.max(1.2, dist * LIGHT_ANGULAR) * (1 + 0.6 * (1 - daylight))) / AIRCRAFT_DRAW_SCALE;
@@ -1042,14 +1266,16 @@ export class PlaneLayer implements SceneryLayer {
     slot.crossing = c;
     slot.member = member;
     slot.body.geometry = layout.geometry;
-    for (let i = 0; i < slot.props.length; i++) {
-      const prop = slot.props[i]!;
-      const hub = layout.props[i];
-      prop.visible = !!hub;
-      if (hub) {
-        prop.position.set(hub.x, hub.y, hub.z);
-        prop.scale.setScalar(hub.r);
-      }
+    slot.prop.geometry = this.propDiscs[c.kind];
+    const skin = (this.skins[c.kind] ??= buildSkin(c.kind, this.tier));
+    const m = slot.bodyMat;
+    if (m.map !== skin.map) {
+      const first = m.map === null;
+      m.map = skin.map;
+      m.roughnessMap = skin.roughnessMap;
+      m.normalMap = skin.normalMap;
+      m.metalness = liveryFor(c.kind).metal ? 0.8 : 0.1;
+      if (first) m.needsUpdate = true;
     }
     for (let i = 0; i < 3; i++) slot.lights[i]!.position.copy(layout.lights[i]!);
   }
@@ -1063,13 +1289,24 @@ export class PlaneLayer implements SceneryLayer {
   dispose(): void {
     for (const slot of this.slots) {
       slot.bodyMat.dispose();
+      slot.glassMat.dispose();
       slot.propMat.dispose();
       for (const m of slot.lightMats) m.dispose();
       slot.shimmerMat.dispose();
     }
     this.slots.length = 0;
-    for (const k of KINDS) this.airframes[k].geometry.dispose();
-    this.propGeometry.dispose();
+    for (const k of KINDS) {
+      this.airframes[k].geometry.dispose();
+      this.propDiscs[k].dispose();
+      const skin = this.skins[k];
+      if (skin) {
+        skin.map.dispose();
+        skin.roughnessMap.dispose();
+        skin.normalMap.dispose();
+        delete this.skins[k];
+      }
+    }
+    this.propTexture.dispose();
     this.glow.dispose();
     this.object.clear();
   }

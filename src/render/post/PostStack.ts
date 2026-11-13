@@ -18,7 +18,7 @@
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import type { Pass } from 'three/examples/jsm/postprocessing/Pass.js';
+import { Pass } from 'three/examples/jsm/postprocessing/Pass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -29,6 +29,20 @@ import { UnderwaterPass, type UnderwaterParams } from '../underwater/UnderwaterP
 export const BLOOM_THRESHOLD = 1.2;
 const BLOOM_STRENGTH = 0.35;
 const BLOOM_RADIUS = 0.55;
+
+/** Draws nothing: calls `onReached` when the composer gets to it (marks where the scene ends). */
+class MarkerPass extends Pass {
+  onReached: (() => void) | null = null;
+
+  constructor() {
+    super();
+    this.needsSwap = false;
+  }
+
+  override render(): void {
+    this.onReached?.();
+  }
+}
 
 /** True when the context can render into half-float colour buffers. */
 export function supportsHdrTarget(gl: WebGL2RenderingContext): boolean {
@@ -82,6 +96,7 @@ export class PostStack {
   private bloom: UnrealBloomPass | null = null;
   private grade: ShaderPass | null = null;
   private underwaterPass: UnderwaterPass | null = null;
+  private readonly sceneDone = new MarkerPass();
   private underwater: UnderwaterParams | null = null;
   private settings: PostSettings = { bloom: false, grain: false, vignette: false };
   private width = 1;
@@ -135,12 +150,17 @@ export class PostStack {
     }
   }
 
-  /** Draw one frame to the canvas. Grain animates on wall-clock time, even while paused. */
-  render(): void {
+  /**
+   * Draw one frame to the canvas. Grain animates on wall-clock time, even while paused.
+   * `afterScene` runs once the scene itself is drawn, before the post passes (GPU timing).
+   */
+  render(afterScene: (() => void) | null = null): void {
     if (!this.active) return;
     this.composer ??= this.build();
     if (this.grade) this.grade.uniforms.uTime!.value = performance.now() / 1000;
+    this.sceneDone.onReached = afterScene;
     this.composer.render();
+    this.sceneDone.onReached = null;
   }
 
   /** Rebuild the targets after a WebGL context restore. */
@@ -177,6 +197,7 @@ export class PostStack {
     underwater.set(this.underwater);
     const passes: Pass[] = [
       new RenderPass(this.scene, this.camera),
+      this.sceneDone,
       underwater,
       bloom,
       grade,

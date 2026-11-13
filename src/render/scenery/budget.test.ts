@@ -79,7 +79,7 @@ function makeFrame(camera: THREE.Camera, overrides: Partial<SceneryFrame> = {}):
 }
 
 /**
- * Camera spot (world x, y) with the most traffic hulls and rig cells in view: uncapped counts of
+ * Camera spot (world x, y) with the most traffic hulls and buoy cells in view: uncapped counts of
  * ship poses (at the frame's time and weather) and structure cells that pass the same view-range
  * filters the layer applies, so the caps are shown to bind after filtering.
  */
@@ -128,21 +128,21 @@ describe('traffic budget enforced on the real layer', () => {
   });
 
   for (const tier of TIERS) {
-    it(`${tier}: hull instances <= ${TRAFFIC_BUDGET[tier]}, rig cells <= ${STRUCTURE_BUDGET[tier]}`, () => {
+    it(`${tier}: hull instances <= ${TRAFFIC_BUDGET[tier]}, buoy cells <= ${STRUCTURE_BUDGET[tier]}`, () => {
       const layer = new TrafficLayer();
       layer.setFlags({ traffic: true, structures: true, hostiles: false });
       layer.update(makeFrame(cam, { tier }));
       const hulls = instances(layer.object, 'traffic-');
       expect(hulls).toBeLessThanOrEqual(TRAFFIC_BUDGET[tier]);
       expect(hulls).toBe(layer.ships.length);
-      // Structures are instanced per item; a cell holds at most 4 items (3-4 turbines + buoy).
+      // One navigation buoy per structure cell.
       const items = instances(layer.object, 'structure-');
-      expect(items).toBeLessThanOrEqual(STRUCTURE_BUDGET[tier] * 5);
+      expect(items).toBeLessThanOrEqual(STRUCTURE_BUDGET[tier]);
       if (tier === 'lite') expect(items).toBe(0);
-      // Background hulls + structures + night lights: one call per live class, never per hull.
+      // Background hulls + buoys + night lights: one call per live class, never per hull.
       const calls = drawCalls(layer.object);
-      expect(calls).toBeLessThanOrEqual(7 + 3 + 1);
-      expect(calls).toBeLessThanOrEqual(layer.ships.length + 3 + 1);
+      expect(calls).toBeLessThanOrEqual(7 + 1 + 1);
+      expect(calls).toBeLessThanOrEqual(layer.ships.length + 1 + 1);
       layer.dispose();
     });
   }
@@ -158,6 +158,18 @@ describe('traffic budget enforced on the real layer', () => {
     expect(counts[0]!).toBeGreaterThan(counts[1]!);
     expect(counts[1]!).toBeGreaterThan(counts[2]!);
     expect(counts[2]!).toBe(TRAFFIC_BUDGET.lite);
+  });
+
+  it('builds no oil-rig or wind-turbine meshes', () => {
+    const layer = new TrafficLayer();
+    layer.setFlags({ traffic: true, structures: true, hostiles: false });
+    layer.update(makeFrame(cam));
+    const names: string[] = [];
+    layer.object.traverse((o) => names.push(o.name));
+    expect(names).not.toContain('structure-oil-rig');
+    expect(names).not.toContain('structure-wind-turbine');
+    expect(names).toContain('structure-buoy');
+    layer.dispose();
   });
 
   it('draws nothing when traffic, structures and hostiles are all off', () => {

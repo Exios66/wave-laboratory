@@ -4,6 +4,7 @@ playwright-report
 test-results
 pnpm-lock.yaml
 .claude
+.superpowers
 # Built site committed for GitHub Pages (scripts/deploy-pages.mjs)
 /docs/index.html
 /docs/404.html

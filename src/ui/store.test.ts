@@ -119,6 +119,11 @@ describe('ambience sanitising (traffic families)', () => {
     expect(sanitizeAmbience({})).toEqual(DEFAULT_AMBIENCE);
   });
 
+  it('reads a pre-buoys saved `structures: true` as navigation buoys on', () => {
+    expect(sanitizeAmbience({ structures: true }).structures).toBe(true);
+    expect(sanitizeAmbience({ structures: false }).structures).toBe(false);
+  });
+
   it('keeps explicit booleans', () => {
     const s = sanitizeAmbience({ traffic: false, hostiles: true });
     expect(s.traffic).toBe(false);

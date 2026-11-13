@@ -1,7 +1,7 @@
 /**
  * Image-based lighting from the live sky. The sky dome alone is drawn into a small cube map and
  * prefiltered (PMREM) into `scene.environment`, so every standard material (hulls, superstructures,
- * islands, traffic, rigs) picks up the sky's colour in its ambient light and reflections: blue from
+ * islands, traffic, buoys) picks up the sky's colour in its ambient light and reflections: blue from
  * above at noon, warm from the sun's side at dusk, grey under overcast.
  *
  * The cube is redrawn only when the sky has visibly changed (the sun moved, cloud, night or the

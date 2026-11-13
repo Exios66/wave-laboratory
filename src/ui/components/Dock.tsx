@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import {
   motionSicknessIncidence,
   rms,
@@ -8,12 +8,17 @@ import {
 } from '../../instruments/analysis';
 import { downloadText, slug } from '../fileOps';
 import { getRuntime } from '../runtime';
+import { renderCostText, renderCostTitle } from '../renderCost';
 import { useLab, type DockTab } from '../store';
 import { telemetry } from '../telemetry';
-import { Chart, type ChartSeries } from './Chart';
+import type { ChartSeries } from './Chart';
+import { ErrorBoundary } from './ErrorBoundary';
 import { fmt } from './fields';
 import { Icon } from './icons';
 import { HidePanelButton } from './Splitters';
+
+/** uPlot and the chart code load on first use, not with the app shell. */
+const Chart = lazy(() => import('./Chart'));
 
 const TABS: { id: DockTab; label: string }[] = [
   { id: 'gauges', label: 'Wave gauges' },
@@ -99,10 +104,14 @@ export function Dock() {
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
       >
-        {tab === 'gauges' && <GaugeCharts />}
-        {tab === 'motions' && <MotionCharts />}
-        {tab === 'spectrum' && <SpectrumChart />}
-        {tab === 'statistics' && <Statistics />}
+        <ErrorBoundary area="charts">
+          <Suspense fallback={<p className="dock__loading">Loading chart…</p>}>
+            {tab === 'gauges' && <GaugeCharts />}
+            {tab === 'motions' && <MotionCharts />}
+            {tab === 'spectrum' && <SpectrumChart />}
+            {tab === 'statistics' && <Statistics />}
+          </Suspense>
+        </ErrorBoundary>
       </div>
     </section>
   );
@@ -179,18 +188,18 @@ function Transport() {
 /** Frame rate and, where the browser can measure it, GPU time per frame. */
 function RenderCost() {
   const [text, setText] = useState('');
+  const [title, setTitle] = useState(renderCostTitle(null));
   useEffect(() => {
     const read = () => {
       const stats = getRuntime().rendererApi?.stats;
-      if (!stats || stats.fps <= 0) return setText('');
-      const gpu = stats.gpuMs === null ? '' : ` · GPU ${stats.gpuMs.toFixed(1)} ms`;
-      setText(`${Math.round(stats.fps)} fps${gpu}`);
+      setText(stats ? renderCostText(stats.fps, stats.gpuMs) : '');
+      setTitle(renderCostTitle(stats?.gpuPasses ?? null));
     };
     const id = window.setInterval(read, 500);
     return () => window.clearInterval(id);
   }, []);
   return (
-    <span className="field__hint" title="Frames drawn per second and GPU time per frame">
+    <span className="field__hint" title={title}>
       {text}
     </span>
   );

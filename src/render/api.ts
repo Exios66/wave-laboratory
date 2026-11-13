@@ -7,6 +7,7 @@ import type { Environment, OceanQuality, ProbeConfig, Weather } from '../schema/
 import type { CameraSurface, SimFrame } from '../sim/types';
 import type { VesselDefinition } from '../vessel/api';
 import type { AmbienceSettings } from './scenery/types';
+import type { GpuPass } from './gpuTimer';
 
 export type { AmbienceSettings } from './scenery/types';
 export { DAY_LENGTH_RANGE, DEFAULT_AMBIENCE } from './scenery/types';
@@ -65,6 +66,8 @@ export interface RendererStats {
   frameMs: number;
   /** GPU time of a frame [ms], smoothed; null where the browser cannot measure it. */
   gpuMs: number | null;
+  /** GPU time of each frame stage [ms], smoothed; null where the browser cannot measure it. */
+  gpuPasses: Partial<Record<GpuPass, number>> | null;
   drawCalls: number;
   triangles: number;
   /** True while the camera is under the sea surface (any camera mode). */

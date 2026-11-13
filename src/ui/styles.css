@@ -1182,6 +1182,19 @@ input[type='range'] {
   max-width: 520px;
 }
 
+.error-notice {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  padding: var(--space-4);
+}
+.error-notice p {
+  margin: 0;
+}
+.error-notice__title {
+  font-weight: 600;
+}
+
 .spinner {
   width: 28px;
   height: 28px;
@@ -1240,6 +1253,12 @@ input[type='range'] {
   min-height: 0;
   overflow: auto;
   padding: var(--space-2) var(--space-3);
+}
+
+.dock__loading {
+  margin: var(--space-2) 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
 }
 
 .chart {

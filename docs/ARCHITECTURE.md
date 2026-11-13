@@ -68,8 +68,8 @@
 - **Ambient world.** Decorative scenery is a stack of `SceneryLayer`s updated once per frame with
   a read-only `SceneryFrame` (`calm`, `daylight`, `hs`, vessel positions, `underwater`,
   `waterType`, `tier`); nothing a layer does feeds back into the ocean or the hull forces.
-  Placement is a seeded hash grid, so islands, fishing grounds, shipping lanes, offshore rig
-  fields, kelp patches and wrecks are the same wherever you look from and are unit-tested without
+  Placement is a seeded hash grid, so islands, fishing grounds, shipping lanes, navigation
+  buoys, kelp patches and wrecks are the same wherever you look from and are unit-tested without
   WebGL (`traffic.test.ts`, `scenery.test.ts`, `islands.test.ts`). `traffic.ts` exports its live
   hulls as `WakeSource`s (so a passing trawler leaves a Kelvin wake) and as `WildVessel`s (so
   dolphins bow-ride it and gulls trail its stern); underwater, `underwater/scenery.ts` adds a

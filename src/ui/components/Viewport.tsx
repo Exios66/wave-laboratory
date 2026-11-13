@@ -1,7 +1,7 @@
 import { beaufortFromWind } from '../../core/units';
 import { useEffect, useRef, useState } from 'react';
-import { LabRenderer } from '../../render/LabRenderer';
 import type { CameraMode, OverlayMode } from '../../render/api';
+import { errorText, isChunkLoadError } from '../errorText';
 import { getRuntime } from '../runtime';
 import { useLab } from '../store';
 import { dayPhase, formatClock } from './clock';
@@ -34,15 +34,16 @@ export function Viewport() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rt = getRuntime();
-    rt.attach(
-      canvas,
-      (c) =>
-        new LabRenderer(c, {
-          onContextLost: () =>
-            useLab.getState().notify('warning', 'Graphics context lost — trying to restore…'),
-          onContextRestored: () => useLab.getState().notify('success', 'Graphics restored.'),
-        }),
-    );
+    // The renderer (three.js and every scenery layer) is its own chunk: the app shell paints
+    // first. The runtime disposes a renderer that resolves after this effect was cleaned up.
+    void rt.attach(canvas, async (c) => {
+      const { LabRenderer } = await import('../../render/LabRenderer');
+      return new LabRenderer(c, {
+        onContextLost: () =>
+          useLab.getState().notify('warning', 'Graphics context lost — trying to restore…'),
+        onContextRestored: () => useLab.getState().notify('success', 'Graphics restored.'),
+      });
+    });
     return () => rt.detach();
   }, []);
 
@@ -90,7 +91,17 @@ export function Viewport() {
         The scene shows the simulated sea surface and vessels. All values shown visually are also
         available as text in the inspector and in the statistics tab.
       </p>
-      {status === 'unsupported' ? (
+      {status === 'unsupported' && isChunkLoadError(error) ? (
+        <div className="viewport__message" role="alert">
+          <div>
+            <h3>3D view needs a reload</h3>
+            <p>{errorText(error)}</p>
+            <button type="button" className="btn" onClick={() => window.location.reload()}>
+              Reload
+            </button>
+          </div>
+        </div>
+      ) : status === 'unsupported' ? (
         <div className="viewport__message" role="alert">
           <div>
             <h3>3D view unavailable</h3>
