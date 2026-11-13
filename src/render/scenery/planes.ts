@@ -302,7 +302,8 @@ export const RIDE = {
  * Plan a flight for the camera to ride: one of the lost flights, circling `centre` (the fleet)
  * at a few hundred metres. It starts on the circuit due `bearing` [rad, Three.js atan2(z, x)]
  * of the centre, and holds steady (no flicker, nobody lost) so the view is calm. The duration
- * is only a start: the layer extends it for as long as the camera stays aboard.
+ * is only a start: the layer extends it for as long as the camera stays aboard. `kind` forces
+ * the aircraft (the viewer asked for the next one); otherwise it is drawn as the sky's are.
  */
 export function planRide(
   rng: Pcg32,
@@ -311,8 +312,8 @@ export function planRide(
   calm: number,
   bearing = rng.nextFloat() * Math.PI * 2,
   id = 0,
+  kind: AircraftKind = chooseAircraft(rng, calm),
 ): Crossing {
-  const kind = chooseAircraft(rng, calm);
   const speed = AIRCRAFT[kind].speed;
   const dir = rng.nextFloat() < 0.5 ? 1 : -1;
   const turnRate = (dir * speed) / RIDE.radius;
@@ -424,6 +425,17 @@ export function crossingPose(c: Crossing, member: number, tau: number, out: Plan
   return out;
 }
 
+const EULER = new THREE.Euler(0, 0, 0, 'YXZ');
+
+/**
+ * Orientation of an aircraft (nose +x, up +y, starboard +z) flying `pose`: a slight nose-up
+ * attitude, rolled by `bank` about its own nose, then turned to `heading`. Positive bank drops
+ * the starboard wing, as in the right turn a positive turn rate flies.
+ */
+export function aircraftQuaternion(pose: PlanePose, out: THREE.Quaternion): THREE.Quaternion {
+  return out.setFromEuler(EULER.set(pose.bank, -pose.heading, 0.02, 'YXZ'));
+}
+
 /** How solid aircraft `member` is at `tau` [0–1]: shimmer fade in/out, flicker, the laggard. */
 export function memberOpacity(c: Crossing, member: number, tau: number): number {
   if (tau <= 0 || tau >= c.duration) return 0;
@@ -531,6 +543,34 @@ export class CrossingScheduler {
         c.orbit.cz += (dz / dist) * step;
       }
     }
+    return c;
+  }
+
+  /**
+   * Swap the ride at wall time `t` for the next kind of aircraft (in `KINDS` order), joining
+   * the circuit at the bearing the old one had reached; the old one dissolves over its fade.
+   * Null (nothing changes) when there is no ride.
+   */
+  nextRide(t: number, centre: { x: number; z: number }, calm: number): Crossing | null {
+    const old = this.ride;
+    if (!old) return null;
+    const tau = t - old.startT;
+    const at = crossingPose(old, 0, tau, { x: 0, y: 0, z: 0, heading: 0, bank: 0 });
+    const cx = old.orbit?.cx ?? centre.x;
+    const cz = old.orbit?.cz ?? centre.z;
+    old.duration = Math.min(old.duration, tau + old.fadeOut);
+    const kind = KINDS[(KINDS.indexOf(old.kind) + 1) % KINDS.length]!;
+    const c = planRide(
+      this.rideRng,
+      { x: cx, z: cz },
+      t,
+      calm,
+      Math.atan2(at.z - cz, at.x - cx),
+      this.nextId++,
+      kind,
+    );
+    this.ride = c;
+    this.active.push(c);
     return c;
   }
 
@@ -684,7 +724,7 @@ function wingPanel(
 ): THREE.BufferGeometry {
   const geo = new THREE.BoxGeometry(chord, thick, span)
     .translate(0, 0, (side * span) / 2)
-    .rotateX((side * dihedralDeg * Math.PI) / 180)
+    .rotateX((-side * dihedralDeg * Math.PI) / 180) // tip up
     .translate(x, y, side * zRoot);
   return lifting(geo, half);
 }
@@ -1151,6 +1191,16 @@ export class PlaneLayer implements SceneryLayer {
     return c ? crossingPose(c, 0, t - c.startT, out) : null;
   }
 
+  /** The ridden flight (its kind, speed and circuit), or null. */
+  get rideFlight(): Readonly<Crossing> | null {
+    return this.scheduler.ride;
+  }
+
+  /** Change the ride to the next kind of aircraft, at wall time `t` (Plane view's "next"). */
+  nextRide(t: number, centre: { x: number; z: number }, calm: number): void {
+    this.scheduler.nextRide(t, centre, calm);
+  }
+
   /** Name of the ridden flight, for the view's caption. */
   get rideLabel(): string | null {
     const c = this.scheduler.ride;
@@ -1200,7 +1250,7 @@ export class PlaneLayer implements SceneryLayer {
       const g = slot.group;
       g.visible = o > 0.002;
       g.position.set(p.x, p.y, p.z);
-      g.rotation.set(p.bank, -p.heading, 0.02);
+      aircraftQuaternion(p, g.quaternion);
 
       const dx = p.x - cam.position.x;
       const dy = p.y - cam.position.y;

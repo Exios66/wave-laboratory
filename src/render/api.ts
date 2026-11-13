@@ -8,6 +8,7 @@ import type { CameraSurface, SimFrame } from '../sim/types';
 import type { VesselDefinition } from '../vessel/api';
 import type { AmbienceSettings } from './scenery/types';
 import type { GpuPass } from './gpuTimer';
+import type { RideView } from './rideCamera';
 
 export type { AmbienceSettings } from './scenery/types';
 export { DAY_LENGTH_RANGE, DEFAULT_AMBIENCE } from './scenery/types';
@@ -116,6 +117,10 @@ export interface LabRendererApi {
   setCameraSurface(surface: CameraSurface | null, t: number): void;
   /** Name of the flight the Plane camera is riding, or null (not riding, or not yet aboard). */
   planeRide(): string | null;
+  /** Plane view: ride in the chase seat, the cockpit, out on the wing, or watch a fly-by. */
+  setRideView(view: RideView): void;
+  /** Plane view: swap the ride for the next kind of aircraft, at the same point on the circuit. */
+  nextRide(): void;
   /** Render one frame (call from requestAnimationFrame). */
   render(): void;
   resize(width: number, height: number, pixelRatio: number): void;
