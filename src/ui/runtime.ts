@@ -25,6 +25,8 @@ export class LabRuntime {
   readonly client: SimClient;
   private renderer: LabRendererApi | null = null;
   private raf = 0;
+  /** Bumped by every detach(); a renderer resolving under an older value is stale. */
+  private attachGeneration = 0;
   private lastTime = 0;
   private loadedRevision = -1;
   private unsubscribers: (() => void)[] = [];
@@ -169,19 +171,32 @@ export class LabRuntime {
     useLab.getState().setRenderScale(g.scale);
   }
 
-  /** Attach the 3D view. `createRenderer` may throw if WebGL 2 is unavailable. */
-  attach(
+  /**
+   * Attach the 3D view. `createRenderer` may throw or reject (no WebGL 2, or the renderer's code
+   * chunk failed to load); either is reported as unsupported. It may also resolve later, e.g.
+   * from a dynamic import: a renderer that arrives after `detach()` (or after a newer `attach`)
+   * is disposed instead of wired up.
+   */
+  async attach(
     canvas: HTMLCanvasElement,
-    createRenderer: (c: HTMLCanvasElement) => LabRendererApi,
-  ): void {
+    createRenderer: (c: HTMLCanvasElement) => LabRendererApi | Promise<LabRendererApi>,
+  ): Promise<void> {
     this.detach();
+    const generation = this.attachGeneration;
+    let renderer: LabRendererApi;
     try {
-      this.renderer = createRenderer(canvas);
+      renderer = await createRenderer(canvas);
     } catch (err) {
+      if (generation !== this.attachGeneration) return;
       const message = err instanceof Error ? err.message : String(err);
       useLab.getState().simUnsupported(message);
       return;
     }
+    if (generation !== this.attachGeneration) {
+      renderer.dispose();
+      return;
+    }
+    this.renderer = renderer;
     const s = useLab.getState();
     this.renderer.setQuality(this.targetQuality());
     this.renderer.setOverlay(s.overlay);
@@ -207,6 +222,7 @@ export class LabRuntime {
   }
 
   detach(): void {
+    this.attachGeneration++;
     cancelAnimationFrame(this.raf);
     this.raf = 0;
     this.resizeObserver?.disconnect();

@@ -6,6 +6,7 @@ import { experimentFromLocation } from './fileOps';
 import { LabRuntime } from './runtime';
 import type { FromWorker, SimFrame, ToWorker } from '../sim/types';
 import { telemetry } from './telemetry';
+import type { LabRendererApi } from '../render/api';
 
 const lab = useLab.getState;
 
@@ -240,5 +241,62 @@ describe('LabRuntime', () => {
     worker.dispatch(LOADED);
     worker.dispatch(frame(0));
     expect(lab().frame!.t).toBe(0);
+  });
+});
+
+describe('LabRuntime.attach with an async renderer', () => {
+  /** A renderer whose every method is a recorded no-op. */
+  function fakeRenderer(): LabRendererApi & Record<string, ReturnType<typeof vi.fn>> {
+    const calls = new Map<PropertyKey, ReturnType<typeof vi.fn>>();
+    return new Proxy({} as LabRendererApi & Record<string, ReturnType<typeof vi.fn>>, {
+      get(_, key) {
+        if (key === 'then') return undefined; // not a thenable
+        if (!calls.has(key)) calls.set(key, vi.fn());
+        return calls.get(key);
+      },
+    });
+  }
+
+  function fakeCanvas(): HTMLCanvasElement {
+    const rect = { width: 800, height: 600 };
+    return { parentElement: { getBoundingClientRect: () => rect } } as unknown as HTMLCanvasElement;
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(): void {}
+        disconnect(): void {}
+      },
+    );
+  });
+
+  it('attaches an async renderer once it resolves', async () => {
+    const fake = fakeRenderer();
+    await runtime!.attach(fakeCanvas(), () => Promise.resolve(fake));
+    expect(fake.setQuality).toHaveBeenCalledTimes(1);
+    expect(runtime!.rendererApi).toBe(fake);
+  });
+
+  it('disposes a renderer that resolves after detach', async () => {
+    const fake = fakeRenderer();
+    let resolve!: (r: LabRendererApi) => void;
+    const pending = new Promise<LabRendererApi>((r) => (resolve = r));
+    const attached = runtime!.attach(fakeCanvas(), () => pending);
+    runtime!.detach();
+    resolve(fake);
+    await attached;
+    expect(fake.dispose).toHaveBeenCalledTimes(1);
+    expect(fake.setQuality).not.toHaveBeenCalled();
+    expect(runtime!.rendererApi).toBeNull();
+  });
+
+  it('reports a rejected renderer import as unsupported', async () => {
+    await runtime!.attach(fakeCanvas(), () => Promise.reject(new Error('chunk')));
+    expect(lab().status).toBe('unsupported');
+    expect(lab().error).toBe('chunk');
+    expect(runtime!.rendererApi).toBeNull();
   });
 });

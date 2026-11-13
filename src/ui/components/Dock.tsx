@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import {
   motionSicknessIncidence,
   rms,
@@ -10,10 +10,13 @@ import { downloadText, slug } from '../fileOps';
 import { getRuntime } from '../runtime';
 import { useLab, type DockTab } from '../store';
 import { telemetry } from '../telemetry';
-import { Chart, type ChartSeries } from './Chart';
+import type { ChartSeries } from './Chart';
 import { fmt } from './fields';
 import { Icon } from './icons';
 import { HidePanelButton } from './Splitters';
+
+/** uPlot and the chart code load on first use, not with the app shell. */
+const Chart = lazy(() => import('./Chart'));
 
 const TABS: { id: DockTab; label: string }[] = [
   { id: 'gauges', label: 'Wave gauges' },
@@ -99,10 +102,12 @@ export function Dock() {
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
       >
-        {tab === 'gauges' && <GaugeCharts />}
-        {tab === 'motions' && <MotionCharts />}
-        {tab === 'spectrum' && <SpectrumChart />}
-        {tab === 'statistics' && <Statistics />}
+        <Suspense fallback={<p className="dock__loading">Loading chart…</p>}>
+          {tab === 'gauges' && <GaugeCharts />}
+          {tab === 'motions' && <MotionCharts />}
+          {tab === 'spectrum' && <SpectrumChart />}
+          {tab === 'statistics' && <Statistics />}
+        </Suspense>
       </div>
     </section>
   );

@@ -1,6 +1,5 @@
 import { beaufortFromWind } from '../../core/units';
 import { useEffect, useRef, useState } from 'react';
-import { LabRenderer } from '../../render/LabRenderer';
 import type { CameraMode, OverlayMode } from '../../render/api';
 import { getRuntime } from '../runtime';
 import { useLab } from '../store';
@@ -34,15 +33,16 @@ export function Viewport() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rt = getRuntime();
-    rt.attach(
-      canvas,
-      (c) =>
-        new LabRenderer(c, {
-          onContextLost: () =>
-            useLab.getState().notify('warning', 'Graphics context lost — trying to restore…'),
-          onContextRestored: () => useLab.getState().notify('success', 'Graphics restored.'),
-        }),
-    );
+    // The renderer (three.js and every scenery layer) is its own chunk: the app shell paints
+    // first. The runtime disposes a renderer that resolves after this effect was cleaned up.
+    void rt.attach(canvas, async (c) => {
+      const { LabRenderer } = await import('../../render/LabRenderer');
+      return new LabRenderer(c, {
+        onContextLost: () =>
+          useLab.getState().notify('warning', 'Graphics context lost — trying to restore…'),
+        onContextRestored: () => useLab.getState().notify('success', 'Graphics restored.'),
+      });
+    });
     return () => rt.detach();
   }, []);
 

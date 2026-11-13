@@ -1242,6 +1242,12 @@ input[type='range'] {
   padding: var(--space-2) var(--space-3);
 }
 
+.dock__loading {
+  margin: var(--space-2) 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
 .chart {
   margin: 0;
   height: 100%;
