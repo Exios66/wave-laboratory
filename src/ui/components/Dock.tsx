@@ -12,6 +12,7 @@ import { renderCostText, renderCostTitle } from '../renderCost';
 import { useLab, type DockTab } from '../store';
 import { telemetry } from '../telemetry';
 import type { ChartSeries } from './Chart';
+import { ErrorBoundary } from './ErrorBoundary';
 import { fmt } from './fields';
 import { Icon } from './icons';
 import { HidePanelButton } from './Splitters';
@@ -103,12 +104,14 @@ export function Dock() {
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
       >
-        <Suspense fallback={<p className="dock__loading">Loading chart…</p>}>
-          {tab === 'gauges' && <GaugeCharts />}
-          {tab === 'motions' && <MotionCharts />}
-          {tab === 'spectrum' && <SpectrumChart />}
-          {tab === 'statistics' && <Statistics />}
-        </Suspense>
+        <ErrorBoundary area="charts">
+          <Suspense fallback={<p className="dock__loading">Loading chart…</p>}>
+            {tab === 'gauges' && <GaugeCharts />}
+            {tab === 'motions' && <MotionCharts />}
+            {tab === 'spectrum' && <SpectrumChart />}
+            {tab === 'statistics' && <Statistics />}
+          </Suspense>
+        </ErrorBoundary>
       </div>
     </section>
   );

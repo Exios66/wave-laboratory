@@ -22,7 +22,12 @@ if (!match) {
   console.error('check-bundle: no module entry script in dist/index.html');
   process.exit(1);
 }
-const entry = match[1].replace(/^\.?\//, '');
+// The URL carries Vite's base ('./' by default, '/wave-laboratory/' for Pages); strip it to get
+// the file's path inside dist.
+const base = process.env.VITE_BASE ?? './';
+let entry = match[1];
+if (base !== './' && entry.startsWith(base)) entry = entry.slice(base.length);
+entry = entry.replace(/^\.?\//, '');
 const size = statSync(join(dist, entry)).size;
 const kb = (n) => (n / 1000).toFixed(1);
 console.info(`entry ${entry}: ${kb(size)} kB / ${kb(ENTRY_BUDGET)} kB`);

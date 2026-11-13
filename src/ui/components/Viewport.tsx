@@ -1,6 +1,7 @@
 import { beaufortFromWind } from '../../core/units';
 import { useEffect, useRef, useState } from 'react';
 import type { CameraMode, OverlayMode } from '../../render/api';
+import { errorText, isChunkLoadError } from '../errorText';
 import { getRuntime } from '../runtime';
 import { useLab } from '../store';
 import { dayPhase, formatClock } from './clock';
@@ -90,7 +91,17 @@ export function Viewport() {
         The scene shows the simulated sea surface and vessels. All values shown visually are also
         available as text in the inspector and in the statistics tab.
       </p>
-      {status === 'unsupported' ? (
+      {status === 'unsupported' && isChunkLoadError(error) ? (
+        <div className="viewport__message" role="alert">
+          <div>
+            <h3>3D view needs a reload</h3>
+            <p>{errorText(error)}</p>
+            <button type="button" className="btn" onClick={() => window.location.reload()}>
+              Reload
+            </button>
+          </div>
+        </div>
+      ) : status === 'unsupported' ? (
         <div className="viewport__message" role="alert">
           <div>
             <h3>3D view unavailable</h3>

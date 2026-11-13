@@ -1182,6 +1182,19 @@ input[type='range'] {
   max-width: 520px;
 }
 
+.error-notice {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  padding: var(--space-4);
+}
+.error-notice p {
+  margin: 0;
+}
+.error-notice__title {
+  font-weight: 600;
+}
+
 .spinner {
   width: 28px;
   height: 28px;

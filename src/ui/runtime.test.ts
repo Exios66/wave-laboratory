@@ -296,6 +296,18 @@ describe('LabRuntime.attach with an async renderer', () => {
     expect(runtime!.rendererApi).toBeNull();
   });
 
+  it('keeps a time of day chosen while the renderer was loading', async () => {
+    const fake = fakeRenderer();
+    let resolve!: (r: LabRendererApi) => void;
+    const pending = new Promise<LabRendererApi>((r) => (resolve = r));
+    const attached = runtime!.attach(fakeCanvas(), () => pending);
+    const hours = (lab().timeOfDay + 5.5) % 24;
+    lab().setTimeOfDay(hours);
+    resolve(fake);
+    await attached;
+    expect(fake.setTimeOfDay).toHaveBeenLastCalledWith(hours);
+  });
+
   it('reports a rejected renderer import as unsupported', async () => {
     await runtime!.attach(fakeCanvas(), () => Promise.reject(new Error('chunk')));
     expect(lab().status).toBe('unsupported');

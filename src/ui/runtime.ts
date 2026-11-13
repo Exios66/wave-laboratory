@@ -198,6 +198,8 @@ export class LabRuntime {
     }
     this.renderer = renderer;
     const s = useLab.getState();
+    // Edits made while the renderer loaded skipped the store subscription; take them now.
+    this.clockHours = s.timeOfDay;
     this.renderer.setQuality(this.targetQuality());
     this.renderer.setOverlay(s.overlay);
     this.renderer.setDuckMode(s.duckMode);

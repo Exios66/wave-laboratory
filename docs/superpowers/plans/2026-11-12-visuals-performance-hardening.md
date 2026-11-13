@@ -95,7 +95,7 @@ Today `dist/assets/index-*.js` is 1.56 MB: three.js, every scenery layer and uPl
 - [ ] **Step 1: Failing tests** in `runtime.test.ts`:
   - `it('attaches an async renderer once it resolves')`: a factory returns `Promise.resolve(fake)`; after `await rt.attach(...)`, `fake.setQuality` has been called once.
   - `it('disposes a renderer that resolves after detach')`: call attach with a deferred promise, call `rt.detach()`, then resolve. Expect `fake.dispose` called once and `rt.rendererApi` to be null.
-  - `it('reports a rejected renderer import as unsupported')`: a factory returns `Promise.reject(new Error('chunk'))`. Expect `useLab.getState().status` to be the unsupported state with the message `'chunk'`.
+  - `it('reports a rejected renderer import as unsupported')`: a factory returns `Promise.reject(new Error('chunk'))`. Expect `useLab.getState().status` to be the unsupported state with the message `'chunk'`. _(Amended in review of PR #71: when the message is a failed chunk load (`isChunkLoadError`, Task 5), the viewport shows "3D view needs a reload" with a Reload button instead of the WebGL 2 message. `errorText`, `isChunkLoadError` and a chart-scoped `ErrorBoundary` landed early, in Phase A.)_
 - [ ] **Step 2:** Run `pnpm vitest run src/ui/runtime.test.ts`. Expected: 3 FAIL.
 - [ ] **Step 3: Implement.** Use an attach generation counter. `detach()` bumps it, and a renderer that resolves under a stale generation is disposed instead of wired up. Keep the existing try/catch path for both sync throws and rejections.
 - [ ] **Step 4:** Run the same tests. Expected: PASS. Then `pnpm build`. Expected: separate `LabRenderer-*.js` and `Chart-*.js` chunks, and an entry chunk under 450 kB raw.
@@ -183,7 +183,7 @@ The code has no `ErrorBoundary`. Since Task 2, chunk loads can fail after a rede
   - `errorText('str')` → `'str'`.
   - For a chunk error, `errorText` → `'A newer version of Wave Laboratory was published. Reload to continue.'`
 - [ ] **Step 2:** Run the tests and watch them fail. Implement. Run them again. Expected: PASS.
-- [ ] **Step 3: Failing e2e test** `test('a missing chart chunk degrades to a reload notice; the 3D view keeps running')`. Abort `**/assets/Chart-*.js` with `page.route`. Open the Spectrum tab. Expect `getByRole('alert')` to contain "Reload", and expect the clock text to still advance.
+- [ ] **Step 3: Failing e2e test** `test('a missing chart chunk degrades to a reload notice; the 3D view keeps running')`. Abort `**/assets/Chart-*.js` with `page.route`. Open the Spectrum tab. Expect `getByRole('alert')` to contain "Reload", and expect the clock text to still advance. A second test aborts `**/assets/LabRenderer-*.js` and expects the reload notice without the WebGL 2 message. _(Both tests already landed in Phase A; Task 5 adds the boundaries around the viewport, inspector and scene panel.)_
 - [ ] **Step 4:** Implement the boundary and wrap the four areas. Run the e2e test. Expected: PASS. Then run `pnpm run check`.
 - [ ] **Step 5:** Commit. Open and merge the Phase B PR "Content-Security-Policy, dependency fixes, error boundaries", then deploy (as in Task 3, Step 6).
 
@@ -517,7 +517,7 @@ Today the Plane view has one chase camera (`LabRenderer.ts:316-328,1748-1790,222
 - `pnpm audit` reports no moderate or high advisories. The user confirms the GitHub Dependabot count.
 - After each phase deploy:
   - the `github-pages` deployment for the merge SHA reports `success`;
-  - the live site's entry script matches `docs/assets/` on `main`, `models/buoy.glb` returns 200, and the CSP meta tag is present in the live HTML;
+  - the live site's entry script matches `docs/assets/` on `main`, `models/buoy.glb` returns 200, and, from the Phase B deploy onward (Task 4 adds it), the CSP meta tag is present in the live HTML;
   - a Playwright smoke run against the live URL shows a canvas, an advancing clock, no console errors and no CSP violations.
 - The user sees horizon screenshots confirming the looming structures are gone (Task 1, Step 5).
 

@@ -1391,6 +1391,7 @@ export class LabRenderer implements LabRendererApi {
     this.updateWakes(t);
     // GPU stages are timed one after another (timer queries cannot nest): the FFT ocean update,
     // the scene prepasses, the scene, and the post chain that follows it.
+    this.gpuTimer.frame();
     this.gpuTimer.begin('ocean');
     this.ocean.update(t);
     this.gpuTimer.end();
@@ -1411,9 +1412,10 @@ export class LabRenderer implements LabRendererApi {
     this.lastRenderT = t;
     this.updateWeather(t, dt);
     this.applyUnderwater();
+    // The prepass stage also carries the sky environment refresh (cube camera and PMREM).
+    this.gpuTimer.begin('prepass');
     this.updateEnvironment();
     this.updateShadows();
-    this.gpuTimer.begin('prepass');
     this.drawPrepass();
     this.gpuTimer.end();
     // Count only the scene draw, not the FFT passes or the reflection and depth prepasses, so

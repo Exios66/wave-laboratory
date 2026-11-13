@@ -713,4 +713,26 @@ test.describe('Wave Laboratory app', () => {
     await expect(again.getByRole('switch', { name: 'Naval traffic' })).not.toBeChecked();
     expect(errors).toEqual([]);
   });
+
+  test('a missing chart chunk degrades to a reload notice; the 3D view keeps running', async ({
+    page,
+  }) => {
+    await page.route('**/assets/Chart-*.js', (route) => route.abort());
+    await page.goto('/');
+    await waitForSimulation(page);
+    const notice = page.getByRole('alert').filter({ hasText: 'newer version' });
+    await expect(notice).toBeVisible({ timeout: 15_000 });
+    await expect(notice.getByRole('button', { name: 'Reload' })).toBeVisible();
+    const time = page.locator('.transport__time');
+    await expectClockContinues(time, await simulationSeconds(time));
+  });
+
+  test('a missing renderer chunk offers a reload instead of blaming WebGL', async ({ page }) => {
+    await page.route('**/assets/LabRenderer-*.js', (route) => route.abort());
+    await page.goto('/');
+    const notice = page.getByRole('alert').filter({ hasText: 'newer version' });
+    await expect(notice).toBeVisible({ timeout: 30_000 });
+    await expect(notice).not.toContainText('WebGL 2');
+    await expect(notice.getByRole('button', { name: 'Reload' })).toBeVisible();
+  });
 });

@@ -60,4 +60,43 @@ describe('GpuTimer', () => {
     expect(t.passes).toBeNull();
     expect(t.ms).toBeNull();
   });
+
+  it('drops a pass from the total once a frame no longer runs it', () => {
+    const t = new GpuTimer(fakeGl([2, 5, 3]));
+    for (let frame = 0; frame < 30; frame++) {
+      t.frame();
+      t.begin('ocean');
+      t.end();
+      t.begin('scene');
+      t.end();
+      t.begin('post');
+      t.end();
+    }
+    expect(t.passes?.post).toBeDefined();
+    for (let frame = 0; frame < 3; frame++) {
+      t.frame();
+      t.begin('ocean');
+      t.end();
+      t.begin('scene');
+      t.end();
+    }
+    expect(t.passes?.post).toBeUndefined();
+    expect(t.ms).toBeCloseTo((t.passes?.ocean ?? 0) + (t.passes?.scene ?? 0), 6);
+  });
+
+  it('starts a pass afresh when it comes back', () => {
+    const t = new GpuTimer(fakeGl([4]));
+    t.frame();
+    t.begin('post');
+    t.end();
+    t.frame();
+    t.frame();
+    const fresh = new GpuTimer(fakeGl([4]));
+    fresh.frame();
+    fresh.begin('post');
+    fresh.end();
+    t.begin('post');
+    t.end();
+    expect(t.passes?.post).toBeCloseTo(fresh.passes!.post!, 6);
+  });
 });
