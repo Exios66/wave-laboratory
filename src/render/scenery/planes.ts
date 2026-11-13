@@ -474,6 +474,8 @@ export class CrossingScheduler {
   readonly active: Crossing[] = [];
   /** The flight the camera rides (also in `active`), or null. */
   ride: Crossing | null = null;
+  /** The ride last swapped out by `nextRide`, while it dissolves (also in `active`). */
+  private fadingRide: Crossing | null = null;
   private readonly rng: Pcg32;
   /** Rides draw from their own stream so they never change the sky's schedule. */
   private readonly rideRng: Pcg32;
@@ -554,6 +556,14 @@ export class CrossingScheduler {
   nextRide(t: number, centre: { x: number; z: number }, calm: number): Crossing | null {
     const old = this.ride;
     if (!old) return null;
+    // Only one replaced ride dissolves at a time: an earlier one still fading goes now, so
+    // repeated presses never outgrow the layer's aircraft pool.
+    const earlier = this.fadingRide;
+    if (earlier && earlier !== old) {
+      const i = this.active.indexOf(earlier);
+      if (i >= 0) this.active.splice(i, 1);
+    }
+    this.fadingRide = old;
     const tau = t - old.startT;
     const at = crossingPose(old, 0, tau, { x: 0, y: 0, z: 0, heading: 0, bank: 0 });
     const cx = old.orbit?.cx ?? centre.x;
@@ -1075,7 +1085,8 @@ export class PlaneLayer implements SceneryLayer {
       tudor: buildPropDiscs(this.airframes.tudor.props),
     };
     // One flight more than the sky schedules, for the one the camera may be riding.
-    const poolSize = (PLANE_SCHEDULE.maxConcurrent + 1) * MAX_FLIGHT_SIZE;
+    // The sky's crossings, the ridden flight, and a replaced ride while it dissolves.
+    const poolSize = (PLANE_SCHEDULE.maxConcurrent + 2) * MAX_FLIGHT_SIZE;
     for (let i = 0; i < poolSize; i++) this.slots.push(this.createSlot());
   }
 
@@ -1299,15 +1310,24 @@ export class PlaneLayer implements SceneryLayer {
     for (const slot of this.slots) {
       if (slot.crossing && !active.includes(slot.crossing)) this.release(slot);
     }
-    for (const c of active) {
-      let bound = false;
-      for (const s of this.slots) if (s.crossing === c) bound = true;
-      if (bound) continue;
-      let m = 0;
-      for (const slot of this.slots) {
-        if (m >= c.members.length) break;
-        if (!slot.crossing) this.assign(slot, c, m++);
-      }
+    // The ridden flight first, so the camera never rides an aircraft that is not drawn; then
+    // every crossing's members that still lack a slot (a crossing may be partly bound).
+    const ride = this.scheduler.ride;
+    if (ride) this.bindMembers(ride);
+    for (const c of active) if (c !== ride) this.bindMembers(c);
+  }
+
+  private bindMembers(c: Crossing): void {
+    const bound = new Set<number>();
+    for (const s of this.slots) if (s.crossing === c) bound.add(s.member);
+    if (bound.size >= c.members.length) return;
+    let m = 0;
+    for (const slot of this.slots) {
+      if (slot.crossing) continue;
+      while (bound.has(m)) m++;
+      if (m >= c.members.length) return;
+      this.assign(slot, c, m);
+      bound.add(m);
     }
   }
 

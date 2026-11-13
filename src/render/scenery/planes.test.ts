@@ -3,6 +3,7 @@ import { Pcg32 } from '../../core/rng';
 import {
   AIRCRAFT,
   CrossingScheduler,
+  PlaneLayer,
   PLANE_SCHEDULE,
   RIDE,
   crossingInterval,
@@ -358,6 +359,38 @@ describe('riding a flight', () => {
     ).toBeLessThan(0.02);
     s.updateRide(t + 1, 1, true, FLEET, 1);
     expect(s.ride).toBe(next);
+  });
+
+  it('keeps at most one replaced ride fading, however fast the next aircraft is asked for', () => {
+    const s = new CrossingScheduler(5);
+    s.updateRide(0, 0.1, true, FLEET, 1);
+    for (const t of [10, 10.3, 10.6, 10.9]) s.nextRide(t, FLEET, 1);
+    const fading = s.active.filter((c) => c.orbit && c !== s.ride);
+    expect(fading).toHaveLength(1);
+  });
+
+  it('always has aircraft to draw the ride with, even in a full sky with a ride fading', () => {
+    const layer = new PlaneLayer();
+    const inner = layer as unknown as {
+      scheduler: CrossingScheduler;
+      slots: { crossing: Crossing | null }[];
+      bindSlots(): void;
+    };
+    const s = inner.scheduler;
+    const rng = new Pcg32(9);
+    const first = planRide(rng, FLEET, 0, 1, 0, 1, 'avenger');
+    s.ride = first;
+    s.active.push(first);
+    // The sky at its busiest: two five-aircraft crossings besides the ride.
+    for (let i = 0; i < PLANE_SCHEDULE.maxConcurrent; i++) {
+      s.active.push(planRide(rng, FLEET, 0, 1, 1 + i, 10 + i, 'avenger'));
+    }
+    inner.bindSlots();
+    const next = s.nextRide(5, FLEET, 1)!;
+    inner.bindSlots();
+    const bound = inner.slots.filter((slot) => slot.crossing === next).length;
+    expect(bound).toBe(next.members.length);
+    layer.dispose();
   });
 
   it('keeps the ride but schedules nothing new while the lost flights are switched off', () => {

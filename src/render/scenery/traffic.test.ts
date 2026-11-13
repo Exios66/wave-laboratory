@@ -523,6 +523,26 @@ describe('TrafficLayer', () => {
     lib.dispose();
   });
 
+  it('fetches the tall-ship model only once a pirate is in sight', () => {
+    const urls: string[] = [];
+    const lib = new ModelLibrary('/models/', (url) => {
+      urls.push(url);
+      return Promise.resolve(shipModel());
+    });
+    const layer = new TrafficLayer();
+    layer.setModels(lib);
+    const cam = new THREE.PerspectiveCamera();
+    cam.position.set(3500, 40, -3500);
+    layer.setFlags({ traffic: true, structures: false, hostiles: false });
+    for (let i = 0; i < 20; i++) layer.update(makeFrame({ camera: cam, t: i, wallT: i, dt: 1 }));
+    expect(layer.ships.some((s) => s.kind === 'pirate')).toBe(false);
+    expect(urls.some((u) => u.includes('tall-ship'))).toBe(false);
+    expect(meetPirate(layer)).toBe(true);
+    expect(urls.some((u) => u.includes('tall-ship'))).toBe(true);
+    layer.dispose();
+    lib.dispose();
+  });
+
   it('keeps the procedural pirate hull when the tall-ship model fails to load', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const lib = new ModelLibrary('/models/', (url) =>

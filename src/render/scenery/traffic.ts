@@ -1195,7 +1195,8 @@ export class TrafficLayer implements SceneryLayer {
       lights++;
     };
 
-    const tallShip = this.tallShipInstances(tier);
+    // The tall-ship model is only fetched once a pirate is about (hostiles are opt-in).
+    const tallShip = poses.some((s) => s.kind === 'pirate') ? this.tallShipInstances(tier) : null;
     let tallShips = 0;
     for (const s of poses) {
       const mesh = this.shipMeshes[s.kind];
