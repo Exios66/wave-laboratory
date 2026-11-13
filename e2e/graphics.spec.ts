@@ -53,3 +53,44 @@ for (const quality of ['high', 'low'] as const) {
     expect(errors).toEqual([]);
   });
 }
+
+test('production build runs under its Content-Security-Policy', async ({ page }) => {
+  test.setTimeout(300_000);
+  const errors = trackErrors(page);
+  await page.addInitScript(() => {
+    const seen: string[] = [];
+    (window as unknown as { __cspViolations: string[] }).__cspViolations = seen;
+    document.addEventListener('securitypolicyviolation', (e) =>
+      seen.push(`${e.violatedDirective} ${e.blockedURI}`),
+    );
+  });
+  // Scenery models (meshopt WebAssembly, glTF textures) load on the full tier.
+  const model = page.waitForResponse((r) => /\/models\/[\w-]+\.glb$/.test(r.url()), {
+    timeout: 120_000,
+  });
+  await page.goto('/?gfx=full');
+  await expect(page.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute(
+    'content',
+    /default-src 'self'/,
+  );
+  const running = page.getByRole('status').filter({ hasText: 'Simulation running' });
+  await expect(running).toBeAttached({ timeout: 60_000 });
+  const t0 = await simulationSeconds(page);
+  await expect.poll(() => simulationSeconds(page), { timeout: 60_000 }).toBeGreaterThan(t0);
+  expect((await model).status()).toBe(200);
+  await page.getByRole('radio', { name: 'Underwater' }).click();
+  await expect(page.getByText(/^Underwater · \d+\.\d m$/)).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('tab', { name: 'Wave gauges' }).click();
+  await expect(page.locator('figure.chart').first()).toBeVisible({ timeout: 30_000 });
+  // Saving hands the browser a blob download.
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: /^Save/ }).click();
+  await download;
+  // Give the textures a moment to decode, then check nothing was blocked.
+  await page.waitForTimeout(3000);
+  const violations = await page.evaluate(
+    () => (window as unknown as { __cspViolations: string[] }).__cspViolations,
+  );
+  expect(violations).toEqual([]);
+  expect(errors).toEqual([]);
+});
