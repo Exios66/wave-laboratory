@@ -324,7 +324,20 @@ describe('lane turn heel', () => {
 });
 
 describe('offshore static structures', () => {
-  it('places deterministic oil rigs, wind turbines and buoys outside the clear radius', () => {
+  it('places only navigation buoys', () => {
+    let seen = 0;
+    for (let ix = -40; ix <= 40; ix++) {
+      for (let iy = -40; iy <= 40; iy++) {
+        for (const s of structuresInCell(ix, iy)?.items ?? []) {
+          expect(s.kind).toBe('buoy');
+          seen++;
+        }
+      }
+    }
+    expect(seen).toBeGreaterThan(0);
+  });
+
+  it('places deterministic navigation buoys outside the clear radius', () => {
     const a = structuresNear(5000, -4000, 'full', 12_000);
     const b = structuresNear(5000, -4000, 'full', 12_000);
     expect(a).toEqual(b);

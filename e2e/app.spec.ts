@@ -690,7 +690,7 @@ test.describe('Wave Laboratory app', () => {
     await waitForSimulation(page);
     await page.getByRole('button', { name: 'Settings' }).click();
     const dialog = page.getByRole('dialog', { name: 'Settings' });
-    for (const name of ['Naval traffic', 'Offshore structures', 'Underwater scenery']) {
+    for (const name of ['Naval traffic', 'Navigation buoys', 'Underwater scenery']) {
       await expect(dialog.getByRole('switch', { name })).toBeChecked();
     }
     await expect(dialog.getByRole('switch', { name: 'Pirates & hostiles' })).not.toBeChecked();

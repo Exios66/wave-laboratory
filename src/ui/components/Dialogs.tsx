@@ -281,10 +281,10 @@ function ScenerySettings() {
         hint="Fishing fleets, merchant convoys, patrol boats and liners in the distance."
       />
       <Switch
-        label="Offshore structures"
+        label="Navigation buoys"
         checked={ambience.structures}
         onChange={(v) => set({ structures: v })}
-        hint="Distant oil rigs, wind turbines and navigation buoys."
+        hint="Red-and-white navigation buoys with a flashing beacon at night."
       />
       <Switch
         label="Underwater scenery"

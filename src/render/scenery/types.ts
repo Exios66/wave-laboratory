@@ -33,7 +33,7 @@ export interface AmbienceSettings {
   planes: boolean;
   /** Background naval traffic: fishing fleets, merchant lanes, patrol boats, tankers and liners. */
   traffic: boolean;
-  /** Offshore oil rigs, wind turbines and navigation buoys. */
+  /** Navigation buoys (the key keeps its old name so saved preferences load). */
   structures: boolean;
   /** Seabed, kelp forests, coral, shipwrecks and underwater atmosphere. */
   underwater: boolean;

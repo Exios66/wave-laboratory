@@ -1,12 +1,12 @@
 /**
- * Ambient passerby naval traffic, offshore static architecture and opt-in pirate luggers.
+ * Ambient passerby naval traffic, offshore navigation buoys and opt-in pirate luggers.
  *
  * Purely visual (scenery never touches wave forces or experiment state):
  *  - Phase 1 working fleets: fishing trawlers in circular/dredge grounds, cargo ships on
  *    merchant lanes, and patrol boats on station rounds;
  *  - Phase 2 big tonnage & static architecture: cruise liners (multi-tier superstructure on a
- *    fine hull), VLCC oil tankers, rare aircraft carriers, and hash-grid offshore rig fields
- *    (oil platforms with night flare + beacon, wind turbines, sea buoys);
+ *    fine hull), VLCC oil tankers, rare aircraft carriers, and hash-grid navigation buoys with a
+ *    flashing night beacon;
  *  - Phase 3 opt-in pirates (`ambience.hostiles`, off by default): a square-rigged lugger
  *    approaches from the horizon, parallels the player vessel, and peels off (always despawning
  *    cleanly beyond 500 m).
@@ -14,15 +14,15 @@
  * Placement & routing live in pure functions (`trafficInCell`, `trafficNear`, `structuresInCell`,
  * `structuresNear`, `stepHostileEncounter`) so they are unit-tested in Node without WebGL.
  *
- * Rendering is one vertex-coloured `InstancedMesh` per hull class and per structure kind (7 + 3;
+ * Rendering is one vertex-coloured `InstancedMesh` per hull class plus one for the buoys (7 + 1;
  * the renderer skips empty ones, so a typical frame draws a handful) plus a single shared additive
- * point pass for night navigation lights, deck lamps, rig flares and beacons, respecting the
- * `TRAFFIC_BUDGET` / `STRUCTURE_BUDGET` caps (`full`: 12 hulls / 3 rig cells, `mid`: 8 / 2,
+ * point pass for night navigation lights, deck lamps and buoy beacons, respecting the
+ * `TRAFFIC_BUDGET` / `STRUCTURE_BUDGET` caps (`full`: 12 hulls / 3 buoy cells, `mid`: 8 / 2,
  * `lite`: 4 / 0). The tier comes from the device-capped quality (`LabRenderer`), see AMBIENCE.md.
  *
  * Routing guarantees (all unit-tested): a route is a pure function of the cell and time (calm only
  * gates visibility, never time), stays inside its own grid cell, keeps clear of the origin zone,
- * islands and rigs, and is continuous in position and heading. Fishing fleets share one circle at
+ * islands and buoys, and is continuous in position and heading. Fishing fleets share one circle at
  * even phase spacing and lanes are racetracks with rounded ends, so hulls never overlap.
  *
  * Coordinates: world (x east, y north, z up) maps to Three.js as (x, z, −y).
@@ -59,7 +59,7 @@ export const TRAFFIC_BUDGET: Record<SceneryTier, number> = {
   lite: 4,
 };
 
-/** Hard cap per tier on live static offshore structure cells. */
+/** Hard cap per tier on live navigation-buoy cells. */
 export const STRUCTURE_BUDGET: Record<SceneryTier, number> = {
   full: 3,
   mid: 2,
@@ -479,10 +479,15 @@ export function trafficNear(
 }
 
 // ---------------------------------------------------------------------------------------------
-// Phase 2: Static offshore architecture (rigs, wind farms, sea buoys)
+// Phase 2: Navigation buoys (the hash-grid cells that once held rigs and wind farms)
 // ---------------------------------------------------------------------------------------------
 
-export type StructureKind = 'oil-rig' | 'wind-turbine' | 'buoy';
+/**
+ * Offshore structures are navigation buoys only. The box-built oil rigs and wind turbines were
+ * removed: untextured, they loomed over the horizon. The `structures` ambience flag keeps its name
+ * so saved preferences still load.
+ */
+export type StructureKind = 'buoy';
 
 export interface StructureItem {
   id: string;
@@ -514,19 +519,12 @@ function buildStructureCell(ix: number, iy: number): StructureCellSpec | null {
   if (Math.hypot(cx, cy) < STRUCTURE_CLEAR_RADIUS) return null;
   if (islandsNear(cx, cy, 420).length > 0) return null;
 
+  // Draw from the generator exactly as the cells did when they also held a rig or a wind farm,
+  // so each buoy stays where it was.
   const items: StructureItem[] = [];
-  const kindRoll = rnd();
-  if (kindRoll < 0.46) {
-    // Offshore oil platform + standby guard buoy.
-    items.push({
-      id: `rig:${ix}:${iy}`,
-      kind: 'oil-rig',
-      x: cx,
-      y: cy,
-      yaw: rnd() * Math.PI * 2,
-      scale: 0.95 + 0.2 * rnd(),
-      seed,
-    });
+  if (rnd() < 0.46) {
+    rnd(); // former platform heading
+    rnd(); // former platform scale
     const ba = rnd() * Math.PI * 2;
     items.push({
       id: `buoy:${ix}:${iy}:0`,
@@ -538,22 +536,9 @@ function buildStructureCell(ix: number, iy: number): StructureCellSpec | null {
       seed: seed ^ 11,
     });
   } else {
-    // Offshore wind farm array (3–4 turbines on a row + cardinal mark buoy).
     const count = 3 + (rnd() < 0.5 ? 1 : 0);
     const rowAng = rnd() * Math.PI * 2;
-    const spacing = 150;
-    for (let k = 0; k < count; k++) {
-      const off = (k - (count - 1) / 2) * spacing;
-      items.push({
-        id: `turbine:${ix}:${iy}:${k}`,
-        kind: 'wind-turbine',
-        x: cx + Math.cos(rowAng) * off,
-        y: cy + Math.sin(rowAng) * off,
-        yaw: rowAng + Math.PI / 2,
-        scale: 0.95 + 0.15 * rnd(),
-        seed: hash2(ix * 8 + k, iy, STRUCTURE_SALT ^ 7),
-      });
-    }
+    for (let k = 0; k < count; k++) rnd(); // former turbine scales
     items.push({
       id: `buoy:${ix}:${iy}:mark`,
       kind: 'buoy',
@@ -909,60 +894,15 @@ function buildTrafficGeometry(kind: TrafficKind): THREE.BufferGeometry {
   return geo;
 }
 
-function buildStructureGeometry(kind: StructureKind): THREE.BufferGeometry {
+/** The procedural buoy, drawn until (or instead of) the CC0 buoy model. */
+function buildStructureGeometry(): THREE.BufferGeometry {
   const pos: number[] = [];
   const col: number[] = [];
   const c = new THREE.Color();
-  if (kind === 'oil-rig') {
-    c.setHex(0x475569);
-    for (const [lx, lz] of [
-      [-14, -14],
-      [14, -14],
-      [-14, 14],
-      [14, 14],
-    ] as const) {
-      appendBox(pos, col, lx, 10, lz, 3.2, 28, 3.2, c);
-    }
-    c.setHex(0x64748b);
-    appendBox(pos, col, 0, 24, 0, 38, 4.5, 34, c);
-    c.setHex(0xe2e8f0);
-    appendBox(pos, col, -8, 29, 6, 14, 6, 14, c);
-    c.setHex(0xd97706);
-    appendBox(pos, col, 6, 38, -4, 3.5, 24, 3.5, c); // derrick tower
-    appendBox(pos, col, 22, 33, -12, 2.2, 18, 2.2, c); // flare boom
-    c.setHex(0x0ea5e9);
-    appendBox(pos, col, -16, 27, -10, 12, 0.8, 12, c); // helipad
-  } else if (kind === 'wind-turbine') {
-    // shortcut: rotor blades are baked into the mesh and never turn, so a whole farm costs one
-    // draw call; give each turbine its own rotor mesh when they get close enough to read.
-    c.setHex(0xf1f5f9);
-    appendBox(pos, col, 0, 36, 0, 3.2, 74, 3.2, c);
-    appendBox(pos, col, 1.5, 73, 0, 7, 3.6, 3.6, c);
-    c.setHex(0xe2e8f0);
-    for (let i = 0; i < 3; i++) {
-      const a = (i * Math.PI * 2) / 3;
-      const by = 73 + Math.cos(a) * 18;
-      const bz = Math.sin(a) * 18;
-      appendBox(
-        pos,
-        col,
-        3.2,
-        by,
-        bz,
-        0.6,
-        Math.max(2, Math.abs(Math.cos(a)) * 34),
-        Math.max(2, Math.abs(Math.sin(a)) * 34),
-        c,
-      );
-    }
-    c.setHex(0xeab308);
-    appendBox(pos, col, 0, 2, 0, 4.4, 5, 4.4, c);
-  } else {
-    c.setHex(0xef4444);
-    appendBox(pos, col, 0, 1.2, 0, 2.8, 2.4, 2.8, c);
-    c.setHex(0xf8fafc);
-    appendBox(pos, col, 0, 3.8, 0, 0.8, 3.2, 0.8, c);
-  }
+  c.setHex(0xef4444);
+  appendBox(pos, col, 0, 1.2, 0, 2.8, 2.4, 2.8, c);
+  c.setHex(0xf8fafc);
+  appendBox(pos, col, 0, 3.8, 0, 0.8, 3.2, 0.8, c);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
@@ -984,7 +924,7 @@ const TRAFFIC_KINDS: readonly TrafficKind[] = [
   'carrier',
   'pirate',
 ];
-const STRUCTURE_KINDS: readonly StructureKind[] = ['oil-rig', 'wind-turbine', 'buoy'];
+const STRUCTURE_KINDS: readonly StructureKind[] = ['buoy'];
 /** The buoy model: height of its top [m], scale to the procedural buoy's size, depth sunk [m]. */
 const BUOY_MODEL_TOP = 2.7;
 const BUOY_MODEL_SCALE = 1.9;
@@ -1054,7 +994,7 @@ export class TrafficLayer implements SceneryLayer {
     }
     this.structMeshes = {} as Record<StructureKind, THREE.InstancedMesh>;
     for (const k of STRUCTURE_KINDS) {
-      const m = new THREE.InstancedMesh(buildStructureGeometry(k), this.material, 16);
+      const m = new THREE.InstancedMesh(buildStructureGeometry(), this.material, 16);
       m.name = `structure-${k}`;
       m.frustumCulled = false;
       m.count = 0;
@@ -1267,7 +1207,7 @@ export class TrafficLayer implements SceneryLayer {
           const mesh = this.structMeshes[item.kind];
           const idx = mesh.count;
           if (idx >= 16) continue;
-          const bob = item.kind === 'buoy' ? 0.25 * Math.sin(frame.t * 1.7 + item.seed) : 0;
+          const bob = 0.25 * Math.sin(frame.t * 1.7 + item.seed);
           this.tmpP.set(item.x, bob, -item.y);
           this.tmpE.set(0, item.yaw, 0);
           this.tmpQ.setFromEuler(this.tmpE);
@@ -1275,7 +1215,7 @@ export class TrafficLayer implements SceneryLayer {
           this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
           mesh.setMatrixAt(idx, this.tmpM);
           mesh.count = idx + 1;
-          if (item.kind === 'buoy' && buoys) {
+          if (buoys) {
             // The model buoy (2.7 m) scaled to the procedural one's size, its skirt under water.
             this.tmpP.y = bob - BUOY_MODEL_SINK * item.scale;
             this.tmpS.setScalar(item.scale * BUOY_MODEL_SCALE);
@@ -1284,26 +1224,11 @@ export class TrafficLayer implements SceneryLayer {
           }
 
           const beacon = structureBeaconIntensity(frame.t, item.seed, frame.calm);
-          if (item.kind === 'oil-rig') {
-            // Persistent flare stack + flashing red aviation beacon.
-            pushLight(item.x + 20, 44 * item.scale, -item.y + 10, 1.0, 0.55, 0.12);
-            if (beacon > 0.1)
-              pushLight(item.x + 6, 52 * item.scale, -item.y + 4, beacon, 0.1, 0.08);
-          } else if (beacon > 0.1) {
-            const h =
-              item.kind === 'wind-turbine'
-                ? 76 * item.scale
-                : buoys
-                  ? (BUOY_MODEL_TOP * BUOY_MODEL_SCALE - BUOY_MODEL_SINK) * item.scale
-                  : 5.2;
-            pushLight(
-              item.x,
-              h + bob,
-              -item.y,
-              beacon,
-              item.kind === 'buoy' ? beacon * 0.7 : 0.1,
-              0.1,
-            );
+          if (beacon > 0.1) {
+            const h = buoys
+              ? (BUOY_MODEL_TOP * BUOY_MODEL_SCALE - BUOY_MODEL_SINK) * item.scale
+              : 5.2;
+            pushLight(item.x, h + bob, -item.y, beacon, beacon * 0.7, 0.1);
           }
         }
       }

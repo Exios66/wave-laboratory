@@ -1432,7 +1432,7 @@ export class LabRenderer implements LabRendererApi {
   /**
    * Fit the sun's shadow map to a square round the camera's focus, snapped to whole texels in the
    * light's frame so it does not crawl as the camera moves, and ask for one shadow pass this
-   * frame (the prepass draws reuse it). Ships, rigs, islands and traffic cast and receive; the
+   * frame (the prepass draws reuse it). Ships, buoys, islands and traffic cast and receive; the
    * ocean samples the map itself to take the sun off the water in a hull's shadow.
    */
   /** Clear the fallback shadow target to "nothing in shadow" and bind it to the ocean. */

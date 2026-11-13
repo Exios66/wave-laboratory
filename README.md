@@ -165,8 +165,8 @@ above, but off on phones and software rendering.
 
 A seeded, deterministic seascape that never disturbs the physics: island
 chains and lighthouses, working fishing fleets (trawlers hauling nets),
-merchant lanes with liners, cargo ships and tankers, patrol boats, offshore
-oil rigs burning a flare, wind farms and buoys, plus seabed, kelp, coral,
+merchant lanes with liners, cargo ships and tankers, patrol boats and
+navigation buoys, plus seabed, kelp, coral,
 wrecks and marine snow when you dive. Everything is deterministic from the
 world seed and throttled to 4–12 hulls by device tier. Opt in under
 Settings → Scenery to a pirate lugger that shadows you and a low recon pass.
