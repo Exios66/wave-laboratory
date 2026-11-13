@@ -252,6 +252,7 @@ MSAA (`PostStack.ts:158-161`) smooths geometry edges, but the sub-pixel glints a
   - Neighbourhood clamping uses a YCoCg 3×3 min/max box to limit ghosting on moving water.
   - The blend factor is 0.1. It becomes 1.0 for the first frame after `reset()` and for any history UV off-screen.
   - The pass is disabled entirely when `PostSettings.taa` is false, so there is zero cost.
+  - Phase E ships first, so call `TaaPass.reset()` from `LabRenderer.setRideView` and `nextRide` (Task 11) as well as on camera-mode changes. Extend the e2e test in Step 4 to also switch Plane view Chase → Cockpit.
 - [ ] **Step 4: Failing e2e test** in `graphics.spec.ts`: `test('TAA on: renders, survives a camera cut, no console errors')`. Use `?gfx=full`, display TAA on, switch Orbit → Bridge → Orbit. Expect the canvas to be non-blank (sampled pixel variance > 0) and no `console.error`.
 - [ ] **Step 5:** Run `pnpm test:e2e e2e/graphics.spec.ts --trace off`. Expected: PASS. Take before/after crops of the distant water (two frames 1/60 s apart, then a pixel diff). Expected: the TAA frame-to-frame diff is lower than without TAA. Commit: "Temporal antialiasing on the full tier".
 
@@ -378,6 +379,62 @@ Every aircraft also gets:
   - Extend `budget.test.ts`: the plane layer still uses ≤ 3 draw calls per aircraft.
 - [ ] **Step 4:** Take screenshots of each kind in the Plane view at `?gfx=full` and show them to the user. Commit: "Textured, smooth-shaded aircraft with period liveries".
 
+### Task 13: More real CC0 models through the existing pipeline (Phase E, runs right after Task 10)
+
+The user asked for more effective three.js models wherever they stay consistent and maintainable. The project already has one pipeline for this, and every new model must go through it:
+
+- `scripts/fetch-models.mjs` downloads from Poly Haven, then simplifies the mesh, converts textures to WebP and compresses with meshopt, and writes `public/models/CREDITS.md`;
+- `ModelLibrary` in `src/render/scenery/models.ts` loads models on demand and keeps the procedural fallback if a load fails;
+- `ModelInstances` draws all copies of a model with one draw call per material.
+
+Poly Haven is reachable from this session (HTTP 200); Kenney and poly.pizza return 403, so they aren't used. Poly Haven has no modern ships or aircraft, so the procedural liners, tankers and carriers stay. These assets do fit:
+
+| New `ModelName`  | Poly Haven id         | Source triangles | Triangle budget | Texture px | Used for                                                                                                  |
+| ---------------- | --------------------- | ---------------- | --------------- | ---------- | --------------------------------------------------------------------------------------------------------- |
+| `lateral-marker` | `lateral_sea_marker`  | 13k              | 3000            | 512        | Every other navigation buoy cell (Task 1 keeps buoys only), alternating with `buoy`                       |
+| `pier`           | `modular_wooden_pier` | 85k              | 4000            | 512        | Island docks, replacing the box-and-cylinder dock (`islands.ts:597-615`) when models are on               |
+| `barrels`        | `wooden_barrels_01`   | 33k              | 1500            | 256        | Dock-end props (1 per dock)                                                                               |
+| `crate`          | `wooden_crate_01`     | 6.6k             | 600             | 256        | Dock and hut props (≤ 2 per island)                                                                       |
+| `lantern`        | `Lantern_01`          | 34k              | 800             | 256        | Hanging at the hut door. It replaces nothing; the existing lamp glow stays.                               |
+| `tall-ship`      | `dutch_ship_medium`   | 69k              | 9000            | 1024       | The pirate lugger hull (`traffic.ts:156`, `CLASS_DIMS.pirate`), scaled so its bounding-box length is 34 m |
+
+Rules for every model:
+
+- Add a `LOOK` entry (tint and lift; the default is `{ tint: 1, lift: 0 }`; tune it once against the screenshot).
+- Never render on the `lite` tier.
+- Keep the procedural mesh until the model is ready, and keep it permanently if the load fails (the existing `hasFailed` path).
+
+**Files:**
+
+- Modify: `scripts/fetch-models.mjs` (`ASSETS`), `public/models/*` (regenerated, plus 6 new `.glb` files), `public/models/CREDITS.md` (generated).
+- Modify: `src/render/scenery/models.ts`: extend `ModelName` and `LOOK`.
+- Modify: `src/render/scenery/islands.ts`:
+  - `ISLAND_MODELS` gains `'pier' | 'barrels' | 'crate' | 'lantern'`;
+  - add `MODEL_PER_ISLAND` caps: pier 4, barrels 4, crate 8, lantern 4;
+  - the dock box geometry is skipped while the pier model is ready, the same way boulders are today.
+- Modify: `src/render/scenery/traffic.ts`: buoy cells alternate the two marker models; the pirate draws the `tall-ship` model through `ModelInstances` (capacity 1).
+- Test: `src/render/scenery/models.test.ts`, `islands.test.ts`, `traffic.test.ts`, `budget.test.ts`.
+- Create: `scripts/check-models.mjs`, run as part of `check` after the bundle check. It fails if any `public/models/*.glb` exceeds its budget:
+  - `tall-ship` 1200 KB;
+  - `pier` 450 KB;
+  - all others 300 KB;
+  - and it fails if CREDITS.md lacks a row for any `.glb` in the folder.
+
+**Interfaces:**
+
+- Produces `ModelName = 'rock-a' | 'rock-b' | 'buoy' | 'lifebuoy' | 'lateral-marker' | 'pier' | 'barrels' | 'crate' | 'lantern' | 'tall-ship'`.
+- Produces `fitLength(parts: ModelPart[], length: number): number`, in `models.ts`. It returns the uniform scale that makes the model's longest horizontal bounding-box extent equal `length`.
+
+- [ ] **Step 1: Failing tests.**
+  - `fitLength` on a 2 × 1 × 8 box geometry with `length` 34 gives 4.25.
+  - `models.test.ts`, using the injectable loader: a `'tall-ship'` load failure leaves `get('tall-ship') === null` and `hasFailed('tall-ship')` true, and the pirate still draws its procedural hull. Assert this in `traffic.test.ts` by checking a mesh named `traffic-pirate` stays visible.
+  - `islands.test.ts`: a dock island with the pier model ready produces exactly 1 `pier` prop, no dock box geometry, and props that all lie within the island's coast radius + dock length.
+  - `traffic.test.ts`: across the buoy cells in a 40 × 40 grid, both marker models occur, and neither makes up more than 70 %.
+  - `budget.test.ts`: with every model ready on the full tier, the draw calls added are ≤ (parts per model) per model kind, and are 0 on lite.
+- [ ] **Step 2:** Run `pnpm vitest run src/render/scenery`. Expected: FAIL. Implement the TypeScript side. Run again. Expected: PASS.
+- [ ] **Step 3:** Run `node scripts/fetch-models.mjs <scratchpad>/models-cache`. Expected: one line per asset showing triangles before → after and KB, all within the budgets above. Then run `node scripts/check-models.mjs`. Expected: PASS. Downloaded files stay in the scratchpad cache; only the processed `.glb` files are committed.
+- [ ] **Step 4:** Take screenshots at `?gfx=full`: an island with a dock, a navigation buoy pair, and the pirate (hostiles on). Show them to the user. Tune `LOOK` so each model matches the brightness of the scenery around it. Run `pnpm run check` and `pnpm test:e2e --trace off`. Commit: "More CC0 scenery models: markers, pier, dock props, tall ship".
+
 ### Task 11: Plane view camera modes and smoother flight (Phase E)
 
 Today the Plane view has one chase camera (`LabRenderer.ts:316-328,1748-1790,2221`) that stays level while the aircraft banks about 30° (`crossingPose`, `planes.ts:420`).
@@ -410,7 +467,7 @@ Today the Plane view has one chase camera (`LabRenderer.ts:316-328,1748-1790,222
 - [ ] **Step 3: Wire up the renderer.**
   - Apply the roll by rotating `camera.up` about the view axis.
   - The near plane is 0.15 m in the cockpit, so the canopy frame is visible without clipping.
-  - Switching view resets TAA history (Task 7 `TaaPass.reset()`).
+  - TAA doesn't exist yet: Phase E ships before Phase C. Task 7 adds the history reset on ride-view changes.
 - [ ] **Step 4:** Commit: "Plane view: cockpit, wing and fly-by cameras with banked, damped flight".
 
 ### Task 12: Plane view HUD and controls (Phase E)
@@ -466,12 +523,15 @@ Today the Plane view has one chase camera (`LabRenderer.ts:316-328,1748-1790,222
 
 ## Execution
 
-Native, as the user requested: I implement every task inline, in order 0 → 9, with one PR plus a deploy PR per phase.
+Native, using superpowers:executing-plans as the user requested. I implement every task inline, with one PR plus a deploy PR per phase. The user moved Phase E up, so the phases run in this order:
 
-- Phase A: Tasks 1–3.
-- Phase B: Tasks 4–5.
-- Phase C: Tasks 6–7.
-- Phase D: Tasks 8–9.
-- Phase E: Tasks 10–12, the aircraft and Plane view. Phase E depends only on Task 7's `TaaPass.reset()`, and only if TAA has already shipped. It can move ahead of Phase D if the user wants it sooner.
+1. Task 0 (housekeeping).
+2. Phase A: Tasks 1–3 (structure removal, bundle split, GPU timings). It is small and also holds the user's capitalised request.
+3. **Phase E: Tasks 10 → 13 → 11 → 12** (textured aircraft, more CC0 scenery models, Plane view cameras, HUD).
+4. Phase B: Tasks 4–5.
+5. Phase C: Tasks 6–7.
+6. Phase D: Tasks 8–9.
+
+Phase E has no dependency on B, C or D. Task 12's HUD is built mobile-safe on its own; Task 6 later only has to keep it passing.
 
 A final self-review of the whole branch happens before each phase PR.
