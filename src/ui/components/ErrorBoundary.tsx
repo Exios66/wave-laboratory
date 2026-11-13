@@ -12,6 +12,8 @@ const AREA_LABEL: Record<ErrorArea, string> = {
 
 interface Props {
   area: ErrorArea;
+  /** Layout classes for the fallback, so a failed area keeps its place in the grid. */
+  className?: string;
   children: ReactNode;
 }
 
@@ -48,6 +50,7 @@ export class ErrorBoundary extends Component<Props, State> {
         title={`${AREA_LABEL[this.props.area]} could not load`}
         error={error}
         onReload={this.retry}
+        className={this.props.className}
       />
     );
   }
@@ -58,13 +61,15 @@ export function ErrorNotice({
   title,
   error,
   onReload,
+  className,
 }: {
   title: string;
   error: unknown;
   onReload: () => void;
+  className?: string;
 }) {
   return (
-    <div className="error-notice" role="alert">
+    <div className={className ? `error-notice ${className}` : 'error-notice'} role="alert">
       <p className="error-notice__title">{title}</p>
       <p>{errorText(error)}</p>
       <button type="button" className="btn" onClick={onReload}>

@@ -3,6 +3,7 @@ import type { CameraMode, OverlayMode } from '../render/api';
 import { RIDE_VIEW_LABELS, RIDE_VIEWS } from '../render/rideViews';
 import { Dialogs } from './components/Dialogs';
 import { Dock } from './components/Dock';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Inspector } from './components/Inspector';
 import { Notices } from './components/Notices';
 import { ScenePanel } from './components/ScenePanel';
@@ -258,11 +259,17 @@ export function App() {
       </a>
       <div className="app" data-mobile-panel={mobilePanel}>
         <TopBar />
-        <ScenePanel />
-        <Viewport />
+        <ErrorBoundary area="scene" className="panel app__scene">
+          <ScenePanel />
+        </ErrorBoundary>
+        <ErrorBoundary area="viewport" className="app__viewport">
+          <Viewport />
+        </ErrorBoundary>
         <Splitters />
         <MobileTabs />
-        <Inspector />
+        <ErrorBoundary area="inspector" className="panel app__inspector">
+          <Inspector />
+        </ErrorBoundary>
         <Dock />
       </div>
       <Notices />
