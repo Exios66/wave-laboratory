@@ -516,6 +516,8 @@ textarea {
   margin: 0;
   padding: 0;
   display: grid;
+  /* Rows no wider than the panel, whatever their labels. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
 }
 
@@ -529,9 +531,10 @@ textarea {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  /* Tight enough that a vessel's name, speed and health fit the default 280 px panel. */
+  gap: 6px;
   min-height: 36px;
-  padding: 4px 8px;
+  padding: 4px 6px;
   text-align: left;
   background: transparent;
   border: 1px solid transparent;
@@ -546,12 +549,18 @@ textarea {
   background: color-mix(in srgb, var(--accent) 18%, var(--bg-elev));
   border-color: color-mix(in srgb, var(--accent) 60%, transparent);
 }
+/* In a narrow panel the meta gives way first; only a very long name ellipses. */
 .tree__label {
+  flex-shrink: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .tree__meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   margin-left: auto;
   color: var(--text-faint);
   font-size: 12px;
@@ -1233,6 +1242,11 @@ input[type='range'] {
   flex-wrap: wrap;
 }
 
+/* A readout moves to the next line whole rather than breaking "69.8 ms" in two. */
+.transport .field__hint {
+  white-space: nowrap;
+}
+
 .transport__time {
   font-family: var(--font-mono);
   font-size: 15px;
@@ -1246,6 +1260,7 @@ input[type='range'] {
   margin-left: auto;
 }
 .tabs [role='tab'] {
+  white-space: nowrap;
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
@@ -1258,6 +1273,34 @@ input[type='range'] {
 .tabs [role='tab'][aria-selected='true'] {
   color: var(--text);
   border-bottom-color: var(--accent);
+}
+
+/*
+ * A narrow dock (side panels open at a medium window width, or dragged narrow) puts the data
+ * tabs on a row of their own, spread across the dock, instead of squeezing them beside playback.
+ */
+.app__dock {
+  container: dock / inline-size;
+}
+@container dock (max-width: 640px) {
+  .transport > .toolbar {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+  .tabs {
+    margin-left: 0;
+    flex: 1 1 320px;
+    min-width: 0;
+    justify-content: space-between;
+    /* Narrower still (a dragged splitter): the row scrolls rather than cutting a label short. */
+    overflow-x: auto;
+  }
+  .tabs [role='tab'] {
+    flex: 0 0 auto;
+    padding: 6px 4px;
+    font-size: 13px;
+    line-height: 1.2;
+  }
 }
 
 .dock__panel {
@@ -1530,8 +1573,16 @@ kbd {
   display: none;
 }
 
-@media (max-width: 1280px) {
+/* Labelled toolbar buttons need about 1340 px; below 1400 px they show icons only. */
+@media (max-width: 1400px) {
   .topbar .btn__label {
+    display: none;
+  }
+}
+
+/* Graphics and theme live in Settings too; below this width the top bar keeps to the essentials. */
+@media (max-width: 1100px) {
+  .topbar__wide-only {
     display: none;
   }
 }

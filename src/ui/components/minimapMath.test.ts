@@ -5,6 +5,7 @@ import {
   formatBearing,
   formatDistance,
   formatPosition,
+  mapStartsOpen,
   mapToWorld,
   stepRange,
   worldToMap,
@@ -80,5 +81,14 @@ describe('minimap controls and labels', () => {
     expect(formatBearing(359.7)).toBe('000°');
     expect(compassPoint(44)).toBe('NE');
     expect(compassPoint(350)).toBe('N');
+  });
+});
+
+describe('mapStartsOpen', () => {
+  it('folds the chart away in a 3D view narrower than 700 px', () => {
+    expect(mapStartsOpen(699)).toBe(false);
+    expect(mapStartsOpen(428)).toBe(false);
+    expect(mapStartsOpen(700)).toBe(true);
+    expect(mapStartsOpen(1200)).toBe(true);
   });
 });

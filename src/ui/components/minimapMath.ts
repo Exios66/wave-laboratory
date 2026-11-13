@@ -77,3 +77,11 @@ export function compassPoint(deg: number): (typeof POINTS)[number] {
   const i = Math.round((((deg % 360) + 360) % 360) / 45) % 8;
   return POINTS[i]!;
 }
+
+/** Below this 3D-view width [px] the chart starts folded so it does not cover the view. */
+export const MAP_OPEN_MIN_WIDTH = 700;
+
+/** Whether the chart starts open in a 3D view `viewWidth` pixels wide (no saved choice). */
+export function mapStartsOpen(viewWidth: number): boolean {
+  return viewWidth >= MAP_OPEN_MIN_WIDTH;
+}

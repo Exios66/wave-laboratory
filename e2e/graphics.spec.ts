@@ -8,8 +8,8 @@ async function simulationSeconds(page: Page): Promise<number> {
 }
 
 // These tests look for compile errors and GPU self-check mismatches, not layout: a smaller
-// canvas keeps the software renderer's per-frame cost (and the run time) down. Wider than
-// 1280 px, where the top bar drops its button labels.
+// canvas keeps the software renderer's per-frame cost (and the run time) down. Wide enough for
+// the desktop three-column layout; toolbar buttons are found by their accessible names.
 test.use({ viewport: { width: 1300, height: 650 } });
 
 for (const quality of ['high', 'low'] as const) {
