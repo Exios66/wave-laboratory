@@ -90,12 +90,29 @@ describe('resolvePostSettings', () => {
       grain: false,
       vignette: false,
     });
-    const on = { bloom: 'off' as const, grain: true, vignette: true };
+    const on = { bloom: 'off' as const, grain: true, vignette: true, taa: 'off' as const };
     expect(resolvePostSettings(on, 'low', desktop)).toEqual({
       bloom: false,
       grain: true,
       vignette: true,
+      taa: false,
     });
+  });
+  it('turns temporal antialiasing on in auto exactly where bloom is', () => {
+    expect(resolvePostSettings(DEFAULT_DISPLAY, 'high', desktop).taa).toBe(true);
+    expect(resolvePostSettings(DEFAULT_DISPLAY, 'medium', desktop).taa).toBe(true);
+    expect(resolvePostSettings(DEFAULT_DISPLAY, 'low', desktop).taa).toBe(false);
+    expect(
+      resolvePostSettings(DEFAULT_DISPLAY, 'high', { software: true, mobile: false }).taa,
+    ).toBe(false);
+    expect(
+      resolvePostSettings(DEFAULT_DISPLAY, 'high', { software: false, mobile: true }).taa,
+    ).toBe(false);
+    const slow = { software: true, mobile: true };
+    expect(resolvePostSettings({ ...DEFAULT_DISPLAY, taa: 'on' }, 'low', slow).taa).toBe(true);
+    expect(resolvePostSettings({ ...DEFAULT_DISPLAY, taa: 'off' }, 'ultra', desktop).taa).toBe(
+      false,
+    );
   });
 });
 
@@ -106,10 +123,16 @@ describe('sanitizeDisplay', () => {
     expect(sanitizeDisplay({ bloom: 'maybe', grain: 'yes', vignette: 1 })).toEqual(DEFAULT_DISPLAY);
   });
   it('keeps valid values', () => {
-    expect(sanitizeDisplay({ bloom: 'off', grain: true, vignette: true })).toEqual({
+    expect(sanitizeDisplay({ bloom: 'off', grain: true, vignette: true, taa: 'off' })).toEqual({
       bloom: 'off',
       grain: true,
       vignette: true,
+      taa: 'off',
     });
+  });
+  it('reads settings saved before temporal antialiasing existed as auto', () => {
+    expect(sanitizeDisplay({}).taa).toBe('auto');
+    expect(sanitizeDisplay({ bloom: 'on', grain: false, vignette: true }).taa).toBe('auto');
+    expect(sanitizeDisplay({ taa: 'sometimes' }).taa).toBe('auto');
   });
 });

@@ -237,6 +237,17 @@ function PostSettings() {
         onChange={(v) => set({ bloom: v })}
         hint="A soft glow around the sun, its glint on the water and lightning. Auto turns it on for medium quality and above, but not on phones or software rendering."
       />
+      <SelectField<BloomPreference>
+        label="Temporal antialiasing"
+        value={display.taa}
+        options={[
+          { value: 'auto', label: 'Auto (this device)' },
+          { value: 'on', label: 'On' },
+          { value: 'off', label: 'Off' },
+        ]}
+        onChange={(v) => set({ taa: v })}
+        hint="Blends recent frames so glints and foam on distant water stop shimmering. Not used underwater or in the Plane view. Auto turns it on for medium quality and above, but not on phones or software rendering."
+      />
       <Switch
         label="Film grain"
         checked={display.grain}

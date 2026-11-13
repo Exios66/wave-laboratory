@@ -193,7 +193,7 @@ function RenderCost() {
     const read = () => {
       const stats = getRuntime().rendererApi?.stats;
       setText(stats ? renderCostText(stats.fps, stats.gpuMs) : '');
-      setTitle(renderCostTitle(stats?.gpuPasses ?? null));
+      setTitle(renderCostTitle(stats?.gpuPasses ?? null, stats?.taa ?? false));
     };
     const id = window.setInterval(read, 500);
     return () => window.clearInterval(id);

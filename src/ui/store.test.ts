@@ -89,12 +89,12 @@ describe('display preferences', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('defaults to automatic bloom with grain and vignette off', () => {
-    expect(readDisplay()).toEqual({ bloom: 'auto', grain: false, vignette: false });
+    expect(readDisplay()).toEqual({ bloom: 'auto', grain: false, vignette: false, taa: 'auto' });
   });
 
   it('persists changes and reads them back', () => {
     lab().setDisplay({ bloom: 'on', grain: true });
-    expect(lab().display).toEqual({ bloom: 'on', grain: true, vignette: false });
+    expect(lab().display).toEqual({ bloom: 'on', grain: true, vignette: false, taa: 'auto' });
     expect(JSON.parse(saved.get('wave-lab:display')!)).toEqual(lab().display);
     expect(readDisplay()).toEqual(lab().display);
     lab().setDisplay({ bloom: 'auto', grain: false });
@@ -102,9 +102,9 @@ describe('display preferences', () => {
 
   it('survives corrupt storage', () => {
     saved.set('wave-lab:display', '{not json');
-    expect(readDisplay()).toEqual({ bloom: 'auto', grain: false, vignette: false });
+    expect(readDisplay()).toEqual({ bloom: 'auto', grain: false, vignette: false, taa: 'auto' });
     saved.set('wave-lab:display', JSON.stringify({ bloom: 7, grain: true }));
-    expect(readDisplay()).toEqual({ bloom: 'auto', grain: true, vignette: false });
+    expect(readDisplay()).toEqual({ bloom: 'auto', grain: true, vignette: false, taa: 'auto' });
   });
 });
 
