@@ -11,6 +11,10 @@
  */
 import { z } from 'zod';
 
+// No eval-compiled parsers: the production Content-Security-Policy (core/csp.ts) forbids eval,
+// and zod's probe for it is reported as a violation even though it is caught.
+z.config({ jitless: true });
+
 export const SCHEMA_VERSION = 1 as const;
 
 const finite = () => z.number().finite();
