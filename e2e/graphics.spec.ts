@@ -210,3 +210,42 @@ test.describe('temporal antialiasing', () => {
     expect(errors).toEqual([]);
   });
 });
+
+test.describe('storm visuals', () => {
+  test.use({ viewport: { width: 960, height: 540 } });
+
+  test('a storm wets the bridge camera lens and hangs rain curtains, no console errors', async ({
+    page,
+  }) => {
+    test.setTimeout(300_000);
+    const errors = trackErrors(page);
+    await page.addInitScript(() => localStorage.setItem('wave-lab:performance', 'high'));
+    await page.goto('/?gfx=full');
+    const running = page.getByRole('status').filter({ hasText: 'Simulation running' });
+    await expect(running).toBeAttached({ timeout: 60_000 });
+    await page.getByRole('button', { name: 'Presets' }).click();
+    await page.getByRole('button', { name: /North Sea winter storm/ }).click();
+    await expect(running).toBeAttached({ timeout: 60_000 });
+    const readout = page.locator('.transport .field__hint[title*="GPU time"]');
+    const wetLens = (on: boolean) =>
+      expect
+        .poll(
+          async () => /Raindrops on the lens/.test((await readout.getAttribute('title')) ?? ''),
+          { timeout: 90_000 },
+        )
+        .toBe(on);
+    const camera = (name: string) => page.getByRole('radio', { name, exact: true });
+    await camera('Bridge').click();
+    await wetLens(true);
+    await frames(page, 3);
+    const { mean, variance } = await canvasLuma(page);
+    expect(mean, 'not black').toBeGreaterThan(8);
+    expect(variance, 'not flat').toBeGreaterThan(1);
+    await page.screenshot({ path: 'test-results/storm-bridge.png' });
+    // Under the sea the lens is dry.
+    await camera('Underwater').click();
+    await expect(page.getByText(/^Underwater · \d+\.\d m$/)).toBeVisible({ timeout: 30_000 });
+    await wetLens(false);
+    expect(errors).toEqual([]);
+  });
+});

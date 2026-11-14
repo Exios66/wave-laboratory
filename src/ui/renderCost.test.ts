@@ -27,4 +27,13 @@ describe('render cost readout', () => {
     );
     expect(renderCostTitle(null, false)).toBe('Frames drawn per second and GPU time per frame');
   });
+
+  it('says when raindrops are on the lens', () => {
+    expect(renderCostTitle(null, false, true)).toBe(
+      'Frames drawn per second and GPU time per frame. Raindrops on the lens',
+    );
+    expect(renderCostTitle(null, true, true)).toBe(
+      'Frames drawn per second and GPU time per frame. Temporal antialiasing on. Raindrops on the lens',
+    );
+  });
 });

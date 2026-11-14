@@ -226,6 +226,8 @@ export interface DisplaySettings {
   vignette: boolean;
   /** Temporal antialiasing of distant water; `auto` follows the same rule as bloom. */
   taa: BloomPreference;
+  /** Rain and spray drops on the camera lens in storms. */
+  lensDroplets: boolean;
 }
 
 export const DEFAULT_DISPLAY: DisplaySettings = {
@@ -233,6 +235,7 @@ export const DEFAULT_DISPLAY: DisplaySettings = {
   grain: false,
   vignette: false,
   taa: 'auto',
+  lensDroplets: true,
 };
 
 function preference(v: unknown, fallback: BloomPreference): BloomPreference {
@@ -249,6 +252,8 @@ export function sanitizeDisplay(raw: unknown): DisplaySettings {
     vignette: typeof r.vignette === 'boolean' ? r.vignette : d.vignette,
     // Settings saved before TAA existed have no key: they read as auto.
     taa: preference(r.taa, d.taa),
+    // Settings saved before the wet lens existed have no key: they read as on.
+    lensDroplets: typeof r.lensDroplets === 'boolean' ? r.lensDroplets : d.lensDroplets,
   };
 }
 
@@ -269,5 +274,6 @@ export function resolvePostSettings(
     grain: display.grain,
     vignette: display.vignette,
     taa: resolve(display.taa),
+    lens: display.lensDroplets,
   };
 }

@@ -14,6 +14,7 @@ export function renderCostText(fps: number, gpuMs: number | null): string {
 export function renderCostTitle(
   passes: Partial<Record<GpuPass, number>> | null,
   taa = false,
+  lens = false,
 ): string {
   const parts = PASS_ORDER.filter((p) => passes?.[p] !== undefined).map(
     (p) => `${p} ${passes![p]!.toFixed(1)} ms`,
@@ -22,5 +23,6 @@ export function renderCostTitle(
     parts.length === 0
       ? 'Frames drawn per second and GPU time per frame'
       : `GPU time per pass: ${parts.join(' · ')}`;
-  return taa ? `${base}. Temporal antialiasing on` : base;
+  const withTaa = taa ? `${base}. Temporal antialiasing on` : base;
+  return lens ? `${withTaa}. Raindrops on the lens` : withTaa;
 }

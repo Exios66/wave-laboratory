@@ -249,6 +249,12 @@ function PostSettings() {
         hint="Blends recent frames so glints and foam on distant water stop shimmering. Not used underwater or in the Plane view. Auto turns it on for medium quality and above, but not on phones or software rendering."
       />
       <Switch
+        label="Raindrops on the lens"
+        checked={display.lensDroplets}
+        onChange={(v) => set({ lensDroplets: v })}
+        hint="In rain and gale spray, drops land on the camera near the sea and run off after a few seconds. Not on the lowest graphics level."
+      />
+      <Switch
         label="Film grain"
         checked={display.grain}
         onChange={(v) => set({ grain: v })}
