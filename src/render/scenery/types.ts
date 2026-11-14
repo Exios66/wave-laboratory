@@ -98,6 +98,8 @@ export interface SceneryFrame {
   windDirectionDeg: number;
   /** Significant wave height of the current sea [m]. */
   hs: number;
+  /** Mean wave period Tm01 of the current sea [s]; absent or NaN for a flat sea. */
+  wavePeriod?: number;
   vessels: readonly VesselMotion[];
   /** World positions (Three.js axes) of the vessels' CoGs, same order as `vessels`. */
   vesselPositions: readonly THREE.Vector3[];

@@ -59,12 +59,22 @@ import {
   type RideView,
 } from './rideCamera';
 import { SailorLayer } from './scenery/sailors';
+import { SurfRingLayer } from './scenery/surfRings';
+import { RainCurtainLayer } from './sky/rainCurtainLayer';
+import {
+  lensDropletRate,
+  lensSprayRate,
+  shownDroplets,
+  stepDroplets,
+  type Droplet,
+} from './sky/rainCurtains';
 import { TrafficLayer } from './scenery/traffic';
 import {
   DEFAULT_AMBIENCE,
   type AmbienceSettings,
   type SceneryFrame,
   type SceneryLayer,
+  type SceneryTier,
 } from './scenery/types';
 import { DEFAULT_WILDLIFE_SEED, WildlifeLayer } from './scenery/wildlife';
 import { MarineLifeLayer } from './underwater/marineLife';
@@ -351,6 +361,7 @@ export class LabRenderer implements LabRendererApi {
     underwater: false,
     cameraDepth: 0,
     taa: false,
+    lens: false,
   };
 
   private readonly renderer: THREE.WebGLRenderer;
@@ -395,9 +406,15 @@ export class LabRenderer implements LabRendererApi {
   });
   private readonly sailors = new SailorLayer();
   private readonly planes = new PlaneLayer();
+  /** Foam around the rocks and buoys the two layers above put in the sea; updated after them. */
+  private readonly surf = new SurfRingLayer([this.islands, this.traffic]);
+  private readonly curtains = new RainCurtainLayer();
+  /** Drops on the camera lens in rain and spray (see `stepDroplets`). */
+  private readonly lensState: { drops: Droplet[]; carry: number } = { drops: [], carry: 0 };
   private readonly layers: SceneryLayer[] = [
     this.islands,
     this.traffic,
+    this.surf,
     this.underwaterScenery,
     this.marineLife,
     this.wildlife,
@@ -535,6 +552,8 @@ export class LabRenderer implements LabRendererApi {
   private readonly bufferSize = new THREE.Vector2();
   private disposed = false;
   private hs = 1;
+  /** Mean wave period Tm01 of the sea [s]; NaN for a flat sea (the swash keeps its idle pace). */
+  private wavePeriod = Number.NaN;
   private hasOcean = false;
   private ambience: AmbienceSettings = { ...DEFAULT_AMBIENCE };
   private timeOfDay: number | null = null;
@@ -701,6 +720,7 @@ export class LabRenderer implements LabRendererApi {
       oceanUniforms: this.ocean.uniforms,
     });
     for (const layer of this.layers) this.scene.add(layer.object);
+    this.scene.add(this.curtains.object);
     this.applyAmbience();
 
     const budget = BUDGET[this.quality];
@@ -782,6 +802,7 @@ export class LabRenderer implements LabRendererApi {
   setOcean(data: GpuOceanData): void {
     this.ocean.setData(data);
     this.hs = data.hs;
+    this.wavePeriod = data.meanPeriod > 0 ? data.meanPeriod : Number.NaN;
     this.hasOcean = true;
   }
 
@@ -1013,6 +1034,27 @@ export class LabRenderer implements LabRendererApi {
     );
     this.spray.update(camDt, light, pixelScale, size.x / Math.max(1, size.y));
     this.smoke.update(camDt, this.windThree, light, pixelScale);
+
+    // Distant rain curtains, and rain and spindrift on the lens (neither on the lite tier).
+    const tier = this.sceneryTier;
+    this.curtains.update({
+      rainMmH: rain,
+      tier,
+      windFromRad: THREE.MathUtils.degToRad(this.env?.windDirectionDeg ?? 0),
+      camera: this.camera,
+      light,
+    });
+    // Spindrift blown off the crests reaches a camera near the sea in a gale.
+    const spray = lensSprayRate(wind, cam.y - this.surfaceNow);
+    const rate = this.underwater || tier === 'lite' ? 0 : lensDropletRate(rain, spray, this.mode);
+    // Drops run off a real lens whether or not the simulation is paused: wall-clock time.
+    stepDroplets(this.lensState, rate, this.wallDt, Math.random);
+    this.post.setLensDrops(shownDroplets(this.lensState.drops, this.mode, tier, this.underwater));
+  }
+
+  /** Scenery performance tier for the current quality. */
+  private get sceneryTier(): SceneryTier {
+    return this.quality === 'low' ? 'lite' : this.quality === 'medium' ? 'mid' : 'full';
   }
 
   private readonly tmp2 = new THREE.Vector2();
@@ -1506,6 +1548,7 @@ export class LabRenderer implements LabRendererApi {
     // Normally already off (the scene marker removes it); raycasts must never see the jitter.
     this.post.endJitter();
     this.stats.taa = this.post.taaRunning;
+    this.stats.lens = this.post.lensRunning;
     this.gpuTimer.end();
     this.stats.gpuMs = this.gpuTimer.ms;
     this.stats.gpuPasses = this.gpuTimer.passes;
@@ -1783,6 +1826,7 @@ export class LabRenderer implements LabRendererApi {
       windSpeed,
       windDirectionDeg: this.env?.windDirectionDeg ?? 0,
       hs: this.hs,
+      wavePeriod: this.wavePeriod,
       vessels,
       vesselPositions: this.vesselPositions,
       underwater: this.underwater,
@@ -1790,7 +1834,7 @@ export class LabRenderer implements LabRendererApi {
       waterType: this.env?.waterType ?? 'oceanic-ib',
       waterDepth: this.env?.depth,
       islands: this.ambience.islands,
-      tier: this.quality === 'low' ? 'lite' : this.quality === 'medium' ? 'mid' : 'full',
+      tier: this.sceneryTier,
       hostiles: this.ambience.hostiles,
     };
     for (const layer of this.layers) layer.update(frame);
@@ -1923,6 +1967,8 @@ export class LabRenderer implements LabRendererApi {
       this.scene.remove(layer.object);
       layer.dispose();
     }
+    this.scene.remove(this.curtains.object);
+    this.curtains.dispose();
     // After the layers: their instanced meshes draw the library's geometry and materials.
     this.models?.dispose();
     this.models = null;

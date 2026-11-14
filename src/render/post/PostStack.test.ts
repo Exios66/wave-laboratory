@@ -95,3 +95,44 @@ describe('PostStack temporal antialiasing', () => {
     expect(camera.view).toBeNull();
   });
 });
+
+describe('PostStack wet lens', () => {
+  const drop = { x: 0.5, y: 0.5, r: 0.02, age: 0.1, life: 3 };
+
+  it('runs only while drops are on the lens and the setting is on', () => {
+    const { post } = setup();
+    post.setSettings({ ...DEFAULT_POST, lens: true });
+    expect(post.lensRunning).toBe(false);
+    expect(post.active).toBe(false);
+    post.setLensDrops([drop]);
+    expect(post.lensRunning).toBe(true);
+    expect(post.active).toBe(true);
+    post.setSettings({ ...DEFAULT_POST, lens: false });
+    expect(post.lensRunning).toBe(false);
+    expect(post.active).toBe(false);
+    post.setSettings({ ...DEFAULT_POST, lens: true });
+    post.setLensDrops([]);
+    expect(post.active).toBe(false);
+  });
+
+  it('never runs on the light tier or without half-float targets', () => {
+    const camera = new THREE.PerspectiveCamera();
+    const light = new PostStack(fakeRenderer(), new THREE.Scene(), camera, 'light');
+    light.setSettings({ ...DEFAULT_POST, lens: true });
+    light.setLensDrops([drop]);
+    expect(light.lensRunning).toBe(false);
+    expect(light.active).toBe(false);
+    const { post } = setup(false);
+    post.setSettings({ ...DEFAULT_POST, lens: true });
+    post.setLensDrops([drop]);
+    expect(post.lensRunning).toBe(false);
+  });
+
+  it('is dry underwater', () => {
+    const { post } = setup();
+    post.setSettings({ ...DEFAULT_POST, lens: true });
+    post.setLensDrops([drop]);
+    post.setUnderwater(UNDER);
+    expect(post.lensRunning).toBe(false);
+  });
+});

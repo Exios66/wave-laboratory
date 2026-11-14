@@ -14,6 +14,8 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { UNDERWATER_BUDGET, UnderwaterSceneryLayer } from '../underwater/scenery';
+import { IslandLayer } from './islands';
+import { SURF_RING_CAP, SURF_RING_RANGE, SurfRingLayer, type SurfAnchor } from './surfRings';
 import {
   evaluateTrafficShip,
   STRUCTURE_BUDGET,
@@ -170,6 +172,47 @@ describe('traffic budget enforced on the real layer', () => {
     expect(names).not.toContain('structure-wind-turbine');
     expect(names).toContain('structure-buoy');
     layer.dispose();
+  });
+
+  it('lists one surf anchor per buoy drawn, and none with structures off', () => {
+    const layer = new TrafficLayer();
+    layer.setFlags({ traffic: true, structures: true, hostiles: false });
+    layer.update(makeFrame(cam));
+    const out: SurfAnchor[] = [];
+    layer.surfAnchors(out);
+    expect(out.length).toBe(instances(layer.object, 'structure-'));
+    expect(out.length).toBeGreaterThan(0);
+    for (const a of out) expect(a.r).toBeGreaterThan(0);
+    layer.setFlags({ traffic: true, structures: false, hostiles: false });
+    layer.update(makeFrame(cam));
+    out.length = 0;
+    layer.surfAnchors(out);
+    expect(out).toEqual([]);
+    layer.dispose();
+  });
+
+  it('foam rings around rocks and buoys add exactly one draw call', () => {
+    const traffic = new TrafficLayer();
+    traffic.setFlags({ traffic: true, structures: true, hostiles: false });
+    const islands = new IslandLayer();
+    const rings = new SurfRingLayer([islands, traffic]);
+    const f = makeFrame(cam);
+    traffic.update(f);
+    islands.update(f);
+    const before = drawCalls(traffic.object) + drawCalls(islands.object);
+    rings.update(f);
+    expect(drawCalls(traffic.object) + drawCalls(islands.object)).toBe(before);
+    expect(drawCalls(rings.object)).toBe(1);
+    const all: SurfAnchor[] = [];
+    islands.surfAnchors(all);
+    traffic.surfAnchors(all);
+    const inRange = all.filter(
+      (a) => Math.hypot(a.x - cam.position.x, a.z - cam.position.z) <= SURF_RING_RANGE,
+    ).length;
+    expect(instances(rings.object, 'surf-')).toBe(Math.min(SURF_RING_CAP, inRange));
+    traffic.dispose();
+    islands.dispose();
+    rings.dispose();
   });
 
   it('draws nothing when traffic, structures and hostiles are all off', () => {

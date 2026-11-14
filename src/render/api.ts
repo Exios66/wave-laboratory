@@ -24,6 +24,8 @@ export interface PostSettings {
   vignette: boolean;
   /** Temporal antialiasing: steadies sub-pixel glints and foam on distant water. */
   taa: boolean;
+  /** Rain and spray drops on the lens in storms (never on the lite tier). */
+  lens: boolean;
 }
 
 export const DEFAULT_POST: PostSettings = {
@@ -31,6 +33,7 @@ export const DEFAULT_POST: PostSettings = {
   grain: false,
   vignette: false,
   taa: false,
+  lens: false,
 };
 
 export type OverlayMode = 'none' | 'height' | 'steepness' | 'foam';
@@ -85,6 +88,8 @@ export interface RendererStats {
   cameraDepth: number;
   /** True while temporal antialiasing blends frames (on, and not underwater or riding a plane). */
   taa: boolean;
+  /** True while raindrops or spray are drawn on the lens. */
+  lens: boolean;
 }
 
 /** Plane view readout: which flight, and how it is flying. */

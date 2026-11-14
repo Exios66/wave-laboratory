@@ -12,9 +12,12 @@ import {
   keysInCell,
   islandsNear,
   ISLAND_MODELS,
+  rockBreaksSurface,
   type IslandSpec,
 } from './islands';
 import { ModelLibrary } from './models';
+import { surfBand, swashSpeed } from './surf';
+import type { SurfAnchor } from './surfRings';
 import type { SceneryFrame } from './types';
 
 function scan(range: number, keys = true): IslandSpec[] {
@@ -272,5 +275,78 @@ describe('IslandLayer scenery models', () => {
     expect(load).not.toHaveBeenCalled();
     expect(layer.modelCounts).toEqual({});
     layer.dispose();
+  });
+});
+
+describe('IslandLayer surf', () => {
+  it('lists the rocks standing in the sea as surf anchors, with or without models', async () => {
+    const plain = new IslandLayer();
+    const dressed = new IslandLayer();
+    const lib = new ModelLibrary('/models/', () => Promise.resolve(new THREE.Group()));
+    dressed.setModels(lib);
+    const camera = new THREE.PerspectiveCamera();
+    let total = 0;
+    for (let i = 0; i < 40; i++) {
+      camera.position.set(i * 900, 80, -i * 400);
+      const f = { ...frame(camera), tier: 'full' as const };
+      dressed.update(f);
+      if (i === 0) {
+        await lib.request(...ISLAND_MODELS);
+        dressed.update(f);
+      }
+      plain.update(f);
+      const a: SurfAnchor[] = [];
+      const b: SurfAnchor[] = [];
+      plain.surfAnchors(a);
+      dressed.surfAnchors(b);
+      expect(b).toEqual(a);
+      for (const r of a) {
+        expect(r.r).toBeGreaterThan(0);
+        // Out at the waterline of one of the islands in view, not inland and not far offshore.
+        const off = Math.min(
+          ...plain.visibleIslands.map((s) => Math.hypot(r.x - s.x, -r.z - s.y) / s.radius),
+        );
+        expect(off).toBeGreaterThan(0.5);
+        expect(off).toBeLessThan(1.6);
+      }
+      total += a.length;
+    }
+    expect(total).toBeGreaterThan(0);
+    plain.dispose();
+    dressed.dispose();
+    lib.dispose();
+  });
+
+  it('lists nothing while switched off', () => {
+    const layer = new IslandLayer();
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(-3_100, 80, -900);
+    layer.update(frame(camera));
+    layer.setEnabled(false);
+    const out: SurfAnchor[] = [];
+    layer.surfAnchors(out);
+    expect(out).toEqual([]);
+    layer.dispose();
+  });
+
+  it('sizes the shoreline foam by the sea state and runs it at the wave period', () => {
+    const layer = new IslandLayer();
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(-3_100, 80, -900);
+    layer.update({ ...frame(camera), hs: 4, wavePeriod: 10 });
+    const lagoon = layer.object.getObjectByName('island-lagoons') as THREE.InstancedMesh;
+    const u = (lagoon.material as THREE.ShaderMaterial).uniforms;
+    expect(u.uSurfWidth!.value).toBeCloseTo(surfBand(4, 10).width, 6);
+    expect(u.uSurfStrength!.value).toBeCloseTo(surfBand(4, 10).strength, 6);
+    expect(u.uSwash!.value).toBeCloseTo(swashSpeed(10), 6);
+    layer.dispose();
+  });
+});
+
+describe('rockBreaksSurface', () => {
+  it('counts a rock whose top clears the water, not one sunk below it', () => {
+    expect(rockBreaksSurface(-0.5, 2)).toBe(true);
+    expect(rockBreaksSurface(-2.8, 0.7)).toBe(false);
+    expect(rockBreaksSurface(0.3, 0.7)).toBe(true);
   });
 });

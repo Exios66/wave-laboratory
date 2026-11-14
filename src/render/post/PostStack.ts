@@ -31,6 +31,8 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import type { PostSettings } from '../api';
 import { UnderwaterPass, type UnderwaterParams } from '../underwater/UnderwaterPass';
 import { jitterOffset } from './taa';
+import { LensPass } from './LensPass';
+import type { Droplet } from '../sky/rainCurtains';
 import { TaaPass } from './TaaPass';
 
 /** Luminance (linear, before exposure) above which pixels bloom. Ordinary surfaces stay below. */
@@ -105,9 +107,17 @@ export class PostStack {
   private grade: ShaderPass | null = null;
   private underwaterPass: UnderwaterPass | null = null;
   private taaPass: TaaPass | null = null;
+  private lensPass: LensPass | null = null;
+  private lensDrops: readonly Droplet[] = [];
   private readonly sceneDone = new MarkerPass();
   private underwater: UnderwaterParams | null = null;
-  private settings: PostSettings = { bloom: false, grain: false, vignette: false, taa: false };
+  private settings: PostSettings = {
+    bloom: false,
+    grain: false,
+    vignette: false,
+    taa: false,
+    lens: false,
+  };
   private taaAllowed = true;
   private taaFrame = 0;
   private jittered = false;
@@ -131,13 +141,34 @@ export class PostStack {
     const s = this.settings;
     return (
       this.supported &&
-      (s.bloom || s.grain || s.vignette || this.underwater !== null || this.taaRunning)
+      (s.bloom ||
+        s.grain ||
+        s.vignette ||
+        this.underwater !== null ||
+        this.taaRunning ||
+        this.lensRunning)
     );
   }
 
   /** Whether temporal antialiasing blends this frame. */
   get taaRunning(): boolean {
     return this.supported && this.settings.taa && this.taaAllowed && this.underwater === null;
+  }
+
+  /** Whether drops on the lens are drawn this frame (never underwater or on the light tier). */
+  get lensRunning(): boolean {
+    return (
+      this.supported &&
+      this.settings.lens &&
+      this.tier !== 'light' &&
+      this.underwater === null &&
+      this.lensDrops.length > 0
+    );
+  }
+
+  /** The drops on the lens this frame (see `stepDroplets`); an empty list skips the pass. */
+  setLensDrops(drops: readonly Droplet[]): void {
+    this.lensDrops = drops;
   }
 
   /** The renderer's say: false where whole subjects move with the camera (the Plane view). */
@@ -231,6 +262,10 @@ export class PostStack {
       // The pass may be newer than this frame's jitter (first frame after a rebuild).
       if (!this.jittered) this.taaPass.jitter.fill(0);
     }
+    if (this.lensPass) {
+      this.lensPass.enabled = this.lensRunning;
+      if (this.lensPass.enabled) this.lensPass.setDrops(this.lensDrops);
+    }
     this.sceneDone.onReached = () => {
       // Everything after the scene sees the plain camera (TAA reprojects with it).
       this.endJitter();
@@ -273,12 +308,15 @@ export class PostStack {
     const underwater = new UnderwaterPass(this.camera);
     underwater.set(this.underwater);
     const taa = new TaaPass(this.camera);
+    const lens = new LensPass();
     const passes: Pass[] = [
       new RenderPass(this.scene, this.camera),
       this.sceneDone,
       underwater,
       // Reads the scene target's depth: only ever on while the underwater pass is off.
       taa,
+      // On the lens, in front of everything: after TAA so drops never enter its history.
+      lens,
       bloom,
       grade,
       new OutputPass(),
@@ -288,6 +326,7 @@ export class PostStack {
     this.grade = grade;
     this.underwaterPass = underwater;
     this.taaPass = taa;
+    this.lensPass = lens;
     this.composer = composer;
     this.applySettings();
     return composer;
@@ -296,6 +335,7 @@ export class PostStack {
   private applySettings(): void {
     if (this.bloom) this.bloom.enabled = this.settings.bloom;
     if (this.taaPass) this.taaPass.enabled = this.taaRunning;
+    if (this.lensPass) this.lensPass.enabled = this.lensRunning;
     if (this.grade) {
       const { grain, vignette } = this.settings;
       this.grade.enabled = grain || vignette;
@@ -312,5 +352,6 @@ export class PostStack {
     this.grade = null;
     this.underwaterPass = null;
     this.taaPass = null;
+    this.lensPass = null;
   }
 }

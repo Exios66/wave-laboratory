@@ -90,12 +90,19 @@ describe('resolvePostSettings', () => {
       grain: false,
       vignette: false,
     });
-    const on = { bloom: 'off' as const, grain: true, vignette: true, taa: 'off' as const };
+    const on = {
+      bloom: 'off' as const,
+      grain: true,
+      vignette: true,
+      taa: 'off' as const,
+      lensDroplets: false,
+    };
     expect(resolvePostSettings(on, 'low', desktop)).toEqual({
       bloom: false,
       grain: true,
       vignette: true,
       taa: false,
+      lens: false,
     });
   });
   it('turns temporal antialiasing on in auto exactly where bloom is', () => {
@@ -123,16 +130,43 @@ describe('sanitizeDisplay', () => {
     expect(sanitizeDisplay({ bloom: 'maybe', grain: 'yes', vignette: 1 })).toEqual(DEFAULT_DISPLAY);
   });
   it('keeps valid values', () => {
-    expect(sanitizeDisplay({ bloom: 'off', grain: true, vignette: true, taa: 'off' })).toEqual({
+    expect(
+      sanitizeDisplay({
+        bloom: 'off',
+        grain: true,
+        vignette: true,
+        taa: 'off',
+        lensDroplets: false,
+      }),
+    ).toEqual({
       bloom: 'off',
       grain: true,
       vignette: true,
       taa: 'off',
+      lensDroplets: false,
     });
   });
   it('reads settings saved before temporal antialiasing existed as auto', () => {
     expect(sanitizeDisplay({}).taa).toBe('auto');
     expect(sanitizeDisplay({ bloom: 'on', grain: false, vignette: true }).taa).toBe('auto');
     expect(sanitizeDisplay({ taa: 'sometimes' }).taa).toBe('auto');
+  });
+  it('reads settings saved before the wet lens existed as on', () => {
+    expect(sanitizeDisplay({}).lensDroplets).toBe(true);
+    expect(sanitizeDisplay({ bloom: 'on', taa: 'off' }).lensDroplets).toBe(true);
+    expect(sanitizeDisplay({ lensDroplets: 'no' }).lensDroplets).toBe(true);
+  });
+});
+
+describe('wet lens setting', () => {
+  it('passes the wet lens through on every device', () => {
+    const slow = { software: true, mobile: true };
+    expect(resolvePostSettings(DEFAULT_DISPLAY, 'low', slow).lens).toBe(true);
+    expect(
+      resolvePostSettings({ ...DEFAULT_DISPLAY, lensDroplets: false }, 'ultra', {
+        software: false,
+        mobile: false,
+      }).lens,
+    ).toBe(false);
   });
 });
