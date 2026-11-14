@@ -9,6 +9,7 @@ import { ScenePrepass } from './water/ScenePrepass';
 import { SkyEnvironment } from './sky/SkyEnvironment';
 import { cloudDeck } from './sky/clouds';
 import { CloudMap } from './sky/cloudMap';
+import { shaftStrength, sunScreen } from './post/sunShafts';
 import { smoothstep } from '../core/mathUtil';
 import { rotate, type Quat, type Vec3 } from '../core/vec';
 import type { GpuOceanData } from '../ocean/gpuData';
@@ -379,6 +380,7 @@ export class LabRenderer implements LabRendererApi {
     cameraDepth: 0,
     taa: false,
     lens: false,
+    shafts: false,
   };
 
   private readonly renderer: THREE.WebGLRenderer;
@@ -1575,6 +1577,7 @@ export class LabRenderer implements LabRendererApi {
     // the prepass by fragment position). Riding in a plane, the aircraft moves with the camera,
     // which camera-only reprojection cannot follow: no TAA there.
     this.post.setTaaAllowed(this.mode !== 'plane');
+    this.updateSunShafts();
     this.post.beginJitter();
     this.drawPrepass();
     this.gpuTimer.end();
@@ -1588,6 +1591,7 @@ export class LabRenderer implements LabRendererApi {
     this.post.endJitter();
     this.stats.taa = this.post.taaRunning;
     this.stats.lens = this.post.lensRunning;
+    this.stats.shafts = this.post.shaftsRunning;
     this.gpuTimer.end();
     this.stats.gpuMs = this.gpuTimer.ms;
     this.stats.gpuPasses = this.gpuTimer.passes;
@@ -1606,6 +1610,24 @@ export class LabRenderer implements LabRendererApi {
       this.fpsFrames = 0;
       this.fpsElapsed = 0;
     }
+  }
+
+  /** Sun shafts: where the sun is on screen and how strongly its light streams this frame. */
+  private updateSunShafts(): void {
+    const u = this.ocean.uniforms;
+    const sunDir = u.uSunDir!.value as THREE.Vector3;
+    const screen = sunScreen(sunDir, this.camera);
+    const strength = shaftStrength({
+      sunY: sunDir.y,
+      cloud: u.uCloud!.value as number,
+      fogDensity: u.uFogDensity!.value as number,
+      night: this.lightState?.night ?? 0,
+      facing: screen.facing,
+      x: screen.x,
+      y: screen.y,
+    });
+    const tint = (u.uSunTint?.value as THREE.Vector3 | undefined) ?? new THREE.Vector3(1, 1, 1);
+    this.post.setSunShafts({ x: screen.x, y: screen.y, strength, tint: [tint.x, tint.y, tint.z] });
   }
 
   /**

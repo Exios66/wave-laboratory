@@ -228,6 +228,8 @@ export interface DisplaySettings {
   taa: BloomPreference;
   /** Rain and spray drops on the camera lens in storms. */
   lensDroplets: boolean;
+  /** Sun shafts through broken cloud; `auto` follows the same rule as bloom. */
+  sunShafts: BloomPreference;
 }
 
 export const DEFAULT_DISPLAY: DisplaySettings = {
@@ -236,6 +238,7 @@ export const DEFAULT_DISPLAY: DisplaySettings = {
   vignette: false,
   taa: 'auto',
   lensDroplets: true,
+  sunShafts: 'auto',
 };
 
 function preference(v: unknown, fallback: BloomPreference): BloomPreference {
@@ -254,6 +257,8 @@ export function sanitizeDisplay(raw: unknown): DisplaySettings {
     taa: preference(r.taa, d.taa),
     // Settings saved before the wet lens existed have no key: they read as on.
     lensDroplets: typeof r.lensDroplets === 'boolean' ? r.lensDroplets : d.lensDroplets,
+    // Settings saved before sun shafts existed have no key: they read as auto.
+    sunShafts: preference(r.sunShafts, d.sunShafts),
   };
 }
 
@@ -275,5 +280,6 @@ export function resolvePostSettings(
     vignette: display.vignette,
     taa: resolve(display.taa),
     lens: display.lensDroplets,
+    shafts: resolve(display.sunShafts),
   };
 }

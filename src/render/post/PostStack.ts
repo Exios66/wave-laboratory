@@ -34,22 +34,32 @@ import { jitterOffset } from './taa';
 import { LensPass } from './LensPass';
 import type { Droplet } from '../sky/rainCurtains';
 import { TaaPass } from './TaaPass';
+import { SunShaftPass, type ShaftParams } from './SunShaftPass';
 
 /** Luminance (linear, before exposure) above which pixels bloom. Ordinary surfaces stay below. */
 export const BLOOM_THRESHOLD = 1.2;
 const BLOOM_STRENGTH = 0.35;
 const BLOOM_RADIUS = 0.55;
 
-/** Draws nothing: calls `onReached` when the composer gets to it (marks where the scene ends). */
+/**
+ * Draws nothing: calls `onReached` when the composer gets to it (marks where the scene ends), and
+ * remembers the scene's depth texture for passes that run after TAA has swapped the buffers.
+ */
 class MarkerPass extends Pass {
   onReached: (() => void) | null = null;
+  depth: THREE.Texture | null = null;
 
   constructor() {
     super();
     this.needsSwap = false;
   }
 
-  override render(): void {
+  override render(
+    _renderer: THREE.WebGLRenderer,
+    _writeBuffer: THREE.WebGLRenderTarget,
+    readBuffer: THREE.WebGLRenderTarget,
+  ): void {
+    this.depth = readBuffer.depthTexture;
     this.onReached?.();
   }
 }
@@ -109,6 +119,8 @@ export class PostStack {
   private taaPass: TaaPass | null = null;
   private lensPass: LensPass | null = null;
   private lensDrops: readonly Droplet[] = [];
+  private shaftPass: SunShaftPass | null = null;
+  private shaftParams: ShaftParams | null = null;
   private readonly sceneDone = new MarkerPass();
   private underwater: UnderwaterParams | null = null;
   private settings: PostSettings = {
@@ -117,6 +129,7 @@ export class PostStack {
     vignette: false,
     taa: false,
     lens: false,
+    shafts: false,
   };
   private taaAllowed = true;
   private taaFrame = 0;
@@ -146,7 +159,8 @@ export class PostStack {
         s.vignette ||
         this.underwater !== null ||
         this.taaRunning ||
-        this.lensRunning)
+        this.lensRunning ||
+        this.shaftsRunning)
     );
   }
 
@@ -164,6 +178,23 @@ export class PostStack {
       this.underwater === null &&
       this.lensDrops.length > 0
     );
+  }
+
+  /** Whether sun shafts are drawn this frame (never underwater or on the light tier). */
+  get shaftsRunning(): boolean {
+    return (
+      this.supported &&
+      this.settings.shafts &&
+      this.tier !== 'light' &&
+      this.underwater === null &&
+      this.shaftParams !== null &&
+      this.shaftParams.strength > 0.01
+    );
+  }
+
+  /** Where the sun is on screen and how strong the shafts are this frame; null for none. */
+  setSunShafts(params: ShaftParams | null): void {
+    this.shaftParams = params;
   }
 
   /** The drops on the lens this frame (see `stepDroplets`); an empty list skips the pass. */
@@ -266,7 +297,12 @@ export class PostStack {
       this.lensPass.enabled = this.lensRunning;
       if (this.lensPass.enabled) this.lensPass.setDrops(this.lensDrops);
     }
+    if (this.shaftPass) {
+      this.shaftPass.enabled = this.shaftsRunning;
+      if (this.shaftPass.enabled && this.shaftParams) this.shaftPass.set(this.shaftParams);
+    }
     this.sceneDone.onReached = () => {
+      this.shaftPass?.setDepth(this.sceneDone.depth);
       // Everything after the scene sees the plain camera (TAA reprojects with it).
       this.endJitter();
       afterScene?.();
@@ -309,12 +345,15 @@ export class PostStack {
     underwater.set(this.underwater);
     const taa = new TaaPass(this.camera);
     const lens = new LensPass();
+    const shafts = new SunShaftPass();
     const passes: Pass[] = [
       new RenderPass(this.scene, this.camera),
       this.sceneDone,
       underwater,
       // Reads the scene target's depth: only ever on while the underwater pass is off.
       taa,
+      // In the air, so after TAA (its noise stays out of the history) and before the lens.
+      shafts,
       // On the lens, in front of everything: after TAA so drops never enter its history.
       lens,
       bloom,
@@ -327,6 +366,7 @@ export class PostStack {
     this.underwaterPass = underwater;
     this.taaPass = taa;
     this.lensPass = lens;
+    this.shaftPass = shafts;
     this.composer = composer;
     this.applySettings();
     return composer;
@@ -336,6 +376,7 @@ export class PostStack {
     if (this.bloom) this.bloom.enabled = this.settings.bloom;
     if (this.taaPass) this.taaPass.enabled = this.taaRunning;
     if (this.lensPass) this.lensPass.enabled = this.lensRunning;
+    if (this.shaftPass) this.shaftPass.enabled = this.shaftsRunning;
     if (this.grade) {
       const { grain, vignette } = this.settings;
       this.grade.enabled = grain || vignette;
@@ -353,5 +394,6 @@ export class PostStack {
     this.underwaterPass = null;
     this.taaPass = null;
     this.lensPass = null;
+    this.shaftPass = null;
   }
 }
