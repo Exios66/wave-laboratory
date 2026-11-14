@@ -59,6 +59,7 @@ import {
   type RideView,
 } from './rideCamera';
 import { SailorLayer } from './scenery/sailors';
+import { SurfRingLayer } from './scenery/surfRings';
 import { TrafficLayer } from './scenery/traffic';
 import {
   DEFAULT_AMBIENCE,
@@ -395,9 +396,12 @@ export class LabRenderer implements LabRendererApi {
   });
   private readonly sailors = new SailorLayer();
   private readonly planes = new PlaneLayer();
+  /** Foam around the rocks and buoys the two layers above put in the sea; updated after them. */
+  private readonly surf = new SurfRingLayer([this.islands, this.traffic]);
   private readonly layers: SceneryLayer[] = [
     this.islands,
     this.traffic,
+    this.surf,
     this.underwaterScenery,
     this.marineLife,
     this.wildlife,
@@ -535,6 +539,8 @@ export class LabRenderer implements LabRendererApi {
   private readonly bufferSize = new THREE.Vector2();
   private disposed = false;
   private hs = 1;
+  /** Mean wave period Tm01 of the sea [s]; NaN for a flat sea (the swash keeps its idle pace). */
+  private wavePeriod = Number.NaN;
   private hasOcean = false;
   private ambience: AmbienceSettings = { ...DEFAULT_AMBIENCE };
   private timeOfDay: number | null = null;
@@ -782,6 +788,7 @@ export class LabRenderer implements LabRendererApi {
   setOcean(data: GpuOceanData): void {
     this.ocean.setData(data);
     this.hs = data.hs;
+    this.wavePeriod = data.meanPeriod > 0 ? data.meanPeriod : Number.NaN;
     this.hasOcean = true;
   }
 
@@ -1783,6 +1790,7 @@ export class LabRenderer implements LabRendererApi {
       windSpeed,
       windDirectionDeg: this.env?.windDirectionDeg ?? 0,
       hs: this.hs,
+      wavePeriod: this.wavePeriod,
       vessels,
       vesselPositions: this.vesselPositions,
       underwater: this.underwater,

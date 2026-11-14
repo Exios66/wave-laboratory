@@ -20,6 +20,8 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../../core/rng';
 import { ModelInstances, type ModelLibrary, type ModelName } from './models';
+import { SURF_MIN_WIDTH_M, surfBand, swashSpeed } from './surf';
+import type { SurfAnchor, SurfSource } from './surfRings';
 import type { SceneryFrame, SceneryLayer } from './types';
 
 // ---------------------------------------------------------------------------------------------
@@ -521,6 +523,8 @@ interface IslandBuild {
   palms: number[];
   /** Lighthouse lamp, island-local, or null. */
   lamp: THREE.Vector3 | null;
+  /** Rocks standing in the sea, island-local: x, z, radius [m] (the surf breaks around them). */
+  surf: number[];
 }
 
 function uniform(k: number): { sx: number; sy: number; sz: number } {
@@ -688,6 +692,7 @@ function buildIsland(
   }
 
   // Rocks: mostly around the shoreline, some wading in the shallows.
+  const surf: number[] = [];
   const rocks = 2 + Math.floor(rnd() * (3 + sh.r0 / 25));
   for (let i = 0; i < rocks; i++) {
     const theta = rnd() * Math.PI * 2;
@@ -700,6 +705,8 @@ function buildIsland(
     const ry = rnd() * 3;
     const rz = rnd() * 3;
     const tint = shade(c, 0.1);
+    // Past the coastline the rock stands in the water and the surf breaks around it.
+    if (s >= 1) surf.push(x, z, 0.8 * size);
     if (props) {
       // The boulder model is 4 m across and 1.3 m high: match the procedural rock's size.
       props.push({
@@ -783,7 +790,7 @@ function buildIsland(
   }
 
   if (props) addShoreModels(sh, spec, props);
-  return { maxH, palms, lamp, shape: sh };
+  return { maxH, palms, lamp, surf, shape: sh };
 }
 
 /**
@@ -961,6 +968,7 @@ uniform float uPull;
 varying float vS;
 varying float vAngle;
 varying float vSeed;
+varying float vRadius;
 void main() {
   vec3 p = position;
   float theta = atan(p.z, p.x);
@@ -970,8 +978,10 @@ void main() {
   vAngle = theta;
   vSeed = aShape2.z;
   vec4 local = vec4(p, 1.0);
+  vRadius = 1.0;
 #ifdef USE_INSTANCING
   local = instanceMatrix * local;
+  vRadius = length(instanceMatrix[0].xyz);
 #endif
   vec4 mvPosition = modelViewMatrix * local;
   gl_Position = projectionMatrix * mvPosition;
@@ -992,20 +1002,26 @@ uniform vec3 uFoam;
 uniform float uOpacity;
 uniform float uLight;
 uniform float uTime;
+uniform float uSwash;
+uniform float uSurfWidth;
+uniform float uSurfStrength;
 varying float vS;
 varying float vAngle;
 varying float vSeed;
+varying float vRadius;
 void main() {
   float s = vS;
+  // The surf band's width in metres, as a fraction of this island's radius.
+  float wS = max(0.02, uSurfWidth / max(vRadius, 1.0));
   float inner = smoothstep(0.955, 1.0, s);
   float tint = inner * (1.0 - smoothstep(1.02, 1.78, s)) * (0.55 + 0.45 * (1.0 - smoothstep(1.0, 1.3, s)));
   float wob = 0.012 * sin(vAngle * 23.0 + vSeed * 40.0 + uTime * 0.9)
     + 0.008 * sin(vAngle * 41.0 - uTime * 1.3);
-  float swash = 0.5 + 0.5 * sin(uTime * 0.8 + vSeed * 17.0);
-  float foamS = s - wob - 0.012 * swash;
-  float foam = smoothstep(0.985, 1.0, foamS) * (1.0 - smoothstep(1.015, 1.05, foamS));
+  float swash = 0.5 + 0.5 * sin(uTime * uSwash + vSeed * 17.0);
+  float foamS = s - wob - (0.012 + 0.3 * wS * uSurfStrength) * swash;
+  float foam = smoothstep(0.985, 1.0, foamS) * (1.0 - smoothstep(1.0 + 0.3 * wS, 1.015 + wS, foamS));
   vec3 col = mix(uShallow, uFoam, foam * 0.9) * uLight;
-  float alpha = clamp(tint * 0.75 + foam * 0.6, 0.0, 1.0) * uOpacity;
+  float alpha = clamp(tint * 0.75 + foam * (0.35 + 0.5 * uSurfStrength), 0.0, 1.0) * uOpacity;
   gl_FragColor = vec4(col, alpha);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -1040,9 +1056,11 @@ interface Slot {
   halo: THREE.Sprite | null;
   /** Scenery models on this island (empty unless models are on). */
   props: IslandProp[];
+  /** Rocks in the sea, island-local x, z, radius (see `IslandBuild.surf`). */
+  surf: number[];
 }
 
-export class IslandLayer implements SceneryLayer {
+export class IslandLayer implements SceneryLayer, SurfSource {
   readonly object = new THREE.Group();
   private readonly builder = new MeshBuilder();
   private readonly slots: Slot[] = [];
@@ -1184,6 +1202,9 @@ gl_Position = projectionMatrix * mvPosition;`,
           uLight: { value: 1 },
           uTime: { value: 0 },
           uPull: { value: 1 },
+          uSwash: { value: swashSpeed(Number.NaN) },
+          uSurfWidth: { value: SURF_MIN_WIDTH_M },
+          uSurfStrength: { value: 0 },
         },
       ]),
       vertexShader: LAGOON_VERT,
@@ -1300,6 +1321,10 @@ gl_Position = projectionMatrix * mvPosition;`,
     lu.uPull!.value = THREE.MathUtils.clamp(0.3 + 0.6 * frame.hs, 0.3, 3);
     lu.uOpacity!.value = THREE.MathUtils.clamp(1.15 - frame.hs / 5, 0.35, 1);
     lu.uLight!.value = 0.12 + 0.88 * frame.daylight;
+    const band = surfBand(frame.hs, frame.wavePeriod ?? Number.NaN);
+    lu.uSurfWidth!.value = band.width;
+    lu.uSurfStrength!.value = band.strength;
+    lu.uSwash!.value = swashSpeed(frame.wavePeriod ?? Number.NaN);
 
     this.haloMaterial.opacity = 0.9 * night;
     const pulse = 1 + 0.12 * Math.sin(frame.wallT * 1.7);
@@ -1349,6 +1374,7 @@ gl_Position = projectionMatrix * mvPosition;`,
       lamp: null,
       halo: null,
       props: [],
+      surf: [],
     };
     this.slots.push(slot);
     return slot;
@@ -1397,6 +1423,7 @@ gl_Position = projectionMatrix * mvPosition;`,
     slot.shape = built.shape;
     slot.palms = built.palms;
     slot.lamp = built.lamp;
+    slot.surf = built.surf;
     slot.mesh.position.set(spec.x, 0, -spec.y);
     slot.mesh.updateMatrix();
     slot.mesh.visible = true;
@@ -1468,6 +1495,19 @@ gl_Position = projectionMatrix * mvPosition;`,
     this.lagoonShape.needsUpdate = true;
     this.lagoonShape2.needsUpdate = true;
     this.lagoonMesh.computeBoundingSphere();
+  }
+
+  /** The rocks standing in the sea around the islands in view, in Three.js axes. */
+  surfAnchors(out: SurfAnchor[]): void {
+    if (!this.object.visible) return;
+    for (const slot of this.active.values()) {
+      const cx = slot.spec!.x;
+      const cz = -slot.spec!.y;
+      const r = slot.surf;
+      for (let i = 0; i + 2 < r.length; i += 3) {
+        out.push({ x: cx + r[i]!, z: cz + r[i + 1]!, r: r[i + 2]! });
+      }
+    }
   }
 
   dispose(): void {

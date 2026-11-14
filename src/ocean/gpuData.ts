@@ -38,6 +38,8 @@ export interface GpuOceanData {
   choppiness: number;
   /** Expected significant wave height of everything represented [m]. */
   hs: number;
+  /** Spectral mean period Tm01 = 2π m0 / m1 of everything represented [s]; 0 for a flat sea. */
+  meanPeriod: number;
 }
 
 /**
@@ -71,14 +73,27 @@ export function buildGpuOceanData(
   const sea = resolveSea(waves, env);
   const n = visualGridSize(quality);
   let variance = 0;
+  // Energy-weighted angular frequency, for the mean period.
+  let m0 = 0;
+  let m1 = 0;
   const cascades = cascadeSpecs().map((spec) => {
     const c = buildCascadeSpectrum(spec, n, sea.spectral, sea.dispersion);
     variance += c.variance;
     const h0 = new Float32Array(4 * n * n);
+    let e0 = 0;
+    let e1 = 0;
     for (let i = 0; i < n * n; i++) {
       h0[4 * i] = c.h0[2 * i]!;
       h0[4 * i + 1] = c.h0[2 * i + 1]!;
       h0[4 * i + 2] = c.omega[i]!;
+      const e = c.h0[2 * i]! ** 2 + c.h0[2 * i + 1]! ** 2;
+      e0 += e;
+      e1 += e * c.omega[i]!;
+    }
+    // Weighted by the cascade's own variance, the same scale as the regular waves below.
+    if (e0 > 0) {
+      m0 += c.variance;
+      m1 += (c.variance * e1) / e0;
     }
     return {
       index: spec.index,
@@ -90,7 +105,13 @@ export function buildGpuOceanData(
       slopeVariance: meanSquareSlope(h0, n, spec.size),
     };
   });
-  for (const r of sea.regular) if (!r.group) variance += (r.amplitude * r.amplitude) / 2;
+  for (const r of sea.regular) {
+    if (r.group) continue;
+    const e = (r.amplitude * r.amplitude) / 2;
+    variance += e;
+    m0 += e;
+    m1 += e * r.omega;
+  }
   return {
     cascades,
     regular: sea.regular,
@@ -98,5 +119,6 @@ export function buildGpuOceanData(
     gravity: env.gravity,
     choppiness: env.choppiness,
     hs: 4 * Math.sqrt(variance),
+    meanPeriod: m1 > 0 ? (2 * Math.PI * m0) / m1 : 0,
   };
 }

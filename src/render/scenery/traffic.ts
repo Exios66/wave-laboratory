@@ -38,6 +38,7 @@ import type { WakeSource } from '../scene/wakes';
 import { ISLAND_CLEAR_RADIUS, islandsNear } from './islands';
 import { fitLength, ModelInstances, type ModelLibrary, type ModelName } from './models';
 import type { SceneryFrame, SceneryLayer, SceneryTier } from './types';
+import type { SurfAnchor, SurfSource } from './surfRings';
 import { KN, type WildVessel } from './wildlife';
 
 // ---------------------------------------------------------------------------------------------
@@ -971,7 +972,7 @@ function lightSpriteTexture(): THREE.DataTexture {
   return tex;
 }
 
-export class TrafficLayer implements SceneryLayer {
+export class TrafficLayer implements SceneryLayer, SurfSource {
   readonly object = new THREE.Group();
   private trafficEnabled = true;
   private structuresEnabled = true;
@@ -988,6 +989,8 @@ export class TrafficLayer implements SceneryLayer {
   /** Sea buoys and the pirate drawn from CC0 models once loaded (see scenery/models.ts). */
   private library: ModelLibrary | null = null;
   private readonly markerModels = new Map<MarkerModel, ModelInstances>();
+  /** The buoys drawn this frame, as surf anchors (Three.js axes). */
+  private readonly buoyAnchors: SurfAnchor[] = [];
   private tallShip: { inst: ModelInstances; scale: number } | null = null;
   private readonly lightPoints: THREE.Points;
   private readonly lightPos: THREE.BufferAttribute;
@@ -1141,7 +1144,14 @@ export class TrafficLayer implements SceneryLayer {
     }
   }
 
+  /** The navigation buoys drawn this frame, for the surf rings. */
+  surfAnchors(out: SurfAnchor[]): void {
+    if (!this.object.visible) return;
+    for (const a of this.buoyAnchors) out.push(a);
+  }
+
   update(frame: SceneryFrame): void {
+    this.buoyAnchors.length = 0;
     if (!this.object.visible) {
       if (this.activePoses.length > 0) this.activePoses = [];
       return;
@@ -1289,6 +1299,8 @@ export class TrafficLayer implements SceneryLayer {
             mesh.count = idx + 1;
           }
 
+          // The procedural buoy's body is 2.8 m across; the marker models are scaled to match.
+          this.buoyAnchors.push({ x: item.x, z: -item.y, r: 1.5 * item.scale });
           const beacon = structureBeaconIntensity(frame.t, item.seed, frame.calm);
           if (beacon > 0.1) pushLight(item.x, top + bob, -item.y, beacon, beacon * 0.7, 0.1);
         }

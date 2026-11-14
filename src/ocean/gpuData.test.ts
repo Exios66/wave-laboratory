@@ -73,3 +73,17 @@ describe('mean-square slope', () => {
     expect(total).toBeLessThan(0.003 + 5.12e-3 * 12);
   });
 });
+
+describe('mean wave period', () => {
+  it('is the spectral mean period Tm01, a little under the peak period', () => {
+    for (const tp of [6, 9, 12]) {
+      const data = buildGpuOceanData([jonswap(2.5, tp)], env(), 'low');
+      expect(data.meanPeriod).toBeGreaterThan(0.7 * tp);
+      expect(data.meanPeriod).toBeLessThan(1.0 * tp);
+    }
+  });
+
+  it('is zero for a flat sea', () => {
+    expect(buildGpuOceanData([], env(), 'low').meanPeriod).toBe(0);
+  });
+});
