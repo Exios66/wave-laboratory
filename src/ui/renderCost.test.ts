@@ -17,4 +17,14 @@ describe('render cost readout', () => {
     );
     expect(renderCostTitle(null)).toBe('Frames drawn per second and GPU time per frame');
   });
+
+  it('says in the tooltip when temporal antialiasing is blending frames', () => {
+    expect(renderCostTitle({ ocean: 1, scene: 2 }, true)).toBe(
+      'GPU time per pass: ocean 1.0 ms · scene 2.0 ms. Temporal antialiasing on',
+    );
+    expect(renderCostTitle(null, true)).toBe(
+      'Frames drawn per second and GPU time per frame. Temporal antialiasing on',
+    );
+    expect(renderCostTitle(null, false)).toBe('Frames drawn per second and GPU time per frame');
+  });
 });

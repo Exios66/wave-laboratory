@@ -15,9 +15,11 @@ import {
   formatBearing,
   formatDistance,
   formatPosition,
+  mapStartsOpen,
   mapToWorld,
   stepRange,
   worldToMap,
+  storedMapPrefs,
   type MapFrame,
 } from './minimapMath';
 
@@ -30,9 +32,19 @@ interface MapPrefs {
 const PREFS_KEY = 'wave-lab:minimap';
 const DEFAULT_PREFS: MapPrefs = { open: true, range: DEFAULT_RANGE, northUp: true };
 
+/** Whether the viewer has chosen to show or hide the chart (saved). */
+function hasSavedOpen(): boolean {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<MapPrefs>;
+    return typeof raw.open === 'boolean';
+  } catch {
+    return false;
+  }
+}
+
 function readPrefs(): MapPrefs {
-  // Small screens start with the chart folded away so it does not cover the view.
-  const open = typeof window === 'undefined' || window.innerWidth >= 700;
+  // A first guess from the window; the 3D view's own width settles it once mounted.
+  const open = typeof window === 'undefined' || mapStartsOpen(window.innerWidth);
   try {
     const raw = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<MapPrefs>;
     return {
@@ -47,7 +59,7 @@ function readPrefs(): MapPrefs {
   }
 }
 
-function writePrefs(p: MapPrefs): void {
+function writePrefs(p: Partial<MapPrefs>): void {
   try {
     localStorage.setItem(PREFS_KEY, JSON.stringify(p));
   } catch {
@@ -86,7 +98,7 @@ export function Minimap() {
   const update = useCallback((patch: Partial<MapPrefs>) => {
     setPrefs((p) => {
       const next = { ...p, ...patch };
-      writePrefs(next);
+      writePrefs(storedMapPrefs(next, patch, hasSavedOpen()));
       return next;
     });
   }, []);
@@ -94,6 +106,22 @@ export function Minimap() {
   useEffect(() => {
     prefsRef.current = prefs;
   }, [prefs]);
+
+  // Without a saved choice, a narrow 3D view (side panels open at a medium window width, or a
+  // phone) starts with the chart folded so it does not cover the view. One measurement of the
+  // laid-out view, delivered before the first paint; not saved, so it stays a default.
+  useEffect(() => {
+    const view = document.getElementById('viewport');
+    if (!view || hasSavedOpen() || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(([entry]) => {
+      ro.disconnect();
+      if (!entry || hasSavedOpen()) return;
+      const open = mapStartsOpen(entry.contentRect.width);
+      setPrefs((p) => (p.open === open ? p : { ...p, open }));
+    });
+    ro.observe(view);
+    return () => ro.disconnect();
+  }, []);
 
   // A new experiment starts fresh tracks; toggling the islands re-reads the chart.
   useEffect(() => {

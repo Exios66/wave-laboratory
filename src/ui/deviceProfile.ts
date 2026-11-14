@@ -224,34 +224,50 @@ export interface DisplaySettings {
   bloom: BloomPreference;
   grain: boolean;
   vignette: boolean;
+  /** Temporal antialiasing of distant water; `auto` follows the same rule as bloom. */
+  taa: BloomPreference;
 }
 
-export const DEFAULT_DISPLAY: DisplaySettings = { bloom: 'auto', grain: false, vignette: false };
+export const DEFAULT_DISPLAY: DisplaySettings = {
+  bloom: 'auto',
+  grain: false,
+  vignette: false,
+  taa: 'auto',
+};
+
+function preference(v: unknown, fallback: BloomPreference): BloomPreference {
+  return v === 'on' || v === 'off' || v === 'auto' ? v : fallback;
+}
 
 /** Fill in defaults for missing or invalid saved values. */
 export function sanitizeDisplay(raw: unknown): DisplaySettings {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const d = DEFAULT_DISPLAY;
   return {
-    bloom: r.bloom === 'on' || r.bloom === 'off' || r.bloom === 'auto' ? r.bloom : d.bloom,
+    bloom: preference(r.bloom, d.bloom),
     grain: typeof r.grain === 'boolean' ? r.grain : d.grain,
     vignette: typeof r.vignette === 'boolean' ? r.vignette : d.vignette,
+    // Settings saved before TAA existed have no key: they read as auto.
+    taa: preference(r.taa, d.taa),
   };
 }
 
-/** What the renderer should draw: resolves bloom `auto` against the device and quality. */
+/** What the renderer should draw: resolves bloom and TAA `auto` against the device and quality. */
 export function resolvePostSettings(
   display: DisplaySettings,
   quality: OceanQuality,
   profile: Pick<DeviceProfile, 'software' | 'mobile'>,
 ): PostSettings {
-  const autoBloom =
+  // Both cost a full-screen pass or two: worth it on a real desktop GPU at medium quality and up.
+  const capable =
     (quality === 'medium' || quality === 'high' || quality === 'ultra') &&
     !profile.software &&
     !profile.mobile;
+  const resolve = (p: BloomPreference) => (p === 'auto' ? capable : p === 'on');
   return {
-    bloom: display.bloom === 'auto' ? autoBloom : display.bloom === 'on',
+    bloom: resolve(display.bloom),
     grain: display.grain,
     vignette: display.vignette,
+    taa: resolve(display.taa),
   };
 }

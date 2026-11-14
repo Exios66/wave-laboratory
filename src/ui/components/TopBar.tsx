@@ -147,7 +147,7 @@ export function TopBar() {
           </label>
           <select
             id={perfId}
-            className="select"
+            className="select topbar__wide-only"
             style={{ width: 'auto' }}
             value={performance}
             title="Graphics performance — the physics is identical in every mode"
@@ -164,7 +164,7 @@ export function TopBar() {
           </label>
           <select
             id={themeId}
-            className="select"
+            className="select topbar__wide-only"
             style={{ width: 'auto' }}
             value={theme}
             onChange={(e) => lab().setTheme(e.target.value as ThemePreference)}

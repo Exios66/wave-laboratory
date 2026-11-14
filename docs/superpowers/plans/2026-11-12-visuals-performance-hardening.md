@@ -218,43 +218,71 @@ The design tokens and light/dark themes already exist in `src/ui/styles.css:4-80
   - Minimap: change the measure as described in Step 1.
 - [ ] **Step 4:** Run the e2e test plus the axe checks already in the suite. Expected: PASS. Commit: "Fit the top bar, dock and chart at medium widths".
 
-### Task 7: Temporal antialiasing (Phase C)
+### Task 7: Temporal antialiasing (Phase C) — refined 2026-11-13
 
-MSAA (`PostStack.ts:158-161`) smooths geometry edges, but the sub-pixel glints and foam on distant water still shimmer from frame to frame.
+MSAA (the 4× multisampled HDR target in `PostStack.ts` `build()`) smooths geometry edges, but sub-pixel glints and foam on distant water still shimmer from frame to frame.
+
+**Constraints found in the code** (these drive the design):
+
+- **Depth feedback loop.** `UnderwaterPass.render` samples `readBuffer.depthTexture` (`src/render/underwater/UnderwaterPass.ts:162`), and the scene depth lives only in the target `RenderPass` drew into. While underwater fog is on, the pass after it writes into that same target, so a TAA pass sampling scene depth there would form a GL feedback loop. **Ruling:** TAA is skipped while underwater (absorption fog already softens that view), and history resets when the camera surfaces.
+- **No motion vectors.** Camera-only reprojection is wrong for things that move with the camera: the ridden aircraft, and the deck under the bridge camera. **Ruling:** TAA is skipped in Plane view. The history weight also fades to 0 (current frame only) for view depth under ~40 m, so near-field geometry stays crisp. The target is distant water and sky.
+- **The prepass must share the jitter.** `drawPrepass` (`LabRenderer.ts:1657`) renders refraction and depth with the main camera, and the ocean shader samples it by `gl_FragCoord`. So the jitter goes on before `drawPrepass` and comes off at the `sceneDone` marker (`PostStack.ts` `MarkerPass`), via `camera.setViewOffset` / `clearViewOffset`. Raycasts and the UI only ever see the unjittered camera.
+- **Reversed depth.** `reversedDepthBuffer` is on when `EXT_clip_control` exists (`LabRenderer.ts:577`). Depth→NDC must follow `renderer.state.buffers.depth.getReversed()`, as `UnderwaterPass` does with `uReversed`.
+- **The post chain only runs when something needs it.** `PostStack.active` must also be true when `taa` is on (and the camera is not underwater or in Plane view).
 
 **Files:**
 
-- Create: `src/render/post/taa.ts` (pure helpers), `src/render/post/taa.test.ts`, `src/render/post/TaaPass.ts` (a three.js `Pass`).
+- Create: `src/render/post/taa.ts` (pure helpers), `src/render/post/taa.test.ts`, `src/render/post/TaaPass.ts`.
 - Modify:
-  - `src/render/post/PostStack.ts`: insert TAA after the scene and underwater passes, before bloom.
-  - `src/render/api.ts:15`: add `PostSettings.taa: boolean`.
-  - `src/ui/deviceProfile.ts`: add `DisplaySettings.taa: 'auto' | 'on' | 'off'`, where auto means on for the 'full' tier only. Add it to `sanitizeDisplay` and `resolvePostSettings`.
-  - `src/render/LabRenderer.ts`: apply the jitter to the camera projection every frame, and reset history on a cut.
-  - `Dialogs.tsx`: add a "Temporal antialiasing" display control.
+  - `PostStack.ts`: TAA sits after `underwater`, before `bloom`. It holds `taaPass`, `setTaaContext({ allowed })` and `resetTaa()`, and includes TAA in `active` and `applySettings`.
+  - `api.ts`: `PostSettings.taa: boolean`, with `DEFAULT_POST.taa = false`.
+  - `deviceProfile.ts`: `DisplaySettings.taa: 'auto' | 'on' | 'off'`, defaulting to `'auto'`. `sanitizeDisplay` keeps old saved values (a missing key means `auto`). `resolvePostSettings` resolves auto exactly as bloom does: on at medium quality and above, off on phones and software GPUs. This is the full-tier device set, and `?gfx=full` forces it.
+  - `LabRenderer.ts` `render()`: apply the jitter before `drawPrepass` when TAA runs this frame. Reset history in `setCamera`, `setRideView`, `nextRide`, `resize`, on context restore and when the camera surfaces from underwater. Pass `allowed = !underwater && mode !== 'plane'`.
+  - `Dialogs.tsx`: a "Temporal antialiasing" select (Auto / On / Off) beside Bloom.
 
-**Interfaces:**
+**Interfaces (pure, in `taa.ts`):**
 
-- Produces `halton(index: number, base: number): number`.
-- Produces `jitterOffset(frame: number, width: number, height: number): [number, number]` in clip space. It uses an 8-sample Halton(2,3) sequence, centred so the mean is 0.
-- Produces `isCameraCut(prev: THREE.Matrix4, next: THREE.Matrix4, threshold = 0.05): boolean`. A cut is any change in view-projection larger than the threshold (Frobenius norm of the difference over the norm of `prev`), or any camera-mode change.
-- Produces `TaaPass.reset(): void` and `TaaPass.setMatrices(prevViewProj, invViewProj)`.
+- `halton(index, base): number`.
+- `jitterOffset(frame, width, height): [number, number]` in **pixels**, from 8 samples of Halton(2,3) centred so the mean is 0. It feeds `setViewOffset`; the shader takes the same offset in UV.
+- `isCameraCut(prev: Matrix4, next: Matrix4, threshold = 0.05): boolean`. Relative Frobenius change of view-projection; this is a backstop only, since explicit resets cover mode changes.
+- `historyWeight(viewDepthM): number`: 0 at ≤ 5 m, smoothstep to 0.9 at ≥ 40 m. The shader mirrors it, and the test pins the constants.
+- `TaaPass`:
+  - two non-MSAA half-float history targets, linear filtering, sized in `setSize`;
+  - the resolve shader writes the history target, then a copy goes to `writeBuffer` (`needsSwap = true`);
+  - `reset()`, `setJitter(px)`, and a `sceneDepth` texture captured by the `sceneDone` marker. With underwater skipped, TAA reads `readBuffer` = the scene target and writes the other one, so no loop.
+- **Resolve shader:**
+  - unjitter the UV, then reconstruct world position from depth with the current unjittered `inverse(proj·view)`, then reproject with the previous unjittered `proj·view`;
+  - YCoCg 3×3 min/max clamp;
+  - Karis luminance weighting (`1/(1+luma)`) so HDR glints don't firefly;
+  - blend = 1 − `historyWeight` × (UV on-screen ? 1 : 0), and 1 on the first frame after reset.
 
-- [ ] **Step 1: Failing unit tests.**
-  - `halton(1,2) === 0.5`, `halton(2,3)` ≈ `2/3`.
-  - The mean of `jitterOffset(0..7, 1920, 1080)` is ≈ 0, within 1e-3 of a pixel.
-  - Every offset is ≤ 1 px in magnitude.
-  - `isCameraCut(m, m)` is false; a 30° yaw gives true; a 0.1° orbit step gives false.
-  - `sanitizeDisplay({})` gives `taa: 'auto'`.
-- [ ] **Step 2:** Run the tests. Expected: FAIL. Implement `taa.ts`. Run again. Expected: PASS.
-- [ ] **Step 3: Implement `TaaPass`.**
-  - It holds a pair of ping-pong half-float history targets.
-  - Reprojection runs from the scene depth texture through `invViewProj` → `prevViewProj` (camera-only motion).
-  - Neighbourhood clamping uses a YCoCg 3×3 min/max box to limit ghosting on moving water.
-  - The blend factor is 0.1. It becomes 1.0 for the first frame after `reset()` and for any history UV off-screen.
-  - The pass is disabled entirely when `PostSettings.taa` is false, so there is zero cost.
-  - Phase E ships first, so call `TaaPass.reset()` from `LabRenderer.setRideView` and `nextRide` (Task 11) as well as on camera-mode changes. Extend the e2e test in Step 4 to also switch Plane view Chase → Cockpit.
-- [ ] **Step 4: Failing e2e test** in `graphics.spec.ts`: `test('TAA on: renders, survives a camera cut, no console errors')`. Use `?gfx=full`, display TAA on, switch Orbit → Bridge → Orbit. Expect the canvas to be non-blank (sampled pixel variance > 0) and no `console.error`.
-- [ ] **Step 5:** Run `pnpm test:e2e e2e/graphics.spec.ts --trace off`. Expected: PASS. Take before/after crops of the distant water (two frames 1/60 s apart, then a pixel diff). Expected: the TAA frame-to-frame diff is lower than without TAA. Commit: "Temporal antialiasing on the full tier".
+- [ ] **Step 1: Failing unit tests** (`taa.test.ts`, `deviceProfile.test.ts`):
+  - `halton(1,2)=0.5`; `halton(2,3)`≈`2/3`.
+  - `jitterOffset` over frames 0..7: mean within 1e-3 px, every |offset| ≤ 0.5 px, and frame 8 repeats frame 0.
+  - `isCameraCut(m,m)` false; a 30° yaw true; a 0.1° orbit step false; a 1.2 m translation at 300 m altitude false.
+  - `historyWeight(2)=0`, `historyWeight(100)=0.9`, and monotone.
+  - `sanitizeDisplay({})` and `sanitizeDisplay({bloom:'on'})` (an old saved value) both give `taa:'auto'`.
+  - `resolvePostSettings` gives `taa: true` for desktop high quality, false for software or mobile in auto, and honours on/off.
+- [ ] **Step 2:** RED, then implement `taa.ts` plus the display settings, then GREEN.
+- [ ] **Step 3:** Implement `TaaPass`, the `PostStack` wiring and the `LabRenderer` jitter and resets. Unit-test what can run without WebGL: the `PostStack.active` truth table with TAA on, underwater, and Plane view.
+- [ ] **Step 4: Failing e2e** in `graphics.spec.ts`: `test('TAA: renders, survives camera cuts, no console errors')`.
+  - Load `?gfx=full`, which turns TAA on through auto.
+  - Switch Orbit → Bridge → Underwater → Orbit → Plane (Chase → Cockpit) → land.
+  - After each switch, sample canvas pixels: variance > 0 and not all black.
+  - Expect no `console.error` and no WebGL feedback-loop warnings (these arrive as console warnings; `trackErrors` must collect them).
+- [ ] **Step 5: Quality check (scratch, reported to you, not committed).**
+  - Pause the sim at `?gfx=full`, 960×540, Orbit pitched at the horizon.
+  - Compare the TAA-converged frame and the TAA-off frame against a 4× supersampled reference (deviceScaleFactor 4, downsampled) on a distant-water crop.
+  - Expected: TAA mean squared error < TAA-off mean squared error.
+  - Show you the crops.
+  - Then run `pnpm run check` and the full e2e suite.
+  - Commit: "Temporal antialiasing for distant water on capable devices".
+
+**Then:**
+
+- **Phase C PR:** "Medium-width layout and temporal antialiasing". Merge only on GitGuardian green with zero open threads. Then `pnpm deploy:pages`, the deploy PR, merge, and verify live (entry hash, Pages success, the smoke run and the CSP check script).
+- **Phase D:** Tasks 8 and 9 exactly as written below.
+- **Finish:** final self-review using the review package, "Rulings I made" and "Deferred minors", then finishing-a-development-branch.
 
 ### Task 8: Surf around rocks and buoys, sized by sea state (Phase D)
 

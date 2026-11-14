@@ -350,6 +350,7 @@ export class LabRenderer implements LabRendererApi {
     triangles: 0,
     underwater: false,
     cameraDepth: 0,
+    taa: false,
   };
 
   private readonly renderer: THREE.WebGLRenderer;
@@ -1424,6 +1425,8 @@ export class LabRenderer implements LabRendererApi {
 
   /** A cut: the chase seat and the fly-by point start over instead of easing from the last shot. */
   private freshRideCamera(): void {
+    // Every camera cut lands here (mode, ride view, next aircraft): drop the TAA history.
+    this.post.resetTaa();
     this.chaseOffset = null;
     this.rideCam.placed = false;
     this.rideCam.passing = false;
@@ -1487,6 +1490,11 @@ export class LabRenderer implements LabRendererApi {
     this.gpuTimer.begin('prepass');
     this.updateEnvironment();
     this.updateShadows();
+    // TAA: the prepass and the scene draw share this frame's sub-pixel jitter (the ocean samples
+    // the prepass by fragment position). Riding in a plane, the aircraft moves with the camera,
+    // which camera-only reprojection cannot follow: no TAA there.
+    this.post.setTaaAllowed(this.mode !== 'plane');
+    this.post.beginJitter();
     this.drawPrepass();
     this.gpuTimer.end();
     // Count only the scene draw, not the FFT passes or the reflection and depth prepasses, so
@@ -1495,6 +1503,9 @@ export class LabRenderer implements LabRendererApi {
     this.gpuTimer.begin('scene');
     if (this.post.active) this.post.render(this.afterScenePass);
     else this.renderer.render(this.scene, this.camera);
+    // Normally already off (the scene marker removes it); raycasts must never see the jitter.
+    this.post.endJitter();
+    this.stats.taa = this.post.taaRunning;
     this.gpuTimer.end();
     this.stats.gpuMs = this.gpuTimer.ms;
     this.stats.gpuPasses = this.gpuTimer.passes;

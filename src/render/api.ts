@@ -22,9 +22,16 @@ export interface PostSettings {
   grain: boolean;
   /** Darkened corners. */
   vignette: boolean;
+  /** Temporal antialiasing: steadies sub-pixel glints and foam on distant water. */
+  taa: boolean;
 }
 
-export const DEFAULT_POST: PostSettings = { bloom: false, grain: false, vignette: false };
+export const DEFAULT_POST: PostSettings = {
+  bloom: false,
+  grain: false,
+  vignette: false,
+  taa: false,
+};
 
 export type OverlayMode = 'none' | 'height' | 'steepness' | 'foam';
 /** `plane` rides one of the lost flights, circling high over the fleet. */
@@ -76,6 +83,8 @@ export interface RendererStats {
   underwater: boolean;
   /** Depth of the camera below the local wave surface [m]; 0 above water. */
   cameraDepth: number;
+  /** True while temporal antialiasing blends frames (on, and not underwater or riding a plane). */
+  taa: boolean;
 }
 
 /** Plane view readout: which flight, and how it is flying. */

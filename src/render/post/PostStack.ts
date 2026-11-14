@@ -14,6 +14,12 @@
  * Antialiasing: the canvas MSAA does not carry into off-screen targets, so on the 'full' tier
  * the HDR target is itself multisampled (up to 4x). The 'light' tier (phones, software GPUs)
  * has no MSAA on the canvas either, so nothing is lost there.
+ *
+ * Temporal antialiasing (optional) follows the scene pass: `beginJitter` shifts the camera by a
+ * sub-pixel offset before the prepasses and the scene draw, the marker after the scene takes it
+ * off again, and `TaaPass` blends the frame into its history. It is skipped underwater (that
+ * pass needs the scene target's depth, which TAA would then be writing into) and wherever the
+ * renderer says whole subjects move with the camera (`setTaaAllowed(false)`, the Plane view).
  */
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
@@ -24,6 +30,8 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import type { PostSettings } from '../api';
 import { UnderwaterPass, type UnderwaterParams } from '../underwater/UnderwaterPass';
+import { jitterOffset } from './taa';
+import { TaaPass } from './TaaPass';
 
 /** Luminance (linear, before exposure) above which pixels bloom. Ordinary surfaces stay below. */
 export const BLOOM_THRESHOLD = 1.2;
@@ -96,9 +104,14 @@ export class PostStack {
   private bloom: UnrealBloomPass | null = null;
   private grade: ShaderPass | null = null;
   private underwaterPass: UnderwaterPass | null = null;
+  private taaPass: TaaPass | null = null;
   private readonly sceneDone = new MarkerPass();
   private underwater: UnderwaterParams | null = null;
-  private settings: PostSettings = { bloom: false, grain: false, vignette: false };
+  private settings: PostSettings = { bloom: false, grain: false, vignette: false, taa: false };
+  private taaAllowed = true;
+  private taaFrame = 0;
+  private jittered = false;
+  private taaWasRunning = false;
   private width = 1;
   private height = 1;
   private pixelRatio = 1;
@@ -116,7 +129,61 @@ export class PostStack {
   /** Whether the HDR chain should draw this frame. */
   get active(): boolean {
     const s = this.settings;
-    return this.supported && (s.bloom || s.grain || s.vignette || this.underwater !== null);
+    return (
+      this.supported &&
+      (s.bloom || s.grain || s.vignette || this.underwater !== null || this.taaRunning)
+    );
+  }
+
+  /** Whether temporal antialiasing blends this frame. */
+  get taaRunning(): boolean {
+    return this.supported && this.settings.taa && this.taaAllowed && this.underwater === null;
+  }
+
+  /** The renderer's say: false where whole subjects move with the camera (the Plane view). */
+  setTaaAllowed(allowed: boolean): void {
+    this.taaAllowed = allowed;
+  }
+
+  /** Drop the TAA history: the next frame stands alone (a camera cut). */
+  resetTaa(): void {
+    this.taaPass?.reset();
+  }
+
+  /**
+   * Shift the camera by this frame's sub-pixel jitter (TAA only). Call before anything that
+   * draws the scene with the main camera this frame; the scene pass's marker (or `endJitter`)
+   * takes it off again.
+   */
+  beginJitter(): void {
+    const running = this.taaRunning;
+    // Coming back (from underwater, the Plane view or TAA off): old history is stale.
+    if (running && !this.taaWasRunning) this.resetTaa();
+    this.taaWasRunning = running;
+    if (!running) return;
+    this.taaFrame = (this.taaFrame + 1) % 8;
+    const [jx, jy] = jitterOffset(this.taaFrame);
+    // The composer's targets (and the canvas) truncate fractional sizes: 428 × 0.85 → 363.
+    const w = Math.max(1, Math.floor(this.width * this.pixelRatio));
+    const h = Math.max(1, Math.floor(this.height * this.pixelRatio));
+    // setViewOffset also sets aspect = w / h, which truncation can skew slightly: keep the
+    // viewport's own aspect (the jitter is a fraction of the view either way).
+    const aspect = this.camera.aspect;
+    this.camera.setViewOffset(w, h, jx, jy, w, h);
+    this.camera.aspect = aspect;
+    this.camera.updateProjectionMatrix();
+    this.jittered = true;
+    if (this.taaPass) {
+      this.taaPass.jitter[0] = jx;
+      this.taaPass.jitter[1] = jy;
+    }
+  }
+
+  /** Take the jitter off the camera (safe to call when none is on). */
+  endJitter(): void {
+    if (!this.jittered) return;
+    this.jittered = false;
+    this.camera.clearViewOffset();
   }
 
   /** Whether the half-float chain exists on this device (else underwater falls back to fog). */
@@ -148,6 +215,7 @@ export class PostStack {
       this.composer.setPixelRatio(pixelRatio);
       this.composer.setSize(this.width, this.height);
     }
+    this.resetTaa();
   }
 
   /**
@@ -158,7 +226,16 @@ export class PostStack {
     if (!this.active) return;
     this.composer ??= this.build();
     if (this.grade) this.grade.uniforms.uTime!.value = performance.now() / 1000;
-    this.sceneDone.onReached = afterScene;
+    if (this.taaPass) {
+      this.taaPass.enabled = this.taaRunning;
+      // The pass may be newer than this frame's jitter (first frame after a rebuild).
+      if (!this.jittered) this.taaPass.jitter.fill(0);
+    }
+    this.sceneDone.onReached = () => {
+      // Everything after the scene sees the plain camera (TAA reprojects with it).
+      this.endJitter();
+      afterScene?.();
+    };
     this.composer.render();
     this.sceneDone.onReached = null;
   }
@@ -195,10 +272,13 @@ export class PostStack {
     const grade = new ShaderPass(GradeShader);
     const underwater = new UnderwaterPass(this.camera);
     underwater.set(this.underwater);
+    const taa = new TaaPass(this.camera);
     const passes: Pass[] = [
       new RenderPass(this.scene, this.camera),
       this.sceneDone,
       underwater,
+      // Reads the scene target's depth: only ever on while the underwater pass is off.
+      taa,
       bloom,
       grade,
       new OutputPass(),
@@ -207,6 +287,7 @@ export class PostStack {
     this.bloom = bloom;
     this.grade = grade;
     this.underwaterPass = underwater;
+    this.taaPass = taa;
     this.composer = composer;
     this.applySettings();
     return composer;
@@ -214,6 +295,7 @@ export class PostStack {
 
   private applySettings(): void {
     if (this.bloom) this.bloom.enabled = this.settings.bloom;
+    if (this.taaPass) this.taaPass.enabled = this.taaRunning;
     if (this.grade) {
       const { grain, vignette } = this.settings;
       this.grade.enabled = grain || vignette;
@@ -229,5 +311,6 @@ export class PostStack {
     this.bloom = null;
     this.grade = null;
     this.underwaterPass = null;
+    this.taaPass = null;
   }
 }
