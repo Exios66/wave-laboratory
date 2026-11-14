@@ -19,6 +19,7 @@ import {
   mapToWorld,
   stepRange,
   worldToMap,
+  storedMapPrefs,
   type MapFrame,
 } from './minimapMath';
 
@@ -58,7 +59,7 @@ function readPrefs(): MapPrefs {
   }
 }
 
-function writePrefs(p: MapPrefs): void {
+function writePrefs(p: Partial<MapPrefs>): void {
   try {
     localStorage.setItem(PREFS_KEY, JSON.stringify(p));
   } catch {
@@ -97,7 +98,7 @@ export function Minimap() {
   const update = useCallback((patch: Partial<MapPrefs>) => {
     setPrefs((p) => {
       const next = { ...p, ...patch };
-      writePrefs(next);
+      writePrefs(storedMapPrefs(next, patch, hasSavedOpen()));
       return next;
     });
   }, []);

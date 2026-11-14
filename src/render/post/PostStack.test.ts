@@ -69,12 +69,18 @@ describe('PostStack temporal antialiasing', () => {
   it('jitters in whole drawing-buffer pixels at a fractional pixel ratio', () => {
     // 428 × 0.85 = 363.8: the canvas and the render targets are 363 pixels wide.
     const { camera, post } = setup();
+    camera.aspect = 428 / 330;
+    camera.updateProjectionMatrix();
+    const plain = camera.projectionMatrix.clone();
     post.setSize(428, 330, 0.85);
     post.setSettings({ ...DEFAULT_POST, taa: true });
     post.beginJitter();
     expect(camera.view!.fullWidth).toBe(363);
     expect(camera.view!.fullHeight).toBe(280);
     post.endJitter();
+    // setViewOffset sets aspect = 363 / 280; the viewport's own aspect must come back.
+    expect(camera.aspect).toBe(428 / 330);
+    expect(camera.projectionMatrix.equals(plain)).toBe(true);
   });
 
   it('leaves the camera alone when TAA is not running', () => {

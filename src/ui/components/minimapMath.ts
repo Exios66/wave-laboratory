@@ -85,3 +85,18 @@ export const MAP_OPEN_MIN_WIDTH = 700;
 export function mapStartsOpen(viewWidth: number): boolean {
   return viewWidth >= MAP_OPEN_MIN_WIDTH;
 }
+
+/**
+ * What to save after a change to the chart's settings. `open` is saved only once the viewer has
+ * chosen it (now or before): until then it is the automatic choice from the view's width, and
+ * saving it on a zoom would pin that guess for every later launch.
+ */
+export function storedMapPrefs<T extends { open: boolean }>(
+  next: T,
+  patch: Partial<T>,
+  openSaved: boolean,
+): Partial<T> {
+  if (openSaved || patch.open !== undefined) return next;
+  const { open: _open, ...rest } = next;
+  return rest as Partial<T>;
+}

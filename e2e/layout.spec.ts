@@ -102,6 +102,29 @@ test.describe('medium width 960×540', () => {
     expect(outside).toBe(0);
   });
 
+  test('keeps a long vessel name from pushing its row past the remove button', async ({ page }) => {
+    await ready(page);
+    const scene = page.locator('.app__scene');
+    await scene.locator('.tree__item:has(.tree__health) .tree__select').first().click();
+    const name = page.getByRole('textbox', { name: 'Name', exact: true });
+    await name.fill('Motor tanker Northern Lights of the Hebridean Coastal Trading Company');
+    await name.press('Enter');
+    await expect(scene.getByText(/^Motor tanker Northern Lights/)).toBeVisible();
+    const spill = await scene.evaluate((panel) =>
+      Array.from(panel.querySelectorAll('.tree__item')).flatMap((item) => {
+        const select = item.querySelector('.tree__select')!.getBoundingClientRect();
+        const remove = item.querySelector('button[aria-label^="Remove "]')?.getBoundingClientRect();
+        return Array.from(item.querySelectorAll('.tree__select > *'))
+          .map((el) => [el.className, el.getBoundingClientRect()] as const)
+          .filter(
+            ([, r]) => r.right > select.right + 0.5 || (remove && r.right > remove.left + 0.5),
+          )
+          .map(([cls]) => cls);
+      }),
+    );
+    expect(spill).toEqual([]);
+  });
+
   test('starts with the chart folded when the 3D view is narrow', async ({ page }) => {
     await ready(page);
     const width = await page.locator('.app__viewport').evaluate((el) => el.clientWidth);

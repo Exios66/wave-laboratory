@@ -549,15 +549,17 @@ textarea {
   background: color-mix(in srgb, var(--accent) 18%, var(--bg-elev));
   border-color: color-mix(in srgb, var(--accent) 60%, transparent);
 }
-/* In a narrow panel the meta gives way first; only a very long name ellipses. */
+/* In a narrow panel the meta gives way first (it shrinks far faster); then a long name
+   ellipses, so the health readout and the remove button keep their place. */
 .tree__label {
-  flex-shrink: 0;
-  max-width: 100%;
+  flex: 0 1 auto;
+  min-width: 3em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .tree__meta {
+  flex-shrink: 1000;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

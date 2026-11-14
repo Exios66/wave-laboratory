@@ -7,6 +7,7 @@ import {
   formatPosition,
   mapStartsOpen,
   mapToWorld,
+  storedMapPrefs,
   stepRange,
   worldToMap,
   type MapFrame,
@@ -90,5 +91,19 @@ describe('mapStartsOpen', () => {
     expect(mapStartsOpen(428)).toBe(false);
     expect(mapStartsOpen(700)).toBe(true);
     expect(mapStartsOpen(1200)).toBe(true);
+  });
+});
+
+describe('storedMapPrefs', () => {
+  const prefs = { open: true, range: 2000, northUp: false };
+
+  it('does not save the automatic open state when only zoom or orientation changes', () => {
+    expect(storedMapPrefs(prefs, { range: 2000 }, false)).toEqual({ range: 2000, northUp: false });
+    expect(storedMapPrefs(prefs, { northUp: false }, false)).not.toHaveProperty('open');
+  });
+
+  it('saves the open state once the viewer has chosen it', () => {
+    expect(storedMapPrefs(prefs, { open: true }, false)).toEqual(prefs);
+    expect(storedMapPrefs(prefs, { range: 2000 }, true)).toEqual(prefs);
   });
 });

@@ -166,7 +166,12 @@ export class PostStack {
     // The composer's targets (and the canvas) truncate fractional sizes: 428 × 0.85 → 363.
     const w = Math.max(1, Math.floor(this.width * this.pixelRatio));
     const h = Math.max(1, Math.floor(this.height * this.pixelRatio));
+    // setViewOffset also sets aspect = w / h, which truncation can skew slightly: keep the
+    // viewport's own aspect (the jitter is a fraction of the view either way).
+    const aspect = this.camera.aspect;
     this.camera.setViewOffset(w, h, jx, jy, w, h);
+    this.camera.aspect = aspect;
+    this.camera.updateProjectionMatrix();
     this.jittered = true;
     if (this.taaPass) {
       this.taaPass.jitter[0] = jx;
