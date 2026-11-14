@@ -7,6 +7,8 @@ import * as THREE from 'three';
 import { GpuTimer } from './gpuTimer';
 import { ScenePrepass } from './water/ScenePrepass';
 import { SkyEnvironment } from './sky/SkyEnvironment';
+import { cloudDeck } from './sky/clouds';
+import { CloudMap } from './sky/cloudMap';
 import { smoothstep } from '../core/mathUtil';
 import { rotate, type Quat, type Vec3 } from '../core/vec';
 import type { GpuOceanData } from '../ocean/gpuData';
@@ -159,6 +161,8 @@ const BUDGET: Record<
     rain: number;
     spray: number;
     octaves: number;
+    /** Steps marched through the volumetric cloud deck (0 = the flat deck). */
+    cloudSteps: number;
     detail: number;
     foam: number;
     scene: number;
@@ -166,11 +170,22 @@ const BUDGET: Record<
     shadow: number;
   }
 > = {
-  low: { rain: 1200, spray: 500, octaves: 3, detail: 3, foam: 0, scene: 0, ibl: false, shadow: 0 },
+  low: {
+    rain: 1200,
+    spray: 500,
+    octaves: 3,
+    cloudSteps: 0,
+    detail: 3,
+    foam: 0,
+    scene: 0,
+    ibl: false,
+    shadow: 0,
+  },
   medium: {
     rain: 3500,
     spray: 1400,
     octaves: 4,
+    cloudSteps: 4,
     detail: 4,
     foam: 1,
     scene: 1,
@@ -181,6 +196,7 @@ const BUDGET: Record<
     rain: 7000,
     spray: 2600,
     octaves: 5,
+    cloudSteps: 6,
     detail: 4,
     foam: 2,
     scene: 2,
@@ -191,6 +207,7 @@ const BUDGET: Record<
     rain: 11000,
     spray: 4000,
     octaves: 6,
+    cloudSteps: 8,
     detail: 4,
     foam: 3,
     scene: 2,
@@ -375,6 +392,7 @@ export class LabRenderer implements LabRendererApi {
   private readonly hemi: THREE.HemisphereLight;
   private readonly lighting: SkyLighting;
   private readonly skyEnv: SkyEnvironment;
+  private readonly cloudMap = new CloudMap();
   /** Lightning flash this frame (0 … 1). */
   private flash = 0;
   private readonly islands = new IslandLayer();
@@ -635,6 +653,10 @@ export class LabRenderer implements LabRendererApi {
       uSkyTime: { value: 0 },
       uCloudDrift: { value: new THREE.Vector2() },
       uCloudOctaves: { value: 5 },
+      uCloudSteps: { value: 0 },
+      uCloudDeck: { value: new THREE.Vector2(1.2, 1.55) },
+      uCloudMapTex: { value: this.cloudMap.target.texture },
+      uCloudMap: { value: this.cloudMap.origin },
       uWhitecap: { value: 0 },
       uWindDir: { value: new THREE.Vector2(1, 0) },
       uRain: { value: 0 },
@@ -675,6 +697,10 @@ export class LabRenderer implements LabRendererApi {
           uSkyTime: u.uSkyTime!,
           uCloudDrift: u.uCloudDrift!,
           uCloudOctaves: u.uCloudOctaves!,
+          uCloudSteps: u.uCloudSteps!,
+          uCloudDeck: u.uCloudDeck!,
+          uCloudMapTex: u.uCloudMapTex!,
+          uCloudMap: u.uCloudMap!,
           uFogDensity: u.uFogDensity!,
         },
         vertexShader: SKY_VERT,
@@ -739,6 +765,7 @@ export class LabRenderer implements LabRendererApi {
       this.post.restore();
       this.gpuTimer.reset();
       this.skyEnv.invalidate();
+      this.cloudMap.invalidate();
       this.clearShadowFallback();
       opts.onContextRestored?.();
     };
@@ -901,6 +928,7 @@ export class LabRenderer implements LabRendererApi {
   private applyQualityUniforms(): void {
     const b = BUDGET[this.quality];
     this.ocean.uniforms.uCloudOctaves!.value = b.octaves;
+    this.ocean.uniforms.uCloudSteps!.value = b.cloudSteps;
     this.ocean.uniforms.uDetailCascades!.value = b.detail;
     this.ocean.setFoamCascades(b.foam);
   }
@@ -956,6 +984,8 @@ export class LabRenderer implements LabRendererApi {
       this.windThree.set(0, 0, 0);
     }
     u.uCloud!.value = cloud;
+    const deck = cloudDeck(cloud);
+    (u.uCloudDeck!.value as THREE.Vector2).set(deck.baseKm, deck.topKm);
     u.uFlash!.value = flash;
     u.uRain!.value = rain;
     u.uWind!.value = wind;
@@ -1530,6 +1560,15 @@ export class LabRenderer implements LabRendererApi {
     this.applyUnderwater();
     // The prepass stage also carries the sky environment refresh (cube camera and PMREM).
     this.gpuTimer.begin('prepass');
+    if ((this.ocean.uniforms.uCloudSteps!.value as number) > 0) {
+      const c = this.camera.position;
+      this.cloudMap.update(
+        this.renderer,
+        c.x * 1e-3,
+        c.z * 1e-3,
+        this.ocean.uniforms.uCloudDrift!.value as THREE.Vector2,
+      );
+    }
     this.updateEnvironment();
     this.updateShadows();
     // TAA: the prepass and the scene draw share this frame's sub-pixel jitter (the ocean samples
@@ -1695,6 +1734,7 @@ export class LabRenderer implements LabRendererApi {
       dusk: ls?.dusk ?? 0,
       level: this.daylight,
       cloudDrift: u.uCloudDrift!.value as THREE.Vector2,
+      eye: this.camera.position,
     });
     this.scene.environment = this.skyEnv.texture;
     if (this.scene.environment) {
@@ -1977,6 +2017,7 @@ export class LabRenderer implements LabRendererApi {
     this.ocean.dispose();
     this.prepass.dispose();
     this.skyEnv.dispose();
+    this.cloudMap.dispose();
     this.shadowFallback.dispose();
     this.oceanMesh.geometry.dispose();
     (this.oceanMesh.material as THREE.Material).dispose();
