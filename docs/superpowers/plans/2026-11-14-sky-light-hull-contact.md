@@ -10,6 +10,37 @@
 
 ---
 
+## Handoff (2026-11-14) — start here
+
+**Tracker:** [Exios66/wave-laboratory#81](https://github.com/Exios66/wave-laboratory/issues/81) (master tracker: roadmap status and agent handoff). Update it at every handoff.
+
+**Branch:** `claude/hopeful-shannon-f2xayr`, pushed. It is ahead of `main` (261979b, after PR #80) by the Phase F commits below. There is no Phase F PR yet. `pnpm vitest run` gives 933 passed at 5dbc20f, and lint and typecheck are clean.
+
+| Task                  | State         | Commit  | Notes                                                                                                                                                                       |
+| --------------------- | ------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1 Volumetric clouds  | ✅ done       | 90868c2 | See the deviation below (baked coverage map). Screenshots looked right at noon (40–45 %) and at golden hour (50 %).                                                         |
+| F2 Sun shafts         | 🟡 checkpoint | 5dbc20f | Code, the `sunShafts` display setting (`auto`/`on`/`off`, default `auto`), dialog control and unit tests are done. **Open:** Step 4 (e2e and screenshot) and visual tuning. |
+| F3 Hull–water contact | ⏳ todo       | —       | Start at Task F3, Step 1.                                                                                                                                                   |
+| F4 Docs, PR, deploy   | ⏳ todo       | —       | —                                                                                                                                                                           |
+
+**F2 open items, in order:**
+
+1. **Tune the look.** At 17:00 with 45 % cloud from the Bridge (Settings → Display → Sun shafts on vs off), the left half of the frame looked hazy. Separate what the shafts add from the existing golden-hour fog and glow before changing anything. The knobs are in `src/render/post/SunShaftPass.ts`:
+   - `MASK_FRAG`: the `bright` smoothstep (now 1.0 → 2.6) and the `near` radius (now 0.5);
+   - `set()`: the gain `k` (now `strength × 0.45`);
+   - `MARCH_FRAG`: decay 0.965 and the 0.9 ray length.
+
+   The aim is distinct rays through cloud gaps and rigging, with no general wash over the foreground.
+
+2. **Add the e2e test** `test('sun shafts: renders toward a low sun, no console errors')` to `e2e/graphics.spec.ts`. Mirror the existing TAA test, with `localStorage['wave-lab:display'] = {"sunShafts":"on"}`.
+3. Tick the F2 boxes below and commit "Sun shafts through broken cloud and past rigging".
+
+**Deviation from §3.1 (already implemented in F1):** the march reads the deck coverage from a **baked, world-anchored map** (`src/render/sky/cloudMap.ts`: 1024², 72 km, RGBA8 with mipmaps). It does not evaluate noise per sample. The per-sample noise version stalled SwiftShader at High from the Bridge camera. The map stores the raw fractal noise, and the cover threshold is applied at sampling, so a change of cover needs no redraw. The map redraws only when the eye (in the drifting frame) moves more than 9 km, snapped to texels. The sky-environment cube is now drawn from the camera position (`SkyEnvironmentKey.eye`).
+
+**Screenshot recipe:** a Playwright script at 960×540, `?gfx=full`, `wave-lab:performance` set to `medium`, and `wave-lab:ambience.startHour` set to the hour you want. Set the cloud cover through Weather → "Cloud cover", choose the Bridge radio, then click "Enlarge view" (with `force`, and a long timeout). At High or Ultra under SwiftShader the page can be too slow to click.
+
+---
+
 ## 1. Requirements
 
 ### Functional
@@ -190,19 +221,19 @@ The new GPU-timer passes need no new bucket: shafts fall in 'post' and clouds in
 
 **Files:** Create `src/render/sky/clouds.ts` and `src/render/sky/clouds.test.ts`. Modify `src/render/ocean/shaders.ts` (SKY, OCEAN_FRAG) and `src/render/LabRenderer.ts` (uniforms, BUDGET.cloudSteps, the dome's camera-height uniform).
 
-- [ ] **Step 1: Failing tests.** `cloudDeck`: base < top, top rises and base falls with cover, and the values match the spec at cover 0.1 and 1. `hgPhase` integrates to about 1 over the sphere, and forward scattering is greater than back scattering for g > 0. `powderSun(τ)` is 0 at τ = 0 only through the powder term, peaks, and then decays. `slabSpan(camY, dirY, base, top, cap)`: below the deck looking up, inside the deck, above the deck looking down, and parallel rays.
-- [ ] **Step 2:** Watch them fail (RED). Implement. Watch them pass (GREEN).
-- [ ] **Step 3: GLSL.** Add `cloudMarch` and the single-sample reflection mode, mirroring the TypeScript. Add `uCloudSteps`, `uCloudBase` and `uCloudTop`, and the camera position (the built-in `cameraPosition`). Add `cloudShadow` in the ocean frag on the direct sun terms.
-- [ ] **Step 4:** Run `pnpm run check`. Take screenshots at `?gfx=full` for cover 0.3 at noon, cover 0.5 at golden hour, the storm preset, and the Plane view at altitude. Show them to the user.
-- [ ] **Step 5:** Commit: "Lit volumetric clouds anchored to the world, with their shadows on the sea".
+- [x] **Step 1: Failing tests.** `cloudDeck`: base < top, top rises and base falls with cover, and the values match the spec at cover 0.1 and 1. `hgPhase` integrates to about 1 over the sphere, and forward scattering is greater than back scattering for g > 0. `powderSun(τ)` is 0 at τ = 0 only through the powder term, peaks, and then decays. `slabSpan(camY, dirY, base, top, cap)`: below the deck looking up, inside the deck, above the deck looking down, and parallel rays.
+- [x] **Step 2:** Watch them fail (RED). Implement. Watch them pass (GREEN).
+- [x] **Step 3: GLSL.** Add `cloudMarch` and the single-sample reflection mode, mirroring the TypeScript. Add `uCloudSteps` and `uCloudDeck` (vec2: base, top km), and the camera position (the built-in `cameraPosition`). Add `cloudShadow` in the ocean frag on the direct sun terms.
+- [ ] **Step 4:** Run `pnpm run check`. Take screenshots at `?gfx=full` for cover 0.3 at noon, cover 0.5 at golden hour, the storm preset, and the Plane view at altitude. Show them to the user. _(Partial: the noon 40–45 % and golden-hour 50 % shots are done. **Still to do:** the storm preset, and the Plane view climbing through or above a low deck. Do these during F4.)_
+- [x] **Step 5:** Commit: "Lit volumetric clouds anchored to the world, with their shadows on the sea".
 
 ### Task F2: Sun shafts
 
 **Files:** Create `src/render/post/sunShafts.ts`, `sunShafts.test.ts` and `SunShaftPass.ts`. Modify `PostStack.ts` (the marker records depth, the pass order, `shaftsRunning`), `PostStack.test.ts`, `api.ts` (`PostSettings.shafts`), `src/ui/deviceProfile.ts` (and its test), `Dialogs.tsx` (the toggle) and `LabRenderer.ts`.
 
-- [ ] **Step 1: Failing tests.** `sunScreen` gives the centre for a sun straight ahead and `facing ≤ 0` behind the camera. `shaftStrength` is 0 at night, with the sun behind, with the sun below the horizon, and at cover 1; it peaks near cover 0.5; it rises with fog density; it fades off screen. The display sanitiser reads missing `sunShafts` as `'auto'` and resolves `auto` to on only on the full tier. The `PostStack.active` truth table covers shafts with strength 0 and > 0.
-- [ ] **Step 2:** RED, implement, GREEN.
-- [ ] **Step 3:** Write the pass (mask → march → composite) and wire it up.
+- [x] **Step 1: Failing tests.** `sunScreen` gives the centre for a sun straight ahead and `facing ≤ 0` behind the camera. `shaftStrength` is 0 at night, with the sun behind, with the sun below the horizon, and at cover 1; it peaks near cover 0.5; it rises with fog density; it fades off screen. The display sanitiser reads missing `sunShafts` as `'auto'` and resolves `auto` to on only on the full tier. The `PostStack.active` truth table covers shafts with strength 0 and > 0.
+- [x] **Step 2:** RED, implement, GREEN.
+- [x] **Step 3:** Write the pass (mask → march → composite) and wire it up.
 - [ ] **Step 4:** Add the e2e test `test('sun shafts: renders toward a low sun, no console errors')` in `graphics.spec.ts`. Take a screenshot of the sun behind broken cloud and the sloop's rig.
 - [ ] **Step 5:** Commit: "Sun shafts through broken cloud and past rigging".
 
