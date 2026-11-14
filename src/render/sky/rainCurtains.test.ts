@@ -7,6 +7,8 @@ import {
   DROPLET_CAP,
   DROPLET_MAX_LIFE,
   lensDropletRate,
+  lensSprayRate,
+  shownDroplets,
   paintDroplet,
   stepDroplets,
   type Droplet,
@@ -138,5 +140,36 @@ describe('paintDroplet', () => {
 
   it('is the same every time', () => {
     expect(paintDroplet(size)).toEqual(paintDroplet(size));
+  });
+});
+
+describe('lensSprayRate', () => {
+  it('blows spindrift onto a lens near the sea in a gale only', () => {
+    expect(lensSprayRate(10, 3)).toBe(0);
+    expect(lensSprayRate(25, 3)).toBeCloseTo(4, 6);
+  });
+
+  it('keeps a camera high above the sea dry of spray', () => {
+    expect(lensSprayRate(30, 40)).toBe(0);
+    expect(lensSprayRate(30, 300)).toBe(0);
+    expect(lensSprayRate(30, 15)).toBeLessThan(lensSprayRate(30, 3));
+    expect(lensSprayRate(30, Number.NaN)).toBe(0);
+  });
+});
+
+describe('shownDroplets', () => {
+  const drops: Droplet[] = [{ x: 0.5, y: 0.5, r: 0.02, age: 0, life: 3 }];
+
+  it('shows the drops on the wet cameras above water', () => {
+    expect(shownDroplets(drops, 'bridge', 'full', false)).toBe(drops);
+    expect(shownDroplets(drops, 'orbit', 'mid', false)).toBe(drops);
+  });
+
+  it('hides them (keeping them for later) on dry cameras, the lite tier and underwater', () => {
+    expect(shownDroplets(drops, 'top', 'full', false)).toEqual([]);
+    expect(shownDroplets(drops, 'plane', 'full', false)).toEqual([]);
+    expect(shownDroplets(drops, 'bridge', 'lite', false)).toEqual([]);
+    expect(shownDroplets(drops, 'bridge', 'full', true)).toEqual([]);
+    expect(drops).toHaveLength(1);
   });
 });

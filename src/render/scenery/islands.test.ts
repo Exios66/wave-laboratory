@@ -12,6 +12,7 @@ import {
   keysInCell,
   islandsNear,
   ISLAND_MODELS,
+  rockBreaksSurface,
   type IslandSpec,
 } from './islands';
 import { ModelLibrary } from './models';
@@ -339,5 +340,13 @@ describe('IslandLayer surf', () => {
     expect(u.uSurfStrength!.value).toBeCloseTo(surfBand(4, 10).strength, 6);
     expect(u.uSwash!.value).toBeCloseTo(swashSpeed(10), 6);
     layer.dispose();
+  });
+});
+
+describe('rockBreaksSurface', () => {
+  it('counts a rock whose top clears the water, not one sunk below it', () => {
+    expect(rockBreaksSurface(-0.5, 2)).toBe(true);
+    expect(rockBreaksSurface(-2.8, 0.7)).toBe(false);
+    expect(rockBreaksSurface(0.3, 0.7)).toBe(true);
   });
 });

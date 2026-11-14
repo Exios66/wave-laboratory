@@ -35,8 +35,8 @@ varying vec2 vUv;
 varying float vSeed;
 void main() {
   // Soft at both sides, densest just above the sea, thinning up into the cloud.
-  float side = smoothstep(0.0, 0.3, vUv.x) * smoothstep(1.0, 0.7, vUv.x);
-  float height = smoothstep(1.0, 0.45, vUv.y) * smoothstep(0.0, 0.04, vUv.y);
+  float side = smoothstep(0.0, 0.3, vUv.x) * (1.0 - smoothstep(0.7, 1.0, vUv.x));
+  float height = (1.0 - smoothstep(0.45, 1.0, vUv.y)) * smoothstep(0.0, 0.04, vUv.y);
   // Uneven shafts of heavier rain across the curtain.
   float x = vUv.x * 9.0 + vSeed * 3.7;
   float shafts = 0.65 + 0.2 * sin(x * 2.3) + 0.15 * sin(x * 5.1 + 1.7);

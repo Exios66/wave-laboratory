@@ -54,6 +54,31 @@ export function lensDropletRate(rainMmH: number, sprayRate: number, camera: Came
   return Math.min(MAX_DROP_RATE, 0.25 * rain + spray);
 }
 
+/**
+ * Spindrift reaching the lens [drops/s]: blown off the crests above 15 m/s wind, and only for a
+ * camera within a few tens of metres of the sea (none at 30 m and above).
+ */
+export function lensSprayRate(windMs: number, heightAboveSeaM: number): number {
+  if (!Number.isFinite(windMs) || !Number.isFinite(heightAboveSeaM)) return 0;
+  const t = Math.min(1, Math.max(0, (heightAboveSeaM - 5) / 25));
+  const near = 1 - t * t * (3 - 2 * t);
+  return Math.max(0, windMs - 15) * 0.4 * near;
+}
+
+/**
+ * The drops to draw: all of them on a wet camera above water, none on the dry cameras, the lite
+ * tier or underwater. The drops themselves are kept, to show again on returning.
+ */
+export function shownDroplets(
+  drops: readonly Droplet[],
+  camera: CameraMode,
+  tier: SceneryTier,
+  underwater: boolean,
+): readonly Droplet[] {
+  return WET_CAMERAS.has(camera) && tier !== 'lite' && !underwater ? drops : NO_DROPS;
+}
+const NO_DROPS: readonly Droplet[] = [];
+
 /** A drop on the lens: centre in screen UV [0, 1]², radius [UV of height], age and life [s]. */
 export interface Droplet {
   x: number;

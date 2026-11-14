@@ -61,7 +61,13 @@ import {
 import { SailorLayer } from './scenery/sailors';
 import { SurfRingLayer } from './scenery/surfRings';
 import { RainCurtainLayer } from './sky/rainCurtainLayer';
-import { lensDropletRate, stepDroplets, type Droplet } from './sky/rainCurtains';
+import {
+  lensDropletRate,
+  lensSprayRate,
+  shownDroplets,
+  stepDroplets,
+  type Droplet,
+} from './sky/rainCurtains';
 import { TrafficLayer } from './scenery/traffic';
 import {
   DEFAULT_AMBIENCE,
@@ -1039,10 +1045,11 @@ export class LabRenderer implements LabRendererApi {
       light,
     });
     // Spindrift blown off the crests reaches a camera near the sea in a gale.
-    const spray = Math.max(0, wind - 15) * 0.4;
+    const spray = lensSprayRate(wind, cam.y - this.surfaceNow);
     const rate = this.underwater || tier === 'lite' ? 0 : lensDropletRate(rain, spray, this.mode);
-    stepDroplets(this.lensState, rate, camDt, Math.random);
-    this.post.setLensDrops(this.lensState.drops);
+    // Drops run off a real lens whether or not the simulation is paused: wall-clock time.
+    stepDroplets(this.lensState, rate, this.wallDt, Math.random);
+    this.post.setLensDrops(shownDroplets(this.lensState.drops, this.mode, tier, this.underwater));
   }
 
   /** Scenery performance tier for the current quality. */
