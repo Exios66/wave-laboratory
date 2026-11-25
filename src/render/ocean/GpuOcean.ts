@@ -304,7 +304,11 @@ export class GpuOcean {
    * 2 more inverse FFTs and 1 combine pass; nothing is allocated or drawn when off.
    * `scale` = (elevation scale [m], speed scale [m/s]) of the legend ramps.
    */
-  setOverlayFields(on: boolean, depthBelow: number, scale: { height: number; velocity: number }): void {
+  setOverlayFields(
+    on: boolean,
+    depthBelow: number,
+    scale: { height: number; velocity: number },
+  ): void {
     const p = this.overlayP();
     p.x = Math.max(0, depthBelow);
     p.z = scale.height;

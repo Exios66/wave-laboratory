@@ -39,11 +39,11 @@ Docs: ARCHITECTURE.md, PLAN.md status table.
 
 ## Tasks (TDD)
 
-- [ ] 1. `overlays.ts`: regular-wave velocity / dynamic pressure / energy / range helpers vs `OceanField`
-- [ ] 2. `evolveVelocitySpectra` vs finite differences of `evolveSpectra` and vs `OceanField` rms
-- [ ] 3. GPU: spectrum fields 2 and 3, velocity targets, shaders, uniforms
-- [ ] 4. Renderer API, store, UI select, legends, depth input, `O` key cycle
-- [ ] 5. e2e per mode, docs, full check
+- [x] 1. `overlays.ts`: regular-wave velocity / dynamic pressure / energy / range helpers vs `OceanField`
+- [x] 2. `evolveVelocitySpectra` vs finite differences of `evolveSpectra` and vs `OceanField` rms
+- [x] 3. GPU: spectrum fields 2 and 3, velocity targets, shaders, uniforms
+- [x] 4. Renderer API, store, UI select, legends, depth input, `O` key cycle
+- [x] 5. e2e per mode, docs, full check
 
 ## Later tasks (out of scope here)
 

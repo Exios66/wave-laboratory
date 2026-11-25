@@ -1493,7 +1493,11 @@ export class LabRenderer implements LabRendererApi {
     const mode = this.overlay;
     const code = OVERLAY_CODES[mode];
     this.ocean.uniforms.uOverlay!.value = code;
-    const scale = overlayScale(this.hs, this.env?.waterDensity ?? 1025, this.env?.gravity ?? 9.80665);
+    const scale = overlayScale(
+      this.hs,
+      this.env?.waterDensity ?? 1025,
+      this.env?.gravity ?? 9.80665,
+    );
     const depth = mode === 'pressure' ? this.overlayDepth : 0;
     this.ocean.setOverlayFields(mode === 'velocity' || mode === 'pressure', depth, scale);
   }

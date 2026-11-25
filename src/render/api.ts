@@ -40,14 +40,7 @@ export const DEFAULT_POST: PostSettings = {
 };
 
 export type OverlayMode =
-  | 'none'
-  | 'height'
-  | 'steepness'
-  | 'foam'
-  | 'jacobian'
-  | 'velocity'
-  | 'pressure'
-  | 'energy';
+  'none' | 'height' | 'steepness' | 'foam' | 'jacobian' | 'velocity' | 'pressure' | 'energy';
 /** `plane` rides one of the lost flights, circling high over the fleet. */
 /** `underwater` hangs the eye a few metres below the surface (any camera dipping below the sea also draws underwater). */
 export type CameraMode = 'orbit' | 'follow' | 'bridge' | 'top' | 'plane' | 'underwater';

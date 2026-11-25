@@ -6,7 +6,15 @@ const sea = { hs: 2, rho: 1025, g: 9.80665 };
 
 describe('overlay legends', () => {
   it('state quantity, unit and range in text for every overlay', () => {
-    for (const mode of ['height', 'steepness', 'foam', 'jacobian', 'velocity', 'pressure', 'energy'] as const) {
+    for (const mode of [
+      'height',
+      'steepness',
+      'foam',
+      'jacobian',
+      'velocity',
+      'pressure',
+      'energy',
+    ] as const) {
       const spec = legendSpec(mode, { ...sea, depth: 0 });
       expect(spec.title.length).toBeGreaterThan(3);
       expect(spec.ticks.length).toBeGreaterThanOrEqual(3);
