@@ -39,14 +39,15 @@ uniform sampler2D tDepth;
 uniform vec2 uSun;
 uniform float uAspect;
 uniform float uReversed;
+uniform vec4 uTune;
 varying vec2 vUv;
 void main() {
   float z = texture2D(tDepth, vUv).x;
   float sky = uReversed > 0.5 ? 1.0 - step(1.0e-6, z) : step(0.999999, z);
   vec3 c = texture2D(tDiffuse, vUv).rgb;
   float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  float bright = smoothstep(1.0, 2.6, lum);
-  float near = 1.0 - smoothstep(0.0, 0.5, length((vUv - uSun) * vec2(uAspect, 1.0)));
+  float bright = smoothstep(uTune.x, uTune.y, lum);
+  float near = 1.0 - smoothstep(0.0, uTune.z, length((vUv - uSun) * vec2(uAspect, 1.0)));
   gl_FragColor = vec4(vec3(sky * bright * near * near), 1.0);
 }
 `;
@@ -54,9 +55,10 @@ void main() {
 const MARCH_FRAG = /* glsl */ `
 uniform sampler2D tMask;
 uniform vec2 uSun;
+uniform vec4 uTune2;
 varying vec2 vUv;
 void main() {
-  vec2 delta = (vUv - uSun) * (0.9 / ${MARCH_SAMPLES}.0);
+  vec2 delta = (vUv - uSun) * (uTune2.x / ${MARCH_SAMPLES}.0);
   // Interleaved gradient noise against banding between the samples.
   float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
   vec2 p = vUv - delta * jit;
@@ -64,7 +66,7 @@ void main() {
   float sum = 0.0;
   for (int i = 0; i < ${MARCH_SAMPLES}; i++) {
     sum += texture2D(tMask, clamp(p, 0.0, 1.0)).r * w;
-    w *= 0.965;
+    w *= uTune2.y;
     p -= delta;
   }
   gl_FragColor = vec4(vec3(sum / ${MARCH_SAMPLES}.0), 1.0);
@@ -107,12 +109,17 @@ export class SunShaftPass extends Pass {
         uSun: { value: new THREE.Vector2(0.5, 0.5) },
         uAspect: { value: 1 },
         uReversed: { value: 0 },
+        uTune: { value: new THREE.Vector4(1, 2.6, 0.5, 0) },
       },
     });
     this.marchMat = new THREE.ShaderMaterial({
       ...common,
       fragmentShader: MARCH_FRAG,
-      uniforms: { tMask: { value: this.mask.texture }, uSun: this.maskMat.uniforms.uSun! },
+      uniforms: {
+        tMask: { value: this.mask.texture },
+        uSun: this.maskMat.uniforms.uSun!,
+        uTune2: { value: new THREE.Vector4(0.9, 0.965, 0, 0) },
+      },
     });
     this.addMat = new THREE.ShaderMaterial({
       ...common,
@@ -132,7 +139,12 @@ export class SunShaftPass extends Pass {
 
   set(params: ShaftParams): void {
     (this.maskMat.uniforms.uSun!.value as THREE.Vector2).set(params.x, params.y);
-    const k = params.strength * 0.45;
+    const tune = (globalThis as unknown as { __shaftTune?: number[] }).__shaftTune;
+    if (tune) {
+      (this.maskMat.uniforms.uTune!.value as THREE.Vector4).set(tune[0]!, tune[1]!, tune[2]!, 0);
+      (this.marchMat.uniforms.uTune2!.value as THREE.Vector4).set(tune[3]!, tune[4]!, 0, 0);
+    }
+    const k = params.strength * (tune ? tune[5]! : 0.45);
     (this.addMat.uniforms.uTint!.value as THREE.Vector3).set(
       (params.tint[0] ?? 1) * k,
       (params.tint[1] ?? 1) * k,
