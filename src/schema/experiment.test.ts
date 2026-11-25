@@ -158,3 +158,41 @@ describe('mooring schema boundaries', () => {
     expect(parsed.ok && parsed.experiment.vessels[0]!.type).toBe('sloop-yacht');
   });
 });
+
+describe('advanced wave systems', () => {
+  const base = { id: 'w1', name: 'Wave', enabled: true, directionDeg: 270 };
+
+  it('regular waves from earlier versions load unchanged, with no theory field added', () => {
+    const exp = presetExperiment();
+    const old = {
+      ...exp,
+      waves: [{ ...base, kind: 'regular', height: 2, period: 8, phaseDeg: 0 }],
+    };
+    const r = parseExperiment(old);
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.experiment.waves[0]).toEqual(old.waves[0]);
+    const back = decodeExperiment(encodeExperiment(old as typeof exp));
+    expect(back.ok && back.experiment.waves[0]).toEqual(old.waves[0]);
+  });
+
+  it('accepts each theory, a solitary wave, and rejects unknown ones', () => {
+    const exp = presetExperiment();
+    for (const theory of ['airy', 'stokes2', 'stokes5', 'cnoidal']) {
+      const r = parseExperiment({
+        ...exp,
+        waves: [{ ...base, kind: 'regular', height: 2, period: 8, phaseDeg: 0, theory }],
+      });
+      expect(r.ok, theory).toBe(true);
+    }
+    const sol = parseExperiment({
+      ...exp,
+      waves: [{ ...base, kind: 'solitary', height: 1, spacing: 0, phaseDeg: 0 }],
+    });
+    expect(sol.ok).toBe(true);
+    const bad = parseExperiment({
+      ...exp,
+      waves: [{ ...base, kind: 'regular', height: 2, period: 8, phaseDeg: 0, theory: 'fifth' }],
+    });
+    expect(bad.ok).toBe(false);
+  });
+});

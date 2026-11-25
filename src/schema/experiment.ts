@@ -82,6 +82,27 @@ export const RegularWaveSystemSchema = z.object({
   /** Wave period T [s]. */
   period: finite().min(0.3).max(30),
   phaseDeg: finite().min(-360).max(360).default(0),
+  /**
+   * Wave theory. Absent means 'stokes2', which is what every earlier version drew: a linear wave
+   * plus the second-order Stokes harmonic (when choppiness is above zero). 'airy' is the pure
+   * linear wave, 'stokes5' Fenton's (1985) fifth-order Stokes wave, 'cnoidal' the KdV wave for
+   * shallow, long waves.
+   */
+  theory: z.enum(['airy', 'stokes2', 'stokes5', 'cnoidal']).optional(),
+});
+
+/**
+ * A solitary wave (Boussinesq sech² hump) travelling over the mean depth. The lab is periodic,
+ * so humps repeat every `spacing` metres (0 = automatic).
+ */
+export const SolitaryWaveSystemSchema = z.object({
+  ...waveSystemBase,
+  kind: z.literal('solitary'),
+  /** Crest height above the still water level [m] (limited to 0.78 of the depth). */
+  height: finite().min(0).max(30),
+  /** Distance between repeated humps [m]; 0 chooses 24 decay lengths. */
+  spacing: finite().min(0).max(20000).default(0),
+  phaseDeg: finite().min(-360).max(360).default(0),
 });
 
 /**
@@ -108,12 +129,14 @@ export const WaveSystemSchema = z.discriminatedUnion('kind', [
   SpectrumSystemSchema,
   WindSeaSystemSchema,
   RegularWaveSystemSchema,
+  SolitaryWaveSystemSchema,
   FocusedWaveSystemSchema,
 ]);
 export type WaveSystem = z.infer<typeof WaveSystemSchema>;
 export type SpectrumSystem = z.infer<typeof SpectrumSystemSchema>;
 export type WindSeaSystem = z.infer<typeof WindSeaSystemSchema>;
 export type RegularWaveSystem = z.infer<typeof RegularWaveSystemSchema>;
+export type SolitaryWaveSystem = z.infer<typeof SolitaryWaveSystemSchema>;
 export type FocusedWaveSystem = z.infer<typeof FocusedWaveSystemSchema>;
 
 export const WaterTypeSchema = z.enum([

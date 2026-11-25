@@ -26,7 +26,18 @@ import {
   verticalAttenuation,
 } from './dispersion';
 import { FFT, signedIndex } from './fft';
-import { resolveSea, type ResolvedRegularWave, type ResolvedSea } from './systems';
+import {
+  nonlinearKinematics,
+  nonlinearSurface,
+  type NonlinearKinematics,
+  type NonlinearSurface,
+} from './nonlinearEval';
+import {
+  resolveSea,
+  type ResolvedNonlinearWave,
+  type ResolvedRegularWave,
+  type ResolvedSea,
+} from './systems';
 
 /** Field slots evaluated per cascade (packed two-per-FFT). */
 const enum F {
@@ -159,6 +170,10 @@ export class OceanField {
 
   get regularWaves(): readonly ResolvedRegularWave[] {
     return this.sea.regular;
+  }
+
+  get nonlinearWaves(): readonly ResolvedNonlinearWave[] {
+    return this.sea.nonlinear;
   }
 
   /** Make sure snapshots bracket time t (computing new ones as needed). */
@@ -328,6 +343,11 @@ export class OceanField {
       dx += s * r.dirX;
       dy += s * r.dirY;
     }
+    for (const nw of this.sea.nonlinear) {
+      const d = lambda * nonlinearSurface(nw, x0, y0, t, this.nlSurface).disp;
+      dx += d * nw.dirX;
+      dy += d * nw.dirY;
+    }
     out[0] = dx;
     out[1] = dy;
   }
@@ -352,6 +372,8 @@ export class OceanField {
   }
 
   private readonly label: [number, number] = [0, 0];
+  private readonly nlSurface: NonlinearSurface = { eta: 0, dEta: 0, etaT: 0, disp: 0 };
+  private readonly nlKin: NonlinearKinematics = { head: 0, uh: 0, w: 0 };
 
   /** Surface elevation, slope and vertical velocity at world point (x, y) and time t. */
   surface(x: number, y: number, t: number, out?: SurfaceSample): SurfaceSample {
@@ -389,6 +411,13 @@ export class OceanField {
       sx += (-r.amplitude * r.k * s - 2 * a2 * r.k * s2) * r.dirX;
       sy += (-r.amplitude * r.k * s - 2 * a2 * r.k * s2) * r.dirY;
       et += r.amplitude * r.omega * s + 2 * a2 * r.omega * s2;
+    }
+    for (const nw of this.sea.nonlinear) {
+      const ns = nonlinearSurface(nw, x0, y0, t, this.nlSurface);
+      eta += ns.eta;
+      sx += ns.dEta * nw.dirX;
+      sy += ns.dEta * nw.dirY;
+      et += ns.etaT;
     }
     // Slopes are w.r.t. the Lagrangian label; good to first order in steepness.
     res.eta = eta;
@@ -454,6 +483,13 @@ export class OceanField {
       u += uh * r.dirX;
       v += uh * r.dirY;
       wv += r.amplitude * r.omega * s * verticalAttenuation(r.k, zeta, h);
+    }
+    for (const nw of this.sea.nonlinear) {
+      const nk = nonlinearKinematics(nw, x0, y0, t, zeta, this.nlKin);
+      head += nk.head;
+      u += nk.uh * nw.dirX;
+      v += nk.uh * nw.dirY;
+      wv += nk.w;
     }
     res.pressure = this.rho * this.g * (head - z);
     res.u = u + this.currentX;
@@ -532,6 +568,15 @@ export class OceanField {
         out.w[j]! += r.amplitude * r.omega * sn * verticalAttenuation(r.k, zeta, h);
       }
     }
+    for (const nw of this.sea.nonlinear) {
+      for (let j = 0; j < m; j++) {
+        const nk = nonlinearKinematics(nw, x0, y0, t, Math.min(0, zetas[j]!), this.nlKin);
+        out.head[j]! += nk.head;
+        out.u[j]! += nk.uh * nw.dirX;
+        out.v[j]! += nk.uh * nw.dirY;
+        out.w[j]! += nk.w;
+      }
+    }
     if (this.currentX !== 0 || this.currentY !== 0) {
       for (let j = 0; j < m; j++) {
         out.u[j]! += this.currentX;
@@ -547,6 +592,8 @@ export class OceanField {
     for (const c of this.cascades) v += c.variance;
     // Focused-group energy is transient (one passing crest), not part of the stationary H_s.
     for (const r of this.sea.regular) if (!r.group) v += (r.amplitude * r.amplitude) / 2;
+    // A solitary hump carries no stationary variance; periodic waves do.
+    for (const w of this.sea.nonlinear) for (const a of w.harmonics) v += (a * a) / 2;
     return v;
   }
 }

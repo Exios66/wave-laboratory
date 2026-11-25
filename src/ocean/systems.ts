@@ -7,6 +7,13 @@ import { deriveSeed } from '../core/rng';
 import { DEG } from '../core/units';
 import type { Environment, Spreading, WaveSystem } from '../schema/experiment';
 import { omegaOf, wavenumberOf, type DispersionParams } from './dispersion';
+import {
+  solveCnoidal,
+  solveSolitary,
+  solveStokes5,
+  type HarmonicWaveSolution,
+  type SolitarySolution,
+} from './nonlinear';
 import { jonswapShape, makeSpectrum, windSeaParameters, type FrequencySpectrum } from './spectra';
 
 /** Number of linear components in a focused wave group. */
@@ -56,9 +63,42 @@ export interface ResolvedFocusedGroup {
   wavelength: number;
 }
 
+/**
+ * A nonlinear steady wave: Fenton fifth-order Stokes, cnoidal or solitary. The surface is
+ * η = Σ a_j cos(jθ) (harmonic waves) or H sech²(κ ξ) (solitary), with θ = k (d·x) − ω t + φ.
+ * Particle kinematics are linear per harmonic, with orbital ratio coth(j k h).
+ */
+export interface ResolvedNonlinearWave {
+  id: string;
+  kind: 'harmonic' | 'solitary';
+  theory: 'stokes5' | 'cnoidal' | 'solitary';
+  k: number;
+  omega: number;
+  /** Phase speed [m/s]. */
+  c: number;
+  dirX: number;
+  dirY: number;
+  phase: number;
+  /** Mean water depth [m] (the kinematics need it). */
+  depth: number;
+  /** Elevation harmonics a_1..a_n [m] (harmonic waves; empty for solitary). */
+  harmonics: number[];
+  /** coth(j k h) for each harmonic. */
+  coth: number[];
+  solitary?: Pick<SolitarySolution, 'kappa' | 'spacing' | 'heightUsed'>;
+  /** Wave height after any clamp [m]. */
+  height: number;
+  ursell?: number;
+  m?: number;
+  truncationError: number;
+  /** Clamp or validity notice for the UI. */
+  notice?: string;
+}
+
 export interface ResolvedSea {
   spectral: ResolvedSpectralSystem[];
   regular: ResolvedRegularWave[];
+  nonlinear: ResolvedNonlinearWave[];
   focused: ResolvedFocusedGroup[];
   dispersion: DispersionParams;
 }
@@ -91,6 +131,7 @@ export function resolveSea(waves: readonly WaveSystem[], env: Environment): Reso
   const tmaDepth = env.depth < DEEP_WATER_DEPTH ? env.depth : undefined;
   const spectral: ResolvedSpectralSystem[] = [];
   const regular: ResolvedRegularWave[] = [];
+  const nonlinear: ResolvedNonlinearWave[] = [];
   const focused: ResolvedFocusedGroup[] = [];
   for (const w of waves) {
     if (!w.enabled) continue;
@@ -148,6 +189,18 @@ export function resolveSea(waves: readonly WaveSystem[], env: Environment): Reso
       }
       case 'regular': {
         if (w.height <= 0) break;
+        const theory = w.theory ?? 'stokes2';
+        if (theory === 'stokes5' || theory === 'cnoidal') {
+          const input = {
+            height: w.height,
+            period: w.period,
+            depth: env.depth,
+            gravity: env.gravity,
+          };
+          const sol = theory === 'stokes5' ? solveStokes5(input) : solveCnoidal(input);
+          nonlinear.push(harmonicWave(w.id, theory, sol, theta0, w.phaseDeg * DEG, env.depth));
+          break;
+        }
         const omega = (2 * Math.PI) / w.period;
         const k = wavenumberOf(omega, dispersion);
         const kh = k * env.depth;
@@ -160,7 +213,36 @@ export function resolveSea(waves: readonly WaveSystem[], env: Environment): Reso
           dirY: Math.sin(theta0),
           phase: w.phaseDeg * DEG,
           cothKh: kh > 20 ? 1 : 1 / Math.tanh(kh),
-          stokes: true,
+          stokes: theory === 'stokes2',
+        });
+        break;
+      }
+      case 'solitary': {
+        if (w.height <= 0) break;
+        const sol = solveSolitary({
+          height: w.height,
+          depth: env.depth,
+          gravity: env.gravity,
+          spacing: w.spacing,
+        });
+        const k = (2 * Math.PI) / sol.spacing;
+        nonlinear.push({
+          id: w.id,
+          kind: 'solitary',
+          theory: 'solitary',
+          k,
+          omega: sol.c * k,
+          c: sol.c,
+          dirX: Math.cos(theta0),
+          dirY: Math.sin(theta0),
+          phase: w.phaseDeg * DEG,
+          depth: env.depth,
+          harmonics: [],
+          coth: [],
+          solitary: { kappa: sol.kappa, spacing: sol.spacing, heightUsed: sol.heightUsed },
+          height: sol.heightUsed,
+          truncationError: 0,
+          ...(sol.notice ? { notice: sol.notice } : {}),
         });
         break;
       }
@@ -173,7 +255,39 @@ export function resolveSea(waves: readonly WaveSystem[], env: Environment): Reso
       }
     }
   }
-  return { spectral, regular, focused, dispersion };
+  return { spectral, regular, nonlinear, focused, dispersion };
+}
+
+function harmonicWave(
+  id: string,
+  theory: 'stokes5' | 'cnoidal',
+  sol: HarmonicWaveSolution & { m?: number; ursell?: number },
+  theta0: number,
+  phase: number,
+  depth: number,
+): ResolvedNonlinearWave {
+  return {
+    id,
+    kind: 'harmonic',
+    theory,
+    k: sol.k,
+    omega: sol.omega,
+    c: sol.c,
+    dirX: Math.cos(theta0),
+    dirY: Math.sin(theta0),
+    phase,
+    depth,
+    harmonics: sol.harmonics,
+    coth: sol.harmonics.map((_, j) => {
+      const x = (j + 1) * sol.k * depth;
+      return x > 20 ? 1 : 1 / Math.tanh(x);
+    }),
+    height: sol.heightUsed,
+    truncationError: sol.truncationError,
+    ...(sol.m !== undefined ? { m: sol.m } : {}),
+    ...(sol.ursell !== undefined ? { ursell: sol.ursell } : {}),
+    ...(sol.notice ? { notice: sol.notice } : {}),
+  };
 }
 
 /**
