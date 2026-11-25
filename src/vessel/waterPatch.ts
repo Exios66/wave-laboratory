@@ -81,7 +81,10 @@ export class LocalWater {
 
   constructor(field: OceanField, levels: readonly number[], maxColumns = 220, minSpacing = 0.35) {
     this.field = field;
-    this.calm = field.sea.spectral.length === 0 && field.sea.regular.length === 0;
+    this.calm =
+      field.sea.spectral.length === 0 &&
+      field.sea.regular.length === 0 &&
+      field.sea.nonlinear.length === 0;
     this.levels = Float64Array.from(levels);
     this.maxColumns = maxColumns;
     this.minSpacing = minSpacing;

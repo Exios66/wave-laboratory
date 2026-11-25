@@ -4,7 +4,7 @@
  */
 import type { Environment, OceanQuality, WaveSystem } from '../schema/experiment';
 import { buildCascadeSpectrum, cascadeSpecs, visualGridSize } from './cascades';
-import { resolveSea, type ResolvedRegularWave } from './systems';
+import { resolveSea, type ResolvedNonlinearWave, type ResolvedRegularWave } from './systems';
 
 export interface GpuCascade {
   index: number;
@@ -33,6 +33,8 @@ export interface GpuCascade {
 export interface GpuOceanData {
   cascades: GpuCascade[];
   regular: ResolvedRegularWave[];
+  /** Stokes 5 / cnoidal / solitary waves drawn by the nonlinear shader path. */
+  nonlinear: ResolvedNonlinearWave[];
   depth: number;
   gravity: number;
   choppiness: number;
@@ -112,9 +114,17 @@ export function buildGpuOceanData(
     m0 += e;
     m1 += e * r.omega;
   }
+  for (const w of sea.nonlinear) {
+    for (const a of w.harmonics) {
+      m0 += (a * a) / 2;
+      m1 += ((a * a) / 2) * w.omega;
+      variance += (a * a) / 2;
+    }
+  }
   return {
     cascades,
     regular: sea.regular,
+    nonlinear: sea.nonlinear,
     depth: env.depth,
     gravity: env.gravity,
     choppiness: env.choppiness,

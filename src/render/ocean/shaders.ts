@@ -535,6 +535,12 @@ uniform float uHasMips;
 uniform vec4 uRegA[48];
 uniform vec4 uRegB[48];
 uniform float uRegularCount;
+// Nonlinear steady waves (Stokes 5, cnoidal, solitary); layout in render/ocean/nonlinearMirror.ts.
+uniform vec4 uNlA[4];
+uniform vec4 uNlB[4];
+uniform vec4 uNlH[24];
+uniform float uNlCount;
+uniform float uNlDepth;
 // Displacement of one cascade, low-passed to the local vertex spacing h: the mip level whose
 // texels are about as large as the mesh cells (or a fade when mips are unavailable).
 vec3 cascadeSample(sampler2D tex, float size, vec2 worldXY, float h) {
@@ -543,6 +549,59 @@ vec3 cascadeSample(sampler2D tex, float size, vec2 worldXY, float h) {
   vec4 t = textureLod(tex, worldXY / size + (0.5 / uN), lod);
   float w = uHasMips > 0.5 ? 1.0 : 1.0 - smoothstep(0.5, 2.0, lod);
   return vec3(t.g, t.b, t.r) * w;
+}
+
+// Nonlinear waves: a cosine series of the elevation (harmonic n has wavenumber n k and the
+// orbital ratio coth(n k h)), or an analytic sech2 hump. Mirrored by mirrorNonlinearSample().
+vec3 nonlinearSample(vec2 worldXY, float h, out vec4 slope) {
+  vec3 d = vec3(0.0);
+  slope = vec4(0.0);
+  for (int i = 0; i < 4; i++) {
+    if (float(i) + 0.5 > uNlCount) break;
+    vec4 a = uNlA[i];
+    vec4 b = uNlB[i];
+    float theta = a.y * dot(b.xy, worldXY) - a.x * uTime + a.z;
+    if (a.w < 1.5) {
+      for (int q = 0; q < 6; q++) {
+        vec4 hv = uNlH[i * 6 + q];
+        for (int c4 = 0; c4 < 4; c4++) {
+          float amp0 = hv[c4];
+          if (amp0 == 0.0) continue;
+          float n = float(q * 4 + c4 + 1);
+          float wavelength = 6.2831853 / (n * a.y);
+          float amp = amp0 * smoothstep(2.0 * h, 4.0 * h, wavelength);
+          float xk = n * a.y * uNlDepth;
+          float coth = xk > 20.0 ? 1.0 : 1.0 / tanh(xk);
+          float s = sin(n * theta);
+          float c = cos(n * theta);
+          float horiz = -uLambda * amp * coth * s;
+          d.xy += horiz * b.xy;
+          d.z += amp * c;
+          float deta = -amp * n * a.y * s;
+          float dd = -uLambda * amp * coth * n * a.y * c;
+          slope += vec4(deta * b.x, deta * b.y, dd * b.x * b.x, dd * b.y * b.y);
+        }
+      }
+    } else {
+      float spacing = uNlH[i * 6].x;
+      float kappa = b.w;
+      float amp = b.z * smoothstep(2.0 * h, 4.0 * h, 4.0 / kappa);
+      float xi = theta / a.y;
+      float x = xi - spacing * floor(xi / spacing + 0.5);
+      float q = min(kappa * abs(x), 30.0);
+      float ch = cosh(q);
+      float sech2 = 1.0 / (ch * ch);
+      float th = tanh(clamp(kappa * x, -20.0, 20.0));
+      float thHalf = tanh(min(0.5 * kappa * spacing, 20.0));
+      float disp = -(amp / (uNlDepth * kappa)) * (th - 2.0 * x / spacing * thHalf);
+      d.xy += uLambda * disp * b.xy;
+      d.z += amp * sech2;
+      float deta = -2.0 * amp * kappa * sech2 * th;
+      float dd = uLambda * (-(amp / uNlDepth) * sech2 + amp / (uNlDepth * kappa) * (2.0 / spacing) * thHalf);
+      slope += vec4(deta * b.x, deta * b.y, dd * b.x * b.x, dd * b.y * b.y);
+    }
+  }
+  return d;
 }
 
 vec3 regularSample(vec2 worldXY, float h, out vec4 slope) {
@@ -571,6 +630,11 @@ vec3 regularSample(vec2 worldXY, float h, out vec4 slope) {
     float deta = -amp * a.z * s - 2.0 * a2 * a.z * sin(2.0 * theta);
     float dd = -uLambda * amp * coth * a.z * c;
     slope += vec4(deta * b.x, deta * b.y, dd * b.x * b.x, dd * b.y * b.y);
+  }
+  if (uNlCount > 0.5) {
+    vec4 nlSlope;
+    d += nonlinearSample(worldXY, h, nlSlope);
+    slope += nlSlope;
   }
   return d;
 }

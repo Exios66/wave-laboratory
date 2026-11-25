@@ -11,6 +11,7 @@ import { surfaceDetailTexture } from '../scene/textures';
 import { evolveSpectra } from './evolve';
 import { FOAM_MARGIN, FoamSim, foamShares, MAX_FOAM_CASCADES } from './foamSim';
 import { gpuVerifyWanted } from './gpuVerify';
+import { MAX_NONLINEAR, NL_HARMONIC_VECS, packNonlinear } from './nonlinearMirror';
 import { COMBINE_FRAG, FFT_FRAG, FFT_VERT, GRADIENT_FRAG, SPECTRUM_FRAG } from './shaders';
 
 const MAX_CASCADES = 4;
@@ -135,6 +136,13 @@ export class GpuOcean {
       uRegularCount: { value: 0 },
       uRegA: { value: regA },
       uRegB: { value: regB },
+      uNlA: { value: Array.from({ length: MAX_NONLINEAR }, () => new THREE.Vector4()) },
+      uNlB: { value: Array.from({ length: MAX_NONLINEAR }, () => new THREE.Vector4()) },
+      uNlH: {
+        value: Array.from({ length: MAX_NONLINEAR * NL_HARMONIC_VECS }, () => new THREE.Vector4()),
+      },
+      uNlCount: { value: 0 },
+      uNlDepth: { value: 1000 },
       uSunHdr: { value: 1 },
       uSunDir: { value: new THREE.Vector3(0.3, 0.6, 0.2).normalize() },
       uWind: { value: 8 },
@@ -233,6 +241,17 @@ export class GpuOcean {
       regB[i]!.set(r?.dirX ?? 1, r?.dirY ?? 0, r?.cothKh ?? 1, r?.stokes ? 1 : 0);
     }
     this.uniforms.uRegularCount!.value = Math.min(data.regular.length, MAX_REGULAR);
+    const nl = packNonlinear(data.nonlinear, data.depth);
+    const nlA = this.uniforms.uNlA!.value as THREE.Vector4[];
+    const nlB = this.uniforms.uNlB!.value as THREE.Vector4[];
+    const nlH = this.uniforms.uNlH!.value as THREE.Vector4[];
+    for (let i = 0; i < MAX_NONLINEAR; i++) {
+      nlA[i]!.fromArray(nl.a, 4 * i);
+      nlB[i]!.fromArray(nl.b, 4 * i);
+    }
+    for (let i = 0; i < nlH.length; i++) nlH[i]!.fromArray(nl.h, 4 * i);
+    this.uniforms.uNlCount!.value = nl.count;
+    this.uniforms.uNlDepth!.value = data.depth;
     const mss = Array.from(
       { length: MAX_CASCADES },
       (_, i) => data.cascades[i]?.slopeVariance ?? 0,

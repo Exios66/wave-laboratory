@@ -29,6 +29,11 @@ const OCEAN_UNIFORMS = [
   'uRegA',
   'uRegB',
   'uRegularCount',
+  'uNlA',
+  'uNlB',
+  'uNlH',
+  'uNlCount',
+  'uNlDepth',
   'uDrift',
   'uHs',
 ] as const;
