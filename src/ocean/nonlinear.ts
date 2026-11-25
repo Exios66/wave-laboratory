@@ -347,3 +347,97 @@ export function solveCnoidal(input: NonlinearInput): CnoidalSolution {
     ursell,
   };
 }
+
+// ---------------------------------------------------------------------------------------------
+// Solitary wave (Boussinesq / first-order KdV)
+// ---------------------------------------------------------------------------------------------
+
+export interface SolitarySolution {
+  /** Wave speed √(g (h + H)) [m/s]. */
+  c: number;
+  /** Decay rate κ in η = H sech²(κ ξ) [1/m]. */
+  kappa: number;
+  /** Distance between repeated humps [m]. */
+  spacing: number;
+  heightUsed: number;
+  clamped: boolean;
+  notice?: string;
+}
+
+/**
+ * Solitary wave (Boussinesq 1872, Rayleigh 1876): η = H sech²(κ ξ), ξ = x − c t,
+ * κ = √(3H / (4 h² (h + H))), c = √(g (h + H)). First order in H/h; Fenton's (1972)
+ * ninth-order profile is a possible later refinement. The lab is a periodic world, so humps repeat
+ * every `spacing` metres; the profile is evaluated analytically for the nearest hump, so there is
+ * no series truncation. `spacing` defaults to 24 / κ (the neighbouring tail is below 1e-10 H).
+ * Heights above H/h = 0.78 (McCowan) would break and are clamped.
+ */
+export function solveSolitary(input: {
+  height: number;
+  depth: number;
+  gravity: number;
+  spacing?: number;
+}): SolitarySolution {
+  const { depth, gravity: g } = input;
+  const limit = BREAKING_H_OVER_D * depth;
+  let height = Math.max(input.height, 1e-6);
+  let clamped = false;
+  let notice: string | undefined;
+  if (height > limit) {
+    notice =
+      `Height reduced from ${height.toFixed(2)} m to ${limit.toFixed(2)} m: a solitary wave ` +
+      'higher than 0.78 times the depth breaks.';
+    height = limit;
+    clamped = true;
+  }
+  const kappa = Math.sqrt((3 * height) / (4 * depth * depth * (depth + height)));
+  const minSpacing = 12 / kappa;
+  let spacing = input.spacing && input.spacing > 0 ? input.spacing : 24 / kappa;
+  if (spacing < minSpacing) {
+    spacing = minSpacing;
+    notice =
+      (notice ? notice + ' ' : '') +
+      `Spacing raised to ${spacing.toFixed(0)} m so neighbouring humps do not overlap.`;
+  }
+  return {
+    c: Math.sqrt(g * (depth + height)),
+    kappa,
+    spacing,
+    heightUsed: height,
+    clamped,
+    ...(notice ? { notice } : {}),
+  };
+}
+
+/** Wrap a distance into [−spacing/2, spacing/2). */
+export function wrapSpacing(xi: number, spacing: number): number {
+  return xi - spacing * Math.floor(xi / spacing + 0.5);
+}
+
+/** Solitary-wave elevation at distance ξ from a crest [m] (nearest hump). */
+export function solitaryEta(
+  xi: number,
+  s: Pick<SolitarySolution, 'kappa' | 'spacing' | 'heightUsed'>,
+): number {
+  const q = Math.min(s.kappa * Math.abs(wrapSpacing(xi, s.spacing)), 30);
+  const sech = 1 / Math.cosh(q);
+  return s.heightUsed * sech * sech;
+}
+
+/**
+ * Horizontal displacement of the water particle labelled at ξ [m]: the time integral of the
+ * long-wave velocity u = c η / h, −(1/h) ∫ η dξ, minus the linear ramp that makes it periodic
+ * (a real solitary wave leaves a permanent forward shift, which a periodic world cannot).
+ */
+export function solitaryDisplacement(
+  xi: number,
+  s: Pick<SolitarySolution, 'kappa' | 'spacing' | 'heightUsed'>,
+  depth: number,
+): number {
+  const x = wrapSpacing(xi, s.spacing);
+  const ramp = (2 * x) / s.spacing;
+  return (
+    -(s.heightUsed / (depth * s.kappa)) *
+    (Math.tanh(s.kappa * x) - ramp * Math.tanh((s.kappa * s.spacing) / 2))
+  );
+}

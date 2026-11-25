@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { fourierWave } from '../test/fentonReference';
-import { fentonCoefficients, solveCnoidal, solveStokes5 } from './nonlinear';
+import {
+  fentonCoefficients,
+  solitaryDisplacement,
+  solitaryEta,
+  solveCnoidal,
+  solveSolitary,
+  solveStokes5,
+} from './nonlinear';
 
 describe('Stokes fifth-order coefficients (Fenton 1985)', () => {
   it('reproduce Table 2, column 4, for d/λ = 0.12 (kd = 0.753982)', () => {
@@ -141,5 +148,59 @@ describe('solveCnoidal', () => {
     expect(s.heightUsed).toBeCloseTo(0.78 * 3, 6);
     const low = solveCnoidal({ height: 0.5, period: 6, depth: 20, gravity: g });
     expect(low.notice).toMatch(/Ursell/);
+  });
+});
+
+describe('solitary wave', () => {
+  const g = 9.81;
+  it('has Boussinesq speed sqrt(g (h + H)) and a sech² crest of height H', () => {
+    const s = solveSolitary({ height: 0.6, depth: 3, gravity: g });
+    expect(s.c).toBeCloseTo(Math.sqrt(g * 3.6), 10);
+    expect(s.kappa).toBeCloseTo(Math.sqrt((3 * 0.6) / (4 * 9 * 3.6)), 10);
+    expect(solitaryEta(0, s)).toBeCloseTo(0.6, 12);
+    expect(solitaryEta(1 / s.kappa, s)).toBeCloseTo(0.6 / Math.cosh(1) ** 2, 8);
+  });
+  it('repeats at its spacing and is negligible half way between humps', () => {
+    const s = solveSolitary({ height: 0.6, depth: 3, gravity: g });
+    expect(solitaryEta(0.3 * s.spacing, s)).toBeCloseTo(solitaryEta(1.3 * s.spacing, s), 12);
+    expect(solitaryEta(0.5 * s.spacing, s) / 0.6).toBeLessThan(1e-6);
+  });
+  it('has a continuous periodic particle displacement that integrates the long-wave velocity', () => {
+    const s = solveSolitary({ height: 0.6, depth: 3, gravity: g });
+    const d = (x: number) => solitaryDisplacement(x, s, 3);
+    expect(d(0)).toBeCloseTo(0, 12);
+    expect(d(0.5 * s.spacing)).toBeCloseTo(d(-0.5 * s.spacing), 9);
+    // d(displacement)/dξ = −η / h, so ∫η dξ over a hump = 2H/κ gives a jump of −2H/(κh).
+    const x = 0.2 / s.kappa;
+    const num = (d(x + 1e-5) - d(x - 1e-5)) / 2e-5;
+    const ramp = (2 / s.spacing) * Math.tanh((s.kappa * s.spacing) / 2) * (0.6 / (3 * s.kappa));
+    expect(num).toBeCloseTo(-solitaryEta(x, s) / 3 + ramp, 6);
+  });
+  it('is close to the numerical solution of a very long periodic wave of the same height', () => {
+    // A periodic wave with L = 80 h is a solitary wave to within the tail overlap. The
+    // numerical wave has zero mean, the solitary wave sits on still water, so remove its mean.
+    const h = 2;
+    const H = 0.3;
+    const s = solveSolitary({ height: H, depth: h, gravity: g, spacing: 80 * h });
+    const T = (80 * h) / s.c;
+    const ref = fourierWave(H, T, h, g, 40, 12);
+    expect(Math.abs(ref.c - s.c) / s.c).toBeLessThan(0.02);
+    const L = (2 * Math.PI) / ref.k;
+    let mean = 0;
+    const n = 4000;
+    for (let i = 0; i < n; i++) mean += solitaryEta(((i + 0.5) / n) * L - L / 2, s) / n;
+    let worst = 0;
+    for (let i = -100; i <= 100; i++) {
+      const xi = (i / 100) * 12 * h;
+      const th = (2 * Math.PI * xi) / L;
+      worst = Math.max(worst, Math.abs(solitaryEta(xi, s) - mean - ref.eta(th)));
+    }
+    expect(worst / H).toBeLessThan(0.05);
+  });
+  it('clamps at H/h = 0.78 with a notice', () => {
+    const s = solveSolitary({ height: 3, depth: 3, gravity: g });
+    expect(s.clamped).toBe(true);
+    expect(s.heightUsed).toBeCloseTo(0.78 * 3, 9);
+    expect(s.notice).toMatch(/0\.78/);
   });
 });
