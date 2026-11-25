@@ -29,6 +29,9 @@ commits the static build into `docs/` on `main`. There is no GitHub Actions work
 | Submarine at periscope depth: neutral buoyancy, plane and ballast depth keeping (`#20`)                                  | ✅                     |
 | Ambient world: passerby naval traffic, navigation buoys, underwater scenery and atmosphere (`#43`)                       | ✅                     |
 | Underwater marine life: instanced fish schools, reef fish, tuna, rays and jellyfish, tiered budgets (`#53`)              | ✅                     |
+| Volumetric clouds anchored to the world (baked deck map, tiered march), cloud shadows on the sea                         | ✅                     |
+| Sun shafts through broken cloud and past rigging (quarter-res post pass, full tier, display toggle)                      | ✅                     |
+| Hull–water contact: wet bands with drip streaks, foam collars, bow cushions and bow-wave crests                          | ✅                     |
 | Stokes/cnoidal/focused waves, grid (SWE/Boussinesq) solvers, scripting API, L1/L2 radiation                              | ⏳ Later phases        |
 
 **Deviation from §2:** the renderer uses **WebGL 2 through Three.js**, not raw WebGPU. Every

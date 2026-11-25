@@ -248,6 +248,17 @@ function PostSettings() {
         onChange={(v) => set({ taa: v })}
         hint="Blends recent frames so glints and foam on distant water stop shimmering. Not used underwater or in the Plane view. Auto turns it on for medium quality and above, but not on phones or software rendering."
       />
+      <SelectField<BloomPreference>
+        label="Sun shafts"
+        value={display.sunShafts}
+        options={[
+          { value: 'auto', label: 'Auto (this device)' },
+          { value: 'on', label: 'On' },
+          { value: 'off', label: 'Off' },
+        ]}
+        onChange={(v) => set({ sunShafts: v })}
+        hint="Rays of sunlight streaming through gaps in the cloud and past masts and islands, strongest with broken cloud in hazy air and the sun in view. Needs bloom on. Not underwater or on the lowest graphics level. Auto follows the same rule as bloom."
+      />
       <Switch
         label="Raindrops on the lens"
         checked={display.lensDroplets}

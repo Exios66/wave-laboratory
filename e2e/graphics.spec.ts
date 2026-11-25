@@ -209,6 +209,42 @@ test.describe('temporal antialiasing', () => {
     expect(feedback).toEqual([]);
     expect(errors).toEqual([]);
   });
+
+  test('sun shafts: renders toward a low sun, no console errors', async ({ page }) => {
+    test.setTimeout(390_000);
+    const errors = trackErrors(page);
+    const feedback: string[] = [];
+    page.on('console', (msg) => {
+      if (/feedback loop/i.test(msg.text())) feedback.push(msg.text());
+    });
+    await page.addInitScript(() => {
+      localStorage.setItem('wave-lab:performance', 'medium');
+      // Late afternoon: a low sun, so the rays have something to stream from.
+      localStorage.setItem('wave-lab:ambience', JSON.stringify({ startHour: 17 }));
+      // Shafts key on the HDR sun, which needs bloom (auto leaves it off under software GL).
+      localStorage.setItem('wave-lab:display', JSON.stringify({ sunShafts: 'on', bloom: 'on' }));
+    });
+    await page.goto('/?gfx=full');
+    const running = page.getByRole('status').filter({ hasText: 'Simulation running' });
+    await expect(running).toBeAttached({ timeout: 60_000 });
+    const looksDrawn = async (where: string) => {
+      await frames(page, 3);
+      const { mean, variance } = await canvasLuma(page);
+      expect(mean, `${where}: not black`).toBeGreaterThan(8);
+      expect(variance, `${where}: not flat`).toBeGreaterThan(1);
+    };
+    const camera = (name: string) => page.getByRole('radio', { name, exact: true });
+    await camera('Bridge').click();
+    await looksDrawn('bridge');
+    // Underwater the pass stands down (the god rays own the scene depth there) and returns.
+    await camera('Underwater').click();
+    await expect(page.getByText(/^Underwater · \d+\.\d m$/)).toBeVisible({ timeout: 30_000 });
+    await looksDrawn('underwater');
+    await camera('Orbit').click();
+    await expect(page.getByText(/^Underwater · /)).toHaveCount(0, { timeout: 30_000 });
+    expect(feedback).toEqual([]);
+    expect(errors).toEqual([]);
+  });
 });
 
 test.describe('storm visuals', () => {

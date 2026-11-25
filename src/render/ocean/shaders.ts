@@ -154,7 +154,7 @@ void main() {
 `;
 
 /** Shared noise helpers. */
-const NOISE = /* glsl */ `
+export const NOISE = /* glsl */ `
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -186,6 +186,12 @@ uniform float uSunHdr;
 uniform float uSkyTime;
 uniform vec2 uCloudDrift;
 uniform float uCloudOctaves;
+// Volumetric deck (sky/clouds.ts): march steps (0 = the flat deck) and base, top [km].
+uniform float uCloudSteps;
+uniform vec2 uCloudDeck;
+// Baked coverage noise (sky/cloudMap.ts): centre [km, drifting frame] and width [km].
+uniform sampler2D uCloudMapTex;
+uniform vec3 uCloudMap;
 // Day:night (scenery/lighting.ts). All 0 = plain daytime.
 uniform float uNight;
 uniform float uDusk;
@@ -240,21 +246,46 @@ vec3 horizonColorDir(vec3 nd, vec3 sun) {
   float clearPart = (1.0 - overcastAmount()) * (1.0 - uNight);
   return horizonColor() + (clearSky(vec3(nd.x, 0.0, nd.z), sun) - uSkyHorizon) * clearPart;
 }
-float cloudDensity(vec3 dir) {
-  if (dir.y <= 0.0 || uCloud < 0.02) return 0.0;
-  vec2 p = dir.xz / max(dir.y, 0.03) * 1.5 + uCloudDrift;
+// Coverage of the deck 0–1 at a point on it [km, world-anchored, drifting with the wind].
+float deckCoverage(vec2 pKm, float octaves) {
+  vec2 q = (pKm + uCloudDrift) * 0.35;
   float f = 0.0;
   float amp = 0.5;
-  vec2 q = p * 0.35;
   for (int i = 0; i < 6; i++) {
-    if (float(i) >= uCloudOctaves) break;
+    if (float(i) >= octaves) break;
     f += amp * vnoise(q);
     q = q * 2.03 + vec2(17.1, 3.7);
     amp *= 0.5;
   }
   float cover = uCloud;
-  float d = smoothstep(1.0 - cover - 0.08, 1.0 - cover + 0.32, f + 0.12 * cover);
-  return d * smoothstep(0.0, 0.12, dir.y);
+  return smoothstep(1.0 - cover - 0.08, 1.0 - cover + 0.32, f + 0.12 * cover);
+}
+// The same coverage read from the baked map (one fetch); outside it, a cheap procedural stand-in.
+float deckCoverageMap(vec2 pKm) {
+  vec2 uv = (pKm + uCloudDrift - uCloudMap.xy) / uCloudMap.z + 0.5;
+  if (uv.x <= 0.0 || uv.y <= 0.0 || uv.x >= 1.0 || uv.y >= 1.0) return deckCoverage(pKm, 3.0);
+  float f = texture2D(uCloudMapTex, uv).r;
+  float cover = uCloud;
+  return smoothstep(1.0 - cover - 0.08, 1.0 - cover + 0.32, f + 0.12 * cover);
+}
+// Where cloud rays start (world, metres) when gCloudOriginSet > 0.5; otherwise the camera. The
+// water sets it to its own surface point so reflected clouds are the world-anchored deck.
+vec3 gCloudOrigin = vec3(0.0);
+float gCloudOriginSet = 0.0;
+vec3 cloudEyeKm() {
+  return (gCloudOriginSet > 0.5 ? gCloudOrigin : cameraPosition) * 1.0e-3;
+}
+// Opacity of the cloud the last skyColorSteps call composited (the dome masks its stars with it).
+float gSkyCloudA = 0.0;
+// Flat estimate: the coverage where the ray meets the middle of the deck.
+float cloudDensity(vec3 dir) {
+  if (uCloud < 0.02) return 0.0;
+  vec3 eye = cloudEyeKm();
+  float mid = 0.5 * (uCloudDeck.x + uCloudDeck.y);
+  float rise = mid - eye.y;
+  if (dir.y * rise <= 0.0) return 0.0;
+  vec2 p = eye.xz + dir.xz / max(abs(dir.y), 0.03) * abs(rise);
+  return deckCoverage(p, uCloudOctaves) * smoothstep(0.0, 0.12, abs(dir.y));
 }
 vec3 zenithColor() {
   vec3 zenith = mix(uSkyZenith, overcastBase() * 1.6 * daylight(), overcastAmount());
@@ -267,8 +298,102 @@ vec3 cloudColor(vec3 nd, vec3 sun, float d) {
   cloudCol *= lit * daylight();
   return cloudCol + vec3(0.8, 0.85, 1.0) * uFlash * (0.6 + 0.8 * d) * (1.0 + 0.5 * (uSunHdr - 1.0));
 }
+// Volumetric deck (mirrors sky/clouds.ts). Density 0–1 at a point [km]: the coverage sets how
+// high the column towers, over a flat base. 'oct' trades detail for cost (light samples use 2).
+float deckDensity(vec3 pKm, float detail) {
+  float hf = (pKm.y - uCloudDeck.x) / max(uCloudDeck.y - uCloudDeck.x, 1.0e-3);
+  if (hf <= 0.0 || hf >= 1.0) return 0.0;
+  float cov = deckCoverageMap(pKm.xz);
+  if (cov <= 0.001) return 0.0;
+  float colH = 0.15 + 0.85 * cov;
+  // Wisps on the flanks, near the eye only (one noise lookup).
+  float wisp = detail > 0.5 ? 0.75 + 0.5 * vnoise(pKm.xz * 3.7 + vec2(hf * 2.3, -hf * 1.7)) : 1.0;
+  return cov * smoothstep(0.0, 0.08, hf) * (1.0 - smoothstep(colH - 0.25, colH, hf * wisp));
+}
+float hgPhase(float c, float g) {
+  float g2 = g * g;
+  return (1.0 - g2) / (12.566371 * pow(max(1.0 + g2 - 2.0 * g * c, 1.0e-6), 1.5));
+}
+float cloudPhase(float c) {
+  return 0.7 * hgPhase(c, 0.6) + 0.3 * hgPhase(c, -0.25);
+}
+float powderSun(float tau) {
+  return exp(-tau) - 0.5 * exp(-3.0 * tau);
+}
+const float CLOUD_SIGMA = 14.0; // extinction at full density [1/km]
+const float CLOUD_PATH_CAP = 8.0; // CLOUD_PATH_CAP_KM
+// Radiance of the deck along dir (premultiplied) and its opacity. steps ≥ 1.
+vec4 cloudMarch(vec3 dir, vec3 sun, float steps) {
+  if (uCloud < 0.02) return vec4(0.0);
+  vec3 eye = cloudEyeKm();
+  float base = uCloudDeck.x;
+  float top = uCloudDeck.y;
+  float t0;
+  float t1;
+  bool inside = eye.y >= base && eye.y <= top;
+  if (abs(dir.y) < 1.0e-4) {
+    if (!inside) return vec4(0.0);
+    t0 = 0.0;
+    t1 = CLOUD_PATH_CAP;
+  } else {
+    float ta = (base - eye.y) / dir.y;
+    float tb = (top - eye.y) / dir.y;
+    t0 = max(0.0, min(ta, tb));
+    t1 = max(ta, tb);
+    if (t1 <= 0.0) return vec4(0.0);
+    t1 = min(t1, t0 + CLOUD_PATH_CAP);
+  }
+  float dt = (t1 - t0) / steps;
+  // Per-pixel offset along the ray (temporal AA smooths it).
+  // Interleaved gradient noise (Jimenez 2014): finer and more even than white noise.
+  float jit = steps > 1.5 ? fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) : 0.5;
+  float mu = dot(dir, sun);
+  float phase = min(cloudPhase(mu) * 12.566371, 4.0);
+  float sunUp = smoothstep(-0.05, 0.05, sun.y);
+  // A deep deck shades its own lower layers: less direct light gets in under heavy overcast.
+  vec3 sunC = vec3(1.0, 0.97, 0.92) * uSunTint * daylight() * 2.4 * sunUp
+    * (1.0 - 0.7 * smoothstep(0.7, 1.0, uCloud));
+  vec3 amb = (0.45 * horizonColor() + 0.55 * zenithColor()) * 1.15;
+  vec3 moonC = srgbToLinear(vec3(0.75, 0.82, 0.95)) * 0.12 * uNight * smoothstep(-0.04, 0.05, uMoonDir.y);
+  float detail = t0 < 6.0 ? 1.0 : 0.0;
+  vec3 col = vec3(0.0);
+  float T = 1.0;
+  for (int i = 0; i < 12; i++) {
+    if (float(i) >= steps || T < 0.02) break;
+    float t = t0 + (float(i) + jit) * dt;
+    vec3 p = eye + dir * t;
+    float d = deckDensity(p, detail);
+    if (d <= 0.001) continue;
+    float hf = (p.y - base) / max(top - base, 1.0e-3);
+    float tauL = CLOUD_SIGMA * (deckDensity(p + sun * 0.1, 0.0) * 0.2 + deckDensity(p + sun * 0.4, 0.0) * 0.4);
+    vec3 light = sunC * powderSun(tauL) * phase + amb * mix(0.35, 1.0, hf)
+      + moonC * powderSun(tauL);
+    float a = 1.0 - exp(-d * CLOUD_SIGMA * dt);
+    col += T * a * light;
+    T *= 1.0 - a;
+  }
+  float alpha = 1.0 - T;
+  col += vec3(0.8, 0.85, 1.0) * uFlash * alpha * 0.9;
+  // Distant cloud melts into the horizon haze; grazing rays below the deck fade out.
+  float far = smoothstep(4.0, 25.0, t0);
+  col = mix(col, horizonColor() * alpha, far * 0.75);
+  float fade = inside ? 1.0 : smoothstep(0.0, 0.1, abs(dir.y));
+  return vec4(col, alpha) * fade;
+}
+// The legacy flat deck, as premultiplied colour and opacity (low quality).
+vec4 cloudFlat(vec3 dir, vec3 sun) {
+  float d = cloudDensity(dir);
+  return vec4(cloudColor(normalize(dir), sun, d), 1.0) * d * 0.92;
+}
+vec4 cloudLayer(vec3 dir, vec3 sun, float steps) {
+  return steps > 0.5 ? cloudMarch(normalize(dir), sun, steps) : cloudFlat(dir, sun);
+}
 // discs = 0 leaves out the sun and moon discs (the water draws their glitter itself).
+vec3 skyColorSteps(vec3 dir, vec3 sun, float discs, float steps);
 vec3 skyColorExt(vec3 dir, vec3 sun, float discs) {
+  return skyColorSteps(dir, sun, discs, uCloudSteps);
+}
+vec3 skyColorSteps(vec3 dir, vec3 sun, float discs, float steps) {
   vec3 horizon = horizonColor();
   vec3 zenith = zenithColor();
   vec3 below = horizon * 0.8;
@@ -282,21 +407,23 @@ vec3 skyColorExt(vec3 dir, vec3 sun, float discs) {
   vec3 lut = clearSky(nd, sun);
   col += (lut - mix(uSkyHorizon, uSkyZenith, dir.y >= 0.0 ? up : 0.0)) * clearPart
     * (dir.y >= 0.0 ? 1.0 : 1.0 - clamp(-dir.y * 4.0, 0.0, 1.0));
+  vec4 cloud = cloudLayer(dir, sun, steps);
+  float cloudA = clamp(cloud.a, 0.0, 1.0);
+  gSkyCloudA = cloudA;
   if (uNight > 0.001) {
     float md = max(dot(nd, uMoonDir), 0.0);
-    float moonUp = smoothstep(-0.04, 0.02, uMoonDir.y) * uNight * (1.0 - cloudDensity(dir)) * (1.0 - 0.8 * overcastAmount());
+    float moonUp = smoothstep(-0.04, 0.02, uMoonDir.y) * uNight * (1.0 - cloudA) * (1.0 - 0.8 * overcastAmount());
     col += srgbToLinear(vec3(0.85, 0.90, 1.0)) * (smoothstep(0.99965, 0.99985, md) * 0.9 * discs + pow(md, 60.0) * 0.06) * moonUp;
   }
-  float d = cloudDensity(dir);
   float clearSun = 1.0 - smoothstep(0.55, 0.95, uCloud);
   float sunGate = 1.0 - uNight * (1.0 - smoothstep(-0.06, 0.0, sun.y));
-  float sunDisc = pow(max(dot(nd, sun), 0.0), 1400.0) * (1.0 - d) * clearSun * sunGate * discs;
+  float sunDisc = pow(max(dot(nd, sun), 0.0), 1400.0) * (1.0 - cloudA) * clearSun * sunGate * discs;
   // The clear-sky glow round the sun is in the table; thin cloud keeps a diffuse aureole.
   float glow = pow(max(dot(nd, sun), 0.0), 8.0) * overcastAmount() * (1.0 - 0.7 * uCloud);
   vec3 glowCol = mix(srgbToLinear(vec3(1.0, 0.85, 0.65)), srgbToLinear(vec3(1.0, 0.55, 0.25)), uDusk);
   col += srgbToLinear(vec3(1.0, 0.96, 0.88)) * uSunTint * sunDisc * 1.6 * uSunHdr;
   col += glowCol * glow * (0.28 + 0.35 * uDusk) * daylight() * (1.0 - uNight * (1.0 - smoothstep(-0.2, 0.0, sun.y)));
-  col = mix(col, cloudColor(nd, sun, d), d * 0.92);
+  col = col * (1.0 - cloudA) + cloud.rgb;
   col += vec3(0.6, 0.65, 0.85) * uFlash * 0.25;
   return col;
 }
@@ -320,6 +447,25 @@ vec3 skyBlurred(vec3 dir, vec3 sun) {
 // Mean radiance of the sky dome (ambient light on foam and into the water).
 vec3 skyAmbient() {
   return 0.45 * horizonColor() + 0.55 * zenithColor();
+}
+`;
+
+/** Bakes the deck's raw coverage noise into the cloud map (sky/cloudMap.ts). */
+export const CLOUD_MAP_FRAG = /* glsl */ `
+uniform vec3 uOrigin;
+varying vec2 vUv;
+${NOISE}
+void main() {
+  vec2 w = uOrigin.xy + (vUv - 0.5) * uOrigin.z;
+  vec2 q = w * 0.35;
+  float f = 0.0;
+  float amp = 0.5;
+  for (int i = 0; i < 6; i++) {
+    f += amp * vnoise(q);
+    q = q * 2.03 + vec2(17.1, 3.7);
+    amp *= 0.5;
+  }
+  gl_FragColor = vec4(f, f, f, 1.0);
 }
 `;
 
@@ -367,8 +513,12 @@ void main() {
 }
 `;
 
-export const OCEAN_VERT = /* glsl */ `
-attribute float aCell;
+/**
+ * The sea's surface displacement at a point of the water frame: the cascades and the regular
+ * (Stokes) waves. Shared by the ocean mesh and by the hull-wetting hook, which finds the
+ * waterline with it (the render side has no CPU ocean; these textures are the drawn sea).
+ */
+export const OCEAN_DISPLACEMENT_GLSL = /* glsl */ `
 uniform sampler2D uC0;
 uniform sampler2D uC1;
 uniform sampler2D uC2;
@@ -382,17 +532,9 @@ uniform float uN;
 uniform float uTime;
 uniform float uLambda;
 uniform float uHasMips;
-uniform float uMeshScale;
-uniform vec2 uDrift;
 uniform vec4 uRegA[48];
 uniform vec4 uRegB[48];
 uniform float uRegularCount;
-varying vec3 vThreePos;
-varying vec2 vLabel;
-varying float vEta;
-varying vec4 vRegSlope;
-varying float vCell;
-
 // Displacement of one cascade, low-passed to the local vertex spacing h: the mip level whose
 // texels are about as large as the mesh cells (or a fade when mips are unavailable).
 vec3 cascadeSample(sampler2D tex, float size, vec2 worldXY, float h) {
@@ -433,6 +575,28 @@ vec3 regularSample(vec2 worldXY, float h, out vec4 slope) {
   return d;
 }
 
+/** Total displacement (x, y, z-up) at a water-frame point; h is the local mesh spacing [m]. */
+vec3 seaDisplacement(vec2 waterXY, float h, out vec4 regSlope) {
+  vec3 d = regularSample(waterXY, h, regSlope);
+  if (uCount > 0.5) d += cascadeSample(uC0, uSize0, waterXY, h);
+  if (uCount > 1.5) d += cascadeSample(uC1, uSize1, waterXY, h);
+  if (uCount > 2.5) d += cascadeSample(uC2, uSize2, waterXY, h);
+  if (uCount > 3.5) d += cascadeSample(uC3, uSize3, waterXY, h);
+  return d;
+}
+`;
+
+export const OCEAN_VERT = /* glsl */ `
+attribute float aCell;
+uniform float uMeshScale;
+uniform vec2 uDrift;
+varying vec3 vThreePos;
+varying vec2 vLabel;
+varying float vEta;
+varying vec4 vRegSlope;
+varying float vCell;
+${OCEAN_DISPLACEMENT_GLSL}
+
 void main() {
   vec3 base = (modelMatrix * vec4(position, 1.0)).xyz;
   vec2 worldXY = vec2(base.x, -base.z);
@@ -441,11 +605,7 @@ void main() {
   vec2 waterXY = worldXY - uDrift;
   float h = max(aCell * uMeshScale, 0.02);
   vec4 regSlope;
-  vec3 d = regularSample(waterXY, h, regSlope);
-  if (uCount > 0.5) d += cascadeSample(uC0, uSize0, waterXY, h);
-  if (uCount > 1.5) d += cascadeSample(uC1, uSize1, waterXY, h);
-  if (uCount > 2.5) d += cascadeSample(uC2, uSize2, waterXY, h);
-  if (uCount > 3.5) d += cascadeSample(uC3, uSize3, waterXY, h);
+  vec3 d = seaDisplacement(waterXY, h, regSlope);
   vec3 p = vec3(worldXY.x + d.x, d.z, -(worldXY.y + d.y));
   vThreePos = p;
   vLabel = waterXY;
@@ -556,6 +716,54 @@ vec4 slopeSample(sampler2D tex, float size, vec2 p) {
   return s;
 }
 
+// Half-width of a hull of length L and beam B at s aft of the stem; mirrors hullHalfWidth() in
+// scene/wakes.ts.
+float hullHalfWidth(float s, float L, float B) {
+  return 0.5 * B * pow(smoothstep(0.0, 0.3 * L, s), 0.6) * (1.0 - 0.25 * smoothstep(0.8 * L, L, s));
+}
+
+// Where the hull meets the water (see ship.z = contact): a foam collar hugging the live hull
+// (segment 0-1 of the track), a cushion of white water ahead of the stem and a bow-wave crest
+// along the forward flanks, all growing with Froude number and sea state. p is the water-frame
+// label, so the breakup rides with the water while the hull moves through it. Mirrors
+// collarWidth() in scene/wakes.ts.
+float hullContactFoam(vec2 p, int i, float L, float B, float contact) {
+  vec4 h0 = texelFetch(uWakeTex, ivec2(0, 2 * i), 0);
+  vec4 h1 = texelFetch(uWakeTex, ivec2(1, 2 * i), 0);
+  float u = texelFetch(uWakeTex, ivec2(0, 2 * i + 1), 0).x;
+  vec2 hd = h1.xy - h0.xy;
+  float hl = max(length(hd), 1.0);
+  vec2 hdir = hd / hl;
+  vec2 rel = p - h0.xy;
+  float s = dot(rel, hdir);
+  float lat = abs(rel.x * hdir.y - rel.y * hdir.x);
+  float fn = u / sqrt(9.81 * hl);
+  float go = smoothstep(0.4, 3.0, u);
+  float hw = hullHalfWidth(s, hl, B);
+  float noise = vnoise(p * 0.9 + vec2(uTime * 0.12, -uTime * 0.07));
+  float breakup = smoothstep(0.35, 0.75, noise);
+
+  // Collar along the hull, from just ahead of the stem to just past the transom.
+  float w = 0.35 + 0.04 * B + 0.12 * u + 0.2 * uHs;
+  float along = smoothstep(-0.03 * hl, 0.0, s) * (1.0 - smoothstep(hl, 1.02 * hl, s));
+  float band = (1.0 - smoothstep(0.0, w, lat - hw)) * smoothstep(hw - 0.4, hw - 0.1, lat);
+  float collar = band * along * breakup
+    * (0.3 + 0.35 * go + 0.25 * min(uHs / 3.0, 1.0));
+
+  // Cushion ahead of the stem, only once the hull pushes water (Froude number).
+  float r = 0.4 * B * (0.4 + fn);
+  float cushion = (1.0 - smoothstep(0.5 * r, r, length(p - (h0.xy - hdir * 0.2 * r))))
+    * smoothstep(0.05, 0.15, fn) * (0.4 + 0.6 * breakup);
+
+  // Bow-wave crest: a band riding a little outside the forward flanks.
+  float crestLat = hw + 0.15 * B * fn;
+  float crest = (1.0 - smoothstep(0.0, 0.1 * B + 0.3, abs(lat - crestLat)))
+    * smoothstep(-0.03 * hl, 0.0, s) * (1.0 - smoothstep(0.15 * hl, 0.25 * hl, s))
+    * smoothstep(0.08, 0.3, fn) * (0.5 + 0.5 * breakup);
+
+  return clamp(max(collar, max(0.7 * cushion, 0.85 * crest)) * contact, 0.0, 1.0);
+}
+
 // Ship wakes along each hull's recorded track (see render/scene/wakes.ts). Row 2i of uWakeTex
 // holds (x, y, time laid, odometer) in the water frame, bow first; row 2i + 1 the speed then.
 // p is the water-frame label, so the foam rides the orbital motion and drifts with the current.
@@ -571,6 +779,7 @@ float wakeFoam(vec2 p, float foot) {
     vec4 info = uWakeInfo[i];
     float L = max(ship.x, 2.0);
     float B = max(ship.y, 1.0);
+    float hullFoam = ship.z > 0.01 ? hullContactFoam(p, i, L, B, ship.z) : 0.0;
     // Nearest point on the track polyline.
     float best = 1e20;
     float age = 0.0;
@@ -606,7 +815,10 @@ float wakeFoam(vec2 p, float foot) {
       a = b;
       ua = ub;
     }
-    if (outside) continue;
+    if (outside) {
+      foam = max(foam, hullFoam);
+      continue;
+    }
     float lat = sqrt(best);
     float tau = info.z;
     float life = 1.0 - smoothstep(0.6, 1.0, age / info.w);
@@ -652,7 +864,7 @@ float wakeFoam(vec2 p, float foot) {
       arm = (1.0 - smoothstep(0.3 * wa, wa, off)) * cusps * mix(0.6, broken, fine)
         * smoothstep(0.12, 0.3, fn) * exp(-s / (1.3 * L)) * exp(-age / tau) * 0.45;
     }
-    foam = max(foam, c + arm);
+    foam = max(foam, max(c + arm, hullFoam));
   }
   return foam;
 }
@@ -717,7 +929,11 @@ vec3 underwaterSurface(vec3 V, vec3 N, float foam) {
     // Schlick on the transmitted side: reflectance climbs to 1 at the edge of the window.
     float r0 = pow((UNDERWATER_INDEX - 1.0) / (UNDERWATER_INDEX + 1.0), 2.0);
     float refl = r0 + (1.0 - r0) * pow(1.0 - cosT, 5.0);
-    col = mix(skyColor(normalize(T), uSunDir), uUwScatter, refl);
+    // One cloud sample is enough through the rippled window (a full march per fragment is not).
+    gCloudOrigin = vThreePos;
+    gCloudOriginSet = 1.0;
+    col = mix(skyColorSteps(normalize(T), uSunDir, 1.0, min(uCloudSteps, 1.0)), uUwScatter, refl);
+    gCloudOriginSet = 0.0;
   }
   return mix(col, uUwScatter * 0.35, foam * 0.85);
 }
@@ -757,6 +973,20 @@ float softCap(float x, float cap) {
 uniform sampler2DShadow uShadowMap;
 uniform mat4 uShadowMatrix;
 uniform vec4 uShadowParams; // (on, bias, texel size in shadow-map uv, 1 = cast by the moon)
+// Direct sunlight left at a water point p [m] under the volumetric deck: the coverage where the
+// ray toward the sun meets the middle of the deck, so shadows drift with the clouds the sky shows.
+// A deep overcast deck dims everywhere on top (as cloudDim does for the flat deck).
+float cloudShadow(vec3 p, vec3 L) {
+  float overcast = 1.0 - 0.85 * smoothstep(0.75, 1.0, uCloud);
+  if (uCloud < 0.02) return 1.0;
+  float mid = 0.5 * (uCloudDeck.x + uCloudDeck.y);
+  vec3 q = p * 1.0e-3;
+  vec2 hit = q.xz + L.xz / max(L.y, 0.05) * (mid - q.y);
+  float d = deckCoverageMap(hit);
+  // Grazing sun: the shadow field is smeared far out; fall back toward the mean.
+  d = mix(uCloud * 0.8, d, smoothstep(0.05, 0.2, L.y));
+  return mix(1.0, 0.22, d) * overcast;
+}
 float oceanShadow(vec3 p) {
   if (uShadowParams.x < 0.5) return 1.0;
   vec4 c = uShadowMatrix * vec4(p, 1.0);
@@ -877,7 +1107,8 @@ void main() {
   vec3 L = uSunDir;
   float cloudDim = 1.0 - 0.85 * smoothstep(0.3, 1.0, uCloud);
   float sunElev = degrees(asin(clamp(L.y, -1.0, 1.0)));
-  float sunE = clamp(0.35 + sunElev / 28.0, 0.25, 2.6) * smoothstep(-4.0, 3.0, sunElev) * cloudDim;
+  float sunE = clamp(0.35 + sunElev / 28.0, 0.25, 2.6) * smoothstep(-4.0, 3.0, sunElev)
+    * (uCloudSteps > 0.5 ? cloudShadow(vThreePos, L) : cloudDim);
   // In a hull's shadow the light that cast it (the sun, or the moon at night) is gone and the
   // hull also hides part of the sky beside it.
   float shade = oceanShadow(vThreePos);
@@ -970,7 +1201,12 @@ void main() {
   vec3 Rs = vec3(R.x, max(R.y, 0.0), R.z);
   Rs.y += alpha * 0.6 * (1.0 - Rs.y);
   Rs = normalize(Rs);
-  vec3 skyR = skyColorExt(Rs, uSunDir, 0.0);
+  // One cloud sample for the reflection (a deliberate cost trade-off: the blurred, wave-broken
+  // reflection hides the coarser cloud, and a full march per water fragment is too dear).
+  gCloudOrigin = vThreePos;
+  gCloudOriginSet = 1.0;
+  vec3 skyR = skyColorSteps(Rs, uSunDir, 0.0, min(uCloudSteps, 1.0));
+  gCloudOriginSet = 0.0;
   skyR = mix(skyR, skyBlurred(Rs, uSunDir), smoothstep(0.08, 0.45, alpha));
   vec3 lowSea = mix(horizonColor() * 0.85, refracted, 0.55);
   vec3 reflection = mix(skyR, lowSea, smoothstep(0.0, 0.25, -R.y));
@@ -1231,7 +1467,8 @@ void main() {
   vec3 dir = normalize(vDir);
   vec3 col = skyColor(dir, uSunDir);
   if (uStars > 0.001 && dir.y > 0.0) {
-    float seen = uStars * (1.0 - cloudDensity(dir)) * (1.0 - overcastAmount());
+    // The cloud the sky just drew (the march from inside a deck sees what the flat estimate misses).
+    float seen = uStars * (1.0 - max(cloudDensity(dir), gSkyCloudA)) * (1.0 - overcastAmount());
     // Extinction: everything dims and reddens toward the horizon.
     float alt = smoothstep(0.0, 0.25, dir.y);
     seen *= mix(0.15, 1.0, alt);

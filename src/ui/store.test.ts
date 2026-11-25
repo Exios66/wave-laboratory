@@ -95,6 +95,7 @@ describe('display preferences', () => {
       vignette: false,
       taa: 'auto',
       lensDroplets: true,
+      sunShafts: 'auto',
     });
   });
 
@@ -106,6 +107,7 @@ describe('display preferences', () => {
       vignette: false,
       taa: 'auto',
       lensDroplets: true,
+      sunShafts: 'auto',
     });
     expect(JSON.parse(saved.get('wave-lab:display')!)).toEqual(lab().display);
     expect(readDisplay()).toEqual(lab().display);
@@ -120,6 +122,7 @@ describe('display preferences', () => {
       vignette: false,
       taa: 'auto',
       lensDroplets: true,
+      sunShafts: 'auto',
     });
     saved.set('wave-lab:display', JSON.stringify({ bloom: 7, grain: true }));
     expect(readDisplay()).toEqual({
@@ -128,6 +131,7 @@ describe('display preferences', () => {
       vignette: false,
       taa: 'auto',
       lensDroplets: true,
+      sunShafts: 'auto',
     });
   });
 });

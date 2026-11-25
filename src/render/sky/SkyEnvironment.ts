@@ -24,7 +24,12 @@ export interface SkyEnvironmentKey {
   level: number;
   /** Cloud deck drift [km]; omit for a sky without moving clouds. */
   cloudDrift?: THREE.Vector2;
+  /** Camera position [m]: the cloud deck is anchored to the world, so the cube is drawn from here. */
+  eye?: THREE.Vector3;
 }
+
+/** Camera travel [m] that counts as a changed sky (the deck is world-anchored). */
+const EYE_STEP = 400;
 
 export class SkyEnvironment {
   private readonly scene = new THREE.Scene();
@@ -40,6 +45,7 @@ export class SkyEnvironment {
     dusk: -1,
     level: -1,
     drift: new THREE.Vector2(),
+    eye: new THREE.Vector3(),
   };
   private sinceLast = Infinity;
 
@@ -74,7 +80,8 @@ export class SkyEnvironment {
       Math.abs(key.night - l.night) > 0.02 ||
       Math.abs(key.dusk - l.dusk) > 0.02 ||
       Math.abs(key.level - l.level) > 0.02 ||
-      (key.cloud > 0.02 && !!key.cloudDrift && key.cloudDrift.distanceTo(l.drift) > DRIFT_STEP);
+      (key.cloud > 0.02 && !!key.cloudDrift && key.cloudDrift.distanceTo(l.drift) > DRIFT_STEP) ||
+      (key.cloud > 0.02 && !!key.eye && key.eye.distanceTo(l.eye) > EYE_STEP);
     if (!changed || (this.sinceLast < MIN_INTERVAL && this.envTarget)) return false;
     l.sun.copy(key.sunDir);
     l.cloud = key.cloud;
@@ -82,6 +89,11 @@ export class SkyEnvironment {
     l.dusk = key.dusk;
     l.level = key.level;
     if (key.cloudDrift) l.drift.copy(key.cloudDrift);
+    if (key.eye) {
+      l.eye.copy(key.eye);
+      this.cubeCamera.position.copy(key.eye);
+      this.dome.position.copy(key.eye);
+    }
     this.sinceLast = 0;
     this.draw();
     return true;

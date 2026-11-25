@@ -96,6 +96,7 @@ describe('resolvePostSettings', () => {
       vignette: true,
       taa: 'off' as const,
       lensDroplets: false,
+      sunShafts: 'off' as const,
     };
     expect(resolvePostSettings(on, 'low', desktop)).toEqual({
       bloom: false,
@@ -103,6 +104,7 @@ describe('resolvePostSettings', () => {
       vignette: true,
       taa: false,
       lens: false,
+      shafts: false,
     });
   });
   it('turns temporal antialiasing on in auto exactly where bloom is', () => {
@@ -123,6 +125,32 @@ describe('resolvePostSettings', () => {
   });
 });
 
+describe('sun shafts', () => {
+  const desktop = { software: false, mobile: false };
+  it('turn on in auto exactly where bloom does, and follow an explicit choice', () => {
+    expect(resolvePostSettings(DEFAULT_DISPLAY, 'high', desktop).shafts).toBe(true);
+    expect(resolvePostSettings(DEFAULT_DISPLAY, 'low', desktop).shafts).toBe(false);
+    expect(
+      resolvePostSettings(DEFAULT_DISPLAY, 'high', { software: true, mobile: false }).shafts,
+    ).toBe(false);
+    const slow = { software: true, mobile: true };
+    expect(resolvePostSettings({ ...DEFAULT_DISPLAY, sunShafts: 'on' }, 'low', slow).shafts).toBe(
+      true,
+    );
+    expect(
+      resolvePostSettings({ ...DEFAULT_DISPLAY, sunShafts: 'off' }, 'ultra', desktop).shafts,
+    ).toBe(false);
+  });
+  it('read settings saved before they existed as auto', () => {
+    expect(sanitizeDisplay({}).sunShafts).toBe('auto');
+    expect(sanitizeDisplay({ bloom: 'on', taa: 'off', lensDroplets: false }).sunShafts).toBe(
+      'auto',
+    );
+    expect(sanitizeDisplay({ sunShafts: 'bright' }).sunShafts).toBe('auto');
+    expect(sanitizeDisplay({ sunShafts: 'off' }).sunShafts).toBe('off');
+  });
+});
+
 describe('sanitizeDisplay', () => {
   it('falls back to defaults for missing or invalid input', () => {
     expect(sanitizeDisplay(null)).toEqual(DEFAULT_DISPLAY);
@@ -137,6 +165,7 @@ describe('sanitizeDisplay', () => {
         vignette: true,
         taa: 'off',
         lensDroplets: false,
+        sunShafts: 'on',
       }),
     ).toEqual({
       bloom: 'off',
@@ -144,6 +173,7 @@ describe('sanitizeDisplay', () => {
       vignette: true,
       taa: 'off',
       lensDroplets: false,
+      sunShafts: 'on',
     });
   });
   it('reads settings saved before temporal antialiasing existed as auto', () => {
