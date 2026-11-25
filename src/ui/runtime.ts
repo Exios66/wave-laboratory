@@ -70,11 +70,13 @@ export class LabRuntime {
     this.client.on('loaded', (msg) => {
       const defs = Object.fromEntries(msg.vessels.map((v) => [v.id, v.definition]));
       useLab.getState().simLoaded(defs, msg.diagnostics);
+      useLab.getState().setOceanHs(msg.ocean.hs);
       this.lastLoaded = msg;
       this.pushSceneToRenderer();
     });
     this.client.on('ocean', (ocean) => {
       if (this.lastLoaded) this.lastLoaded = { ...this.lastLoaded, ocean };
+      useLab.getState().setOceanHs(ocean.hs);
       this.renderer?.setOcean(ocean);
     });
     this.client.on('frame', (frame) => {
@@ -109,6 +111,7 @@ export class LabRuntime {
         }
         if (!this.renderer) return;
         if (s.overlay !== prev.overlay) this.renderer.setOverlay(s.overlay);
+        if (s.overlayDepth !== prev.overlayDepth) this.renderer.setOverlayDepth(s.overlayDepth);
         if (s.duckMode !== prev.duckMode) this.renderer.setDuckMode(s.duckMode);
         if (s.camera !== prev.camera || s.cameraTarget !== prev.cameraTarget) {
           this.renderer.setCamera(s.camera, s.cameraTarget);
@@ -272,6 +275,7 @@ export class LabRuntime {
       this.client.setVisualQuality(attachedQuality);
     }
     this.renderer.setOverlay(s.overlay);
+    this.renderer.setOverlayDepth(s.overlayDepth);
     this.renderer.setDuckMode(s.duckMode);
     this.renderer.setCamera(s.camera, s.cameraTarget);
     this.renderer.setRideView(s.rideView);

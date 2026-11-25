@@ -14,6 +14,7 @@ import { smoothstep } from '../core/mathUtil';
 import { rotate, type Quat, type Vec3 } from '../core/vec';
 import type { GpuOceanData } from '../ocean/gpuData';
 import { currentVelocity } from '../ocean/oceanField';
+import { overlayScale } from '../ocean/overlays';
 import { waterOptics } from '../ocean/waterTypes';
 import {
   DEFAULT_WEATHER,
@@ -222,6 +223,18 @@ const BUDGET: Record<
 
 /** Width of the square the sun's shadow map covers, centred on the camera's focus [m]. */
 const SHADOW_SPAN = 260;
+
+/** Value of the ocean shader's `uOverlay` for each overlay mode. */
+const OVERLAY_CODES: Record<OverlayMode, number> = {
+  none: 0,
+  height: 1,
+  steepness: 2,
+  foam: 3,
+  jacobian: 4,
+  velocity: 5,
+  pressure: 6,
+  energy: 7,
+};
 /** Distance of the shadow camera from the focus, toward the sun [m]. */
 const SHADOW_DISTANCE = 800;
 
@@ -591,6 +604,8 @@ export class LabRenderer implements LabRendererApi {
   private readonly bufferSize = new THREE.Vector2();
   private disposed = false;
   private hs = 1;
+  private overlay: OverlayMode = 'none';
+  private overlayDepth = 0;
   /** Mean wave period Tm01 of the sea [s]; NaN for a flat sea (the swash keeps its idle pace). */
   private wavePeriod = Number.NaN;
   private hasOcean = false;
@@ -852,12 +867,14 @@ export class LabRenderer implements LabRendererApi {
   setOcean(data: GpuOceanData): void {
     this.ocean.setData(data);
     this.hs = data.hs;
+    this.applyOverlay();
     this.wavePeriod = data.meanPeriod > 0 ? data.meanPeriod : Number.NaN;
     this.hasOcean = true;
   }
 
   setEnvironment(env: Environment): void {
     this.env = env;
+    this.applyOverlay();
     this.weatherField = new WeatherField(this.weather, env);
     this.uploadGusts();
     this.ocean.setWaveParams(env.choppiness, env.depth);
@@ -1462,8 +1479,27 @@ export class LabRenderer implements LabRendererApi {
   }
 
   setOverlay(mode: OverlayMode): void {
-    const value = mode === 'height' ? 1 : mode === 'steepness' ? 2 : mode === 'foam' ? 3 : 0;
-    this.ocean.uniforms.uOverlay!.value = value;
+    this.overlay = mode;
+    this.applyOverlay();
+  }
+
+  setOverlayDepth(depth: number): void {
+    this.overlayDepth = Number.isFinite(depth) ? Math.max(0, depth) : 0;
+    this.applyOverlay();
+  }
+
+  /** Overlay mode, colour-scale ranges (they follow Hs) and the velocity maps they need. */
+  private applyOverlay(): void {
+    const mode = this.overlay;
+    const code = OVERLAY_CODES[mode];
+    this.ocean.uniforms.uOverlay!.value = code;
+    const scale = overlayScale(
+      this.hs,
+      this.env?.waterDensity ?? 1025,
+      this.env?.gravity ?? 9.80665,
+    );
+    const depth = mode === 'pressure' ? this.overlayDepth : 0;
+    this.ocean.setOverlayFields(mode === 'velocity' || mode === 'pressure', depth, scale);
   }
 
   setCamera(mode: CameraMode, targetId?: string | null): void {

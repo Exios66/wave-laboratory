@@ -32,6 +32,7 @@ commits the static build into `docs/` on `main`. There is no GitHub Actions work
 | Volumetric clouds anchored to the world (baked deck map, tiered march), cloud shadows on the sea                         | ✅                     |
 | Sun shafts through broken cloud and past rigging (quarter-res post pass, full tier, display toggle)                      | ✅                     |
 | Hull–water contact: wet bands with drip streaks, foam collars, bow cushions and bow-wave crests                          | ✅                     |
+| Scientific overlays: Jacobian breaking flag, orbital velocity, dynamic pressure at depth, energy density, with legends   | ✅                     |
 | Stokes/cnoidal/focused waves, grid (SWE/Boussinesq) solvers, scripting API, L1/L2 radiation                              | ⏳ Later phases        |
 
 **Deviation from §2:** the renderer uses **WebGL 2 through Three.js**, not raw WebGPU. Every
@@ -331,6 +332,7 @@ These are for problems where linear superposition breaks down: shoaling, refract
 ### 6.4 Scientific visualization modes (toggle overlays)
 
 - Color the surface by: η, slope, steepness, Jacobian, orbital velocity, dynamic pressure, energy density, or breaking flag.
+  Shipped: all of these as surface overlays (see ARCHITECTURE, Scientific overlays). Not done: vector glyphs, cross-section plane, hull heatmap, split screen, time-averaged energy density.
 - Vector glyphs (surface velocity, current), wave rays/crests, group envelopes.
 - Underwater cross-section plane showing orbital motion and the pressure field.
 - Hull pressure heatmap, wetted-area outline, force/moment arrows, CoG/CoB/metacenter markers, GZ curve overlay.

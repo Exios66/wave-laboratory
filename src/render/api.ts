@@ -39,7 +39,8 @@ export const DEFAULT_POST: PostSettings = {
   shafts: false,
 };
 
-export type OverlayMode = 'none' | 'height' | 'steepness' | 'foam';
+export type OverlayMode =
+  'none' | 'height' | 'steepness' | 'foam' | 'jacobian' | 'velocity' | 'pressure' | 'energy';
 /** `plane` rides one of the lost flights, circling high over the fleet. */
 /** `underwater` hangs the eye a few metres below the surface (any camera dipping below the sea also draws underwater). */
 export type CameraMode = 'orbit' | 'follow' | 'bridge' | 'top' | 'plane' | 'underwater';
@@ -145,6 +146,8 @@ export interface LabRendererApi {
    */
   setVisualTime(t: number): void;
   setOverlay(mode: OverlayMode): void;
+  /** Depth under the mean surface [m] the pressure overlay is evaluated at (default 0). */
+  setOverlayDepth(depth: number): void;
   setCamera(mode: CameraMode, targetId?: string | null): void;
   setSelection(id: string | null): void;
   /**

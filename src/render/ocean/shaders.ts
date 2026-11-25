@@ -3,6 +3,8 @@
  * `varying` for us. The FFT passes are a line-by-line port of `ifftPasses.ts`.
  */
 
+import { BREAKING_JACOBIAN } from '../../ocean/overlays';
+
 export const FFT_VERT = /* glsl */ `
 varying vec2 vUv;
 void main() {
@@ -70,6 +72,8 @@ uniform float uTime;
 uniform float uDepth;
 uniform float uLambda;
 uniform int uField;
+// Overlay fields only (uField 3): metres under the mean surface the elevation is attenuated to.
+uniform float uDepthBelow;
 
 int wrapNeg(int i, int n) {
   return i == 0 ? 0 : n - i;
@@ -112,6 +116,22 @@ void main() {
   float coth = 1.0 / tanh(kh);
   float ux = (kx / k) * coth;
   float uy = (ky / k) * coth;
+  if (uField >= 2) {
+    // Orbital-velocity overlay (mirrors evolveVelocitySpectra): dh/dt = -i w e1 + i w e2.
+    float tr = omega * (e1i - e2i);
+    float ti = omega * (e2r - e1r);
+    if (uField == 3) {
+      // w + i (h attenuated to depth d): cosh(k(h - d)) / cosh(kh), written without overflow.
+      float hd = min(uDepth, 1.0e4);
+      float dd = min(uDepthBelow, hd);
+      float att = (exp(-k * dd) + exp(-k * (2.0 * hd - dd))) / (1.0 + exp(-2.0 * k * hd));
+      gl_FragColor = vec4(tr - hi * att, ti + hr * att, 0.0, 1.0);
+    } else {
+      // Vx + i Vy: the displacement operator on dh/dt, without the choppiness factor.
+      gl_FragColor = vec4(-ux * ti - uy * tr, ux * tr - uy * ti, 0.0, 1.0);
+    }
+    return;
+  }
   float dxr = -uLambda * ux * hi;
   float dxi = uLambda * ux * hr;
   float dyr = -uLambda * uy * hi;
@@ -150,6 +170,18 @@ void main() {
   float eta = texelFetch(uHeight, p, 0).r;
   vec2 d = texelFetch(uDisp, p, 0).rg;
   gl_FragColor = vec4(eta, d.x, d.y, 1.0);
+}
+`;
+
+/** Packs the two velocity transforms into one RGBA target: (ux, uy, w, elevation at depth d). */
+export const COMBINE_VEL_FRAG = /* glsl */ `
+uniform sampler2D uHoriz;
+uniform sampler2D uVert;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec2 h = texelFetch(uHoriz, p, 0).rg;
+  vec2 v = texelFetch(uVert, p, 0).rg;
+  gl_FragColor = vec4(h.x, h.y, v.x, v.y);
 }
 `;
 
@@ -586,6 +618,64 @@ vec3 seaDisplacement(vec2 waterXY, float h, out vec4 regSlope) {
 }
 `;
 
+/**
+ * Orbital velocity and attenuated elevation of the sea at a water-frame point, for the velocity
+ * and dynamic-pressure overlays. Per-cascade textures hold (ux, uy, w, elevation at depth d), made
+ * by SPECTRUM_FRAG fields 2 and 3 only while one of those overlays is on. Regular and focused
+ * components are summed analytically (mirror: `regularOverlay` in ocean/overlays.ts).
+ * uOverlayP = (depth d under the mean surface [m], water depth [m], elevation scale [m], speed scale [m/s]).
+ */
+const OCEAN_OVERLAY_GLSL = /* glsl */ `
+uniform sampler2D uV0;
+uniform sampler2D uV1;
+uniform sampler2D uV2;
+uniform sampler2D uV3;
+uniform float uOverlay;
+uniform vec4 uOverlayP;
+
+// cosh(k(h - d)) / cosh(kh) without overflow.
+float depthAtten(float k, float d, float h) {
+  return (exp(-k * d) + exp(-k * (2.0 * h - d))) / (1.0 + exp(-2.0 * k * h));
+}
+
+vec4 cascadeVelocity(sampler2D tex, float size, vec2 worldXY, float h) {
+  float texel = size / uN;
+  float lod = max(0.0, log2(h / texel) + 0.5);
+  float w = uHasMips > 0.5 ? 1.0 : 1.0 - smoothstep(0.5, 2.0, lod);
+  return textureLod(tex, worldXY / size + (0.5 / uN), lod) * w;
+}
+
+/** (u, v, w, elevation at depth d) */
+vec4 seaOrbital(vec2 waterXY, float h) {
+  vec4 o = vec4(0.0);
+  float hd = min(uOverlayP.y, 1.0e4);
+  float d = min(uOverlayP.x, hd);
+  for (int i = 0; i < 48; i++) {
+    if (float(i) + 0.5 > uRegularCount) break;
+    vec4 a = uRegA[i];
+    vec4 b = uRegB[i];
+    float wavelength = 6.2831853 / max(a.z, 1.0e-6);
+    float amp = a.x * smoothstep(2.0 * h, 4.0 * h, wavelength);
+    float theta = a.z * dot(b.xy, waterXY) - a.y * uTime + a.w;
+    float s = sin(theta);
+    float c = cos(theta);
+    float sigma = 1.0 / max(b.z, 1.0e-3);
+    float a2 = (uLambda > 0.001 && b.w > 0.5)
+      ? min((a.z * amp * amp * 0.25) * (3.0 - sigma * sigma) / (sigma * sigma * sigma), 0.25 * amp)
+      : 0.0;
+    float uh = amp * a.y * b.z * c;
+    o.xy += uh * b.xy;
+    o.z += amp * a.y * s;
+    o.w += amp * c * depthAtten(a.z, d, hd) + a2 * cos(2.0 * theta) * depthAtten(2.0 * a.z, d, hd);
+  }
+  if (uCount > 0.5) o += cascadeVelocity(uV0, uSize0, waterXY, h);
+  if (uCount > 1.5) o += cascadeVelocity(uV1, uSize1, waterXY, h);
+  if (uCount > 2.5) o += cascadeVelocity(uV2, uSize2, waterXY, h);
+  if (uCount > 3.5) o += cascadeVelocity(uV3, uSize3, waterXY, h);
+  return o;
+}
+`;
+
 export const OCEAN_VERT = /* glsl */ `
 attribute float aCell;
 uniform float uMeshScale;
@@ -595,7 +685,9 @@ varying vec2 vLabel;
 varying float vEta;
 varying vec4 vRegSlope;
 varying float vCell;
+varying vec4 vOrbital;
 ${OCEAN_DISPLACEMENT_GLSL}
+${OCEAN_OVERLAY_GLSL}
 
 void main() {
   vec3 base = (modelMatrix * vec4(position, 1.0)).xyz;
@@ -612,6 +704,8 @@ void main() {
   vEta = d.z;
   vRegSlope = regSlope;
   vCell = h;
+  // Velocity and pressure overlays only (modes 5 and 6).
+  vOrbital = (uOverlay > 4.5 && uOverlay < 6.5) ? seaOrbital(waterXY, h) : vec4(0.0);
   gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
 }
 `;
@@ -682,6 +776,9 @@ varying vec2 vLabel;
 varying float vEta;
 varying vec4 vRegSlope;
 varying float vCell;
+varying vec4 vOrbital;
+// (depth under the mean surface [m], water depth [m], elevation scale [m], speed scale [m/s])
+uniform vec4 uOverlayP;
 
 ${SKY}
 ${FOAM_GLSL}
@@ -1338,10 +1435,49 @@ void main() {
       srgbToLinear(vec3(0.800, 0.278, 0.471)),
       srgbToLinear(vec3(0.973, 0.584, 0.251)),
       srgbToLinear(vec3(0.941, 0.976, 0.129)));
-  } else if (uOverlay > 2.5) {
+  } else if (uOverlay > 2.5 && uOverlay < 3.5) {
     // Foam overlay: the accumulated whitecap foam, or the compression without foam maps.
     float u = uFoamCascades > 0.5 ? foamAcc : clamp(1.0 - jacobian, 0.0, 1.0);
     col = mix(srgbToLinear(vec3(0.031, 0.188, 0.420)), srgbToLinear(vec3(0.969, 0.984, 1.0)), u);
+  } else if (uOverlay > 3.5 && uOverlay < 4.5) {
+    // Jacobian: 0 (folded) orange-red, 1 (undisturbed) white at the ramp's middle stop, 2 and up
+    // (stretched) blue. Diagonal black stripes flag J below the breaking threshold, so the flag
+    // does not rely on colour. The legend (src/ui/overlayLegend.ts) uses the same 0–1–2 scale.
+    col = ramp5(clamp(jacobian * 0.5, 0.0, 1.0),
+      srgbToLinear(vec3(0.698, 0.094, 0.169)),
+      srgbToLinear(vec3(0.937, 0.541, 0.384)),
+      srgbToLinear(vec3(0.969, 0.969, 0.969)),
+      srgbToLinear(vec3(0.404, 0.663, 0.812)),
+      srgbToLinear(vec3(0.129, 0.400, 0.675)));
+    float stripe = step(0.5, fract((gl_FragCoord.x + gl_FragCoord.y) / 8.0));
+    col = mix(col, vec3(0.0), stripe * (1.0 - smoothstep(${BREAKING_JACOBIAN.toFixed(2)} - 0.03, ${BREAKING_JACOBIAN.toFixed(2)}, jacobian)));
+  } else if (uOverlay > 4.5 && uOverlay < 5.5) {
+    // Orbital speed |(u, v, w)| of the surface particle, cividis ramp (colour-blind safe).
+    float u = clamp(length(vOrbital.xyz) / max(uOverlayP.w, 1.0e-3), 0.0, 1.0);
+    col = ramp5(u,
+      srgbToLinear(vec3(0.000, 0.126, 0.302)),
+      srgbToLinear(vec3(0.255, 0.302, 0.420)),
+      srgbToLinear(vec3(0.486, 0.482, 0.471)),
+      srgbToLinear(vec3(0.737, 0.682, 0.424)),
+      srgbToLinear(vec3(1.000, 0.918, 0.275)));
+  } else if (uOverlay > 5.5 && uOverlay < 6.5) {
+    // Dynamic pressure rho g eta_d at depth d: signed, diverging blue-white-orange like height.
+    float u = clamp(vOrbital.w / max(uOverlayP.z, 1.0e-3) * 0.5 + 0.5, 0.0, 1.0);
+    col = ramp5(u,
+      srgbToLinear(vec3(0.129, 0.400, 0.675)),
+      srgbToLinear(vec3(0.404, 0.663, 0.812)),
+      srgbToLinear(vec3(0.969, 0.969, 0.969)),
+      srgbToLinear(vec3(0.937, 0.541, 0.384)),
+      srgbToLinear(vec3(0.698, 0.094, 0.169)));
+  } else if (uOverlay > 6.5) {
+    // Instantaneous potential energy density 1/2 rho g eta^2, viridis ramp, 0 at the mean level.
+    float e = vEta / max(uOverlayP.z, 1.0e-3);
+    col = ramp5(clamp(e * e, 0.0, 1.0),
+      srgbToLinear(vec3(0.267, 0.005, 0.329)),
+      srgbToLinear(vec3(0.231, 0.322, 0.545)),
+      srgbToLinear(vec3(0.129, 0.569, 0.549)),
+      srgbToLinear(vec3(0.369, 0.788, 0.384)),
+      srgbToLinear(vec3(0.993, 0.906, 0.145)));
   }
 
   // From below the sea is its own medium: shade the underside and leave the fog to the

@@ -89,6 +89,30 @@
   `c·e^(−K_d·d) + inscatter·(1 − e^(−K_d·d))` from the depth texture and forces the chain on even
   with every effect off, and the scene fog and rain are switched off. Without half-float targets
   it falls back to a scalar `FogExp2` from the green-channel K_d.
+- **Scientific overlays.** `OverlayMode` adds `jacobian`, `velocity`, `pressure` and `energy`
+  to height, slope and foam (shader codes 4 to 7 of `uOverlay`). Jacobian is the fragment
+  shader's existing J = (1 + ∂Dx/∂x)(1 + ∂Dy/∂y), the same value that drives foam and normals;
+  it omits the cross term ∂Dx/∂y·∂Dy/∂x (the slope maps hold no mixed derivative), so it reads
+  high for waves oblique to the axes. J below `BREAKING_JACOBIAN` (0.30) is striped, so the flag
+  does not rely on colour. Energy is the instantaneous ½ρgη² (not a local mean).
+  Velocity and dynamic pressure need data the cascade textures do not hold, so while one of those
+  two overlays is on `GpuOcean` builds one extra RGBA target per live cascade, (ux, uy, w,
+  elevation attenuated to depth d), with `SPECTRUM_FRAG` fields 2 and 3: ∂ĥ/∂t = −iω e1 + iω e2
+  through the displacement operator (no choppiness factor), and w + i·ĥ·cosh k(h−d)/cosh kh
+  packed in one complex transform. GPU cost while on: 2 spectrum passes, 2 inverse FFTs
+  (2 log₂N + 2 passes each) and 1 combine pass per live cascade per refresh, plus
+  four vertex-stage texture reads; off, nothing is allocated or drawn. The maps are sampled in the
+  vertex shader (the fragment stage is at the 16-sampler limit) with regular and focused
+  components summed analytically in `OCEAN_OVERLAY_GLSL` (`regularSample` is untouched), so
+  velocity and pressure are per-vertex values interpolated across each mesh cell: smooth, and
+  coarser in the far LOD rings. Velocity is linear (the second-order Stokes term of regular waves
+  adds to elevation and pressure but not to u, v, w). Velocity targets exist only for live
+  cascades, created on first use.
+  `ocean/overlays.ts` is the CPU mirror, checked against `OceanField.fluid`; `evolveVelocitySpectra`
+  is checked against finite differences of `evolveSpectra`. `overlayScale(Hs)` sets every colour
+  range from the drawn sea's H_s (`GpuOceanData.hs`, kept in the store as `oceanHs` so the legend
+  reads the same value); the pressure depth is UI state (`overlayDepth`), not saved in
+  experiments, and is capped at the water depth (the legend labels the depth actually drawn).
 - **Ambient world.** Decorative scenery is a stack of `SceneryLayer`s updated once per frame with
   a read-only `SceneryFrame` (`calm`, `daylight`, `hs`, vessel positions, `underwater`,
   `waterType`, `tier`); nothing a layer does feeds back into the ocean or the hull forces.
