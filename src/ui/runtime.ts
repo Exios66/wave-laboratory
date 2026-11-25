@@ -151,21 +151,24 @@ export class LabRuntime {
     );
   }
 
-  /** The tier the settings ask for, before any adaptive step-down. */
+  /**
+   * The tier the settings ask for, capped at what the GPU can hold, before any adaptive
+   * step-down. Capping first keeps every governor step a real step below the drawn tier.
+   */
   private baseQuality() {
     const s = useLab.getState();
-    return effectiveQuality(s.experiment.quality, s.performance, detectDeviceProfile());
+    const wanted = effectiveQuality(s.experiment.quality, s.performance, detectDeviceProfile());
+    // What the GPU can hold: the worker must not build FFT data the renderer would not draw.
+    const cap = this.renderer?.maxQuality;
+    return typeof cap === 'string' ? minQuality(wanted, cap) : wanted;
   }
 
   /** The tier to draw at: only the "auto" setting may be stepped down by the governor. */
   private targetQuality() {
-    const wanted = lowerQuality(
+    return lowerQuality(
       this.baseQuality(),
       this.governor.tierEnabled ? this.governor.tierSteps : 0,
     );
-    // What the GPU can hold: the worker must not build FFT data the renderer would not draw.
-    const cap = this.renderer?.maxQuality;
-    return typeof cap === 'string' ? minQuality(wanted, cap) : wanted;
   }
 
   /** The governor changed the tier: apply it like a graphics-setting change (no sim restart). */
@@ -215,6 +218,7 @@ export class LabRuntime {
     const g = this.governor;
     g.tierEnabled = useLab.getState().performance === 'auto' && !gfxForcedFull();
     g.maxTierSteps = Math.max(0, QUALITY_ORDER.indexOf(this.baseQuality()));
+    g.tierSteps = Math.min(g.tierSteps, g.maxTierSteps);
   }
 
   private configureGovernor(): void {
@@ -259,6 +263,8 @@ export class LabRuntime {
     // Edits made while the renderer loaded skipped the store subscription; take them now.
     this.clockHours = s.timeOfDay;
     // The renderer may cap the tier (small texture limit): tell the worker the real one.
+    // The renderer's ceiling is known only now: re-derive the governor's room to step down.
+    this.configureTierGovernor();
     const attachedQuality = this.targetQuality();
     this.renderer.setQuality(attachedQuality);
     if (attachedQuality !== this.visualQuality) {

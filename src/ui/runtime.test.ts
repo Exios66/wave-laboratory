@@ -353,6 +353,18 @@ describe('LabRuntime.attach with an async renderer', () => {
     expect(quality).toMatchObject({ quality: 'low' });
   });
 
+  it('counts governor step-downs from the capped tier, not the requested one', async () => {
+    const fake = fakeRenderer();
+    const wrapped = new Proxy(fake, {
+      get: (t, k) => (k === 'maxQuality' ? 'low' : (t as never)[k]),
+    });
+    lab().setPerformance('ultra');
+    await runtime!.attach(fakeCanvas(), () => wrapped as LabRendererApi);
+    // Ultra asked, low drawn: there is no lower tier to step down to.
+    const governor = (runtime as unknown as { governor: { maxTierSteps: number } }).governor;
+    expect(governor.maxTierSteps).toBe(0);
+  });
+
   it('reports a rejected renderer import as unsupported', async () => {
     await runtime!.attach(fakeCanvas(), () => Promise.reject(new Error('chunk')));
     expect(lab().status).toBe('unsupported');
