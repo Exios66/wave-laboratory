@@ -89,6 +89,17 @@
 | GPU FFT (4 cascades, 256²) + ocean shading       | GPU            | a few ms          |
 | UI + charts (throttled to 4 Hz)                  | main           | < 2 ms            |
 
+## Performance on every device
+
+- **Tier and resolution:** `deviceProfile.ts` picks a quality tier and pixel-ratio cap from the GPU
+  string, core count, memory and touch; software renderers get the lightest settings. A dynamic
+  resolution governor lowers the render scale when frames run long and restores it slowly.
+- **Frame pacing (`framePacing.ts`):** the runtime stops simulating and drawing while the tab is hidden
+  or the canvas is scrolled off-screen (resuming without a time jump), and caps drawing at 30 fps
+  on software renderers, Save-Data connections and a low (<= 20 %) unplugged battery. The governor's
+  fps target follows the cap so a deliberate cap never reads as slowness.
+- **Context loss:** the renderer restores ocean and post resources on `webglcontextrestored`.
+
 ## Accessibility
 
 - Landmarks: header, scene navigation, main (3D view), complementary (inspector) and the

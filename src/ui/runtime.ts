@@ -17,6 +17,14 @@ import {
   graphicsBudget,
   ResolutionGovernor,
 } from './deviceProfile';
+import {
+  FramePacer,
+  frameCapFor,
+  governorTarget,
+  NO_SIGNALS,
+  shouldRun,
+  type PowerSignals,
+} from './framePacing';
 import { HealthNotifier } from './health';
 import { useLab } from './store';
 import { telemetry } from './telemetry';
@@ -35,6 +43,12 @@ export class LabRuntime {
   private readonly governor = new ResolutionGovernor();
   private readonly healthNotices = new HealthNotifier();
   private canvas: HTMLCanvasElement | null = null;
+  /** Frame cap on battery saver / save-data / software rendering; 0 = display rate. */
+  private readonly pacer = new FramePacer(0);
+  private power: PowerSignals = NO_SIGNALS;
+  private onScreen = true;
+  private intersection: IntersectionObserver | null = null;
+  private powerCleanup: (() => void) | null = null;
   private visualQuality: string | null = null;
   /** Smoothed time the picture is drawn at. Physics frames arrive in bursts; this glides. */
   private displayT = 0;
@@ -167,7 +181,9 @@ export class LabRuntime {
     const g = this.governor;
     g.maxScale = 1;
     g.minScale = budget.minScale;
-    g.targetFps = budget.targetFps;
+    this.power = { ...this.power, software: detectDeviceProfile().software };
+    this.pacer.capFps = frameCapFor(this.power);
+    g.targetFps = governorTarget(budget.targetFps, this.pacer.capFps);
     g.scale = Math.min(Math.max(g.scale, g.minScale), g.maxScale);
     useLab.getState().setRenderScale(g.scale);
   }
@@ -217,6 +233,7 @@ export class LabRuntime {
     this.resizeObserver = new ResizeObserver(() => this.resize(canvas));
     this.resizeObserver.observe(parent);
     this.resize(canvas);
+    this.watchPowerAndVisibility(canvas);
     this.lastTime = performance.now();
     const loop = (now: number) => {
       this.raf = requestAnimationFrame(loop);
@@ -231,9 +248,59 @@ export class LabRuntime {
     this.raf = 0;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.intersection?.disconnect();
+    this.intersection = null;
+    this.powerCleanup?.();
+    this.powerCleanup = null;
+    this.onScreen = true;
     this.renderer?.dispose();
     this.renderer = null;
     this.canvas = null;
+  }
+
+  /** Stop drawing off-screen, and cap the frame rate when power is short. */
+  private watchPowerAndVisibility(canvas: HTMLCanvasElement): void {
+    if (typeof IntersectionObserver !== 'undefined') {
+      this.intersection = new IntersectionObserver((entries) => {
+        const e = entries[entries.length - 1];
+        if (e) this.onScreen = e.isIntersecting;
+      });
+      this.intersection.observe(canvas);
+    }
+    const update = (patch: Partial<PowerSignals>) => {
+      this.power = { ...this.power, ...patch };
+      this.configureGovernor();
+    };
+    const conn = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+    update({ saveData: conn?.saveData === true });
+    const nav = navigator as Navigator & {
+      getBattery?: () => Promise<{
+        level: number;
+        charging: boolean;
+        addEventListener: (t: string, f: () => void) => void;
+        removeEventListener: (t: string, f: () => void) => void;
+      }>;
+    };
+    let dead = false;
+    let detachBattery = () => {};
+    nav.getBattery?.().then(
+      (b) => {
+        if (dead) return;
+        const read = () => update({ batteryLevel: b.level, charging: b.charging });
+        read();
+        b.addEventListener('levelchange', read);
+        b.addEventListener('chargingchange', read);
+        detachBattery = () => {
+          b.removeEventListener('levelchange', read);
+          b.removeEventListener('chargingchange', read);
+        };
+      },
+      () => {},
+    );
+    this.powerCleanup = () => {
+      dead = true;
+      detachBattery();
+    };
   }
 
   get rendererApi(): LabRendererApi | null {
@@ -268,6 +335,14 @@ export class LabRuntime {
   }
 
   private tick(now: number): void {
+    if (!shouldRun(document.hidden, this.onScreen)) {
+      // Nothing to see: stop the simulation and the draw, and resume without a time jump.
+      this.lastTime = now;
+      this.pacer.reset();
+      return;
+    }
+    // Capped: skip this frame; the wall time since the last one accumulates into the next.
+    if (!this.pacer.accept(now)) return;
     // Clamp long gaps (tab in background, debugger) so the simulation never jumps.
     const wall = Math.min(0.1, Math.max(0, (now - this.lastTime) / 1000));
     this.lastTime = now;
