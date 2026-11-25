@@ -62,3 +62,25 @@ export async function frames(page: Page, count: number): Promise<void> {
     count,
   );
 }
+
+/**
+ * Wait until the renderer has drawn `count` more frames, by its own render counter
+ * (`window.__waveLab.stats().frames`, available on `?gfx=full` and `?perf`). Unlike `frames()`,
+ * which counts browser animation frames and so ticks on regardless, this waits for pixels:
+ * software GL can take seconds per render, and a screenshot taken after three animation frames
+ * may still show the render from before the setting under test changed.
+ */
+export async function renders(page: Page, count: number, timeout = 120_000): Promise<void> {
+  type Hook = { __waveLab: { stats: () => { frames: number } | null } };
+  const from = await page.evaluate(
+    () => (window as unknown as Hook).__waveLab.stats()?.frames ?? 0,
+  );
+  await page.waitForFunction(
+    ([start, n]) => {
+      const stats = (window as unknown as Hook).__waveLab.stats();
+      return stats !== null && stats.frames >= (start as number) + (n as number);
+    },
+    [from, count],
+    { timeout },
+  );
+}

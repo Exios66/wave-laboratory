@@ -7,7 +7,7 @@ import { expect, test, trackErrors } from './fixtures';
  * quality is changed and changed back. A steady climb here is a leak that kills phones.
  * `?gfx=full` exposes `window.__waveLab` (src/main.tsx).
  */
-test.use({ viewport: { width: 1300, height: 650 } });
+test.use({ viewport: { width: 960, height: 540 } });
 
 interface Counts {
   geometries: number;
@@ -129,20 +129,22 @@ test('GPU object counts return to baseline after the HDR post composer is built 
     await page.keyboard.press('Escape');
     await expect(dialog).toBeHidden();
   };
-  // Turning bloom on and off again: the first round warms one-off caches (shader programs, the
-  // bloom mip chain's lazily built resources); later rounds must leave the counts where they were.
+  // Turning bloom on and off again. The first rounds warm one-off caches (measured: one extra
+  // fullscreen-pass geometry appears over the first two rounds and then stays), so they only warm
+  // up; later rounds must leave the counts where they were.
   const round = async () => {
     await bloom('on');
     const built = await settled(page);
     await bloom('off');
     return { built, freed: await settled(page) };
   };
-  await round();
+  for (let i = 0; i < 3; i++) await round();
   const base = await settled(page);
-  const again = await round();
-  // The composer really was built (render targets are textures) and really was freed.
-  expect(again.built.textures).toBeGreaterThan(base.textures);
-  expect(again.freed).toEqual(base);
-  expect((await round()).freed).toEqual(base);
+  for (let i = 0; i < 2; i++) {
+    const { built, freed } = await round();
+    // The composer really was built (its render targets are textures) and really was freed.
+    expect(built.textures).toBeGreaterThan(base.textures);
+    expect(freed).toEqual(base);
+  }
   expect(errors).toEqual([]);
 });

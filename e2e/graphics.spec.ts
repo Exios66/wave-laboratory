@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { expect, frames, test, trackErrors } from './fixtures';
+import { expect, renders, test, trackErrors } from './fixtures';
 
 async function simulationSeconds(page: Page): Promise<number> {
   const label = await page.locator('.transport__time').getAttribute('aria-label');
@@ -7,10 +7,11 @@ async function simulationSeconds(page: Page): Promise<number> {
   return m ? Number(m[1]) : 0;
 }
 
-// These tests look for compile errors and GPU self-check mismatches, not layout: a smaller
-// canvas keeps the software renderer's per-frame cost (and the run time) down. Wide enough for
-// the desktop three-column layout; toolbar buttons are found by their accessible names.
-test.use({ viewport: { width: 1300, height: 650 } });
+// These tests look for compile errors and GPU self-check mismatches, not layout: a small canvas
+// keeps the software renderer's per-frame cost (and the run time) down. Every action waits on
+// frames, and a frame costs time in proportion to the canvas (measured at high quality, 960x540:
+// 6 s a frame). Toolbar buttons are found by their accessible names.
+test.use({ viewport: { width: 960, height: 540 } });
 
 for (const quality of ['high', 'low'] as const) {
   test(`full graphics tier renders at ${quality} quality without errors`, async ({ page }) => {
@@ -147,9 +148,6 @@ async function canvasLuma(page: Page): Promise<{ mean: number; variance: number 
 }
 
 test.describe('temporal antialiasing', () => {
-  // Smaller than the file's viewport: each pixel check reads a screenshot under SwiftShader.
-  test.use({ viewport: { width: 960, height: 540 } });
-
   test('TAA: renders, survives camera cuts, no console errors', async ({ page }) => {
     test.setTimeout(390_000);
     const errors = trackErrors(page);
@@ -158,8 +156,12 @@ test.describe('temporal antialiasing', () => {
     page.on('console', (msg) => {
       if (/feedback loop/i.test(msg.text())) feedback.push(msg.text());
     });
-    await page.addInitScript(() => localStorage.setItem('wave-lab:performance', 'high'));
-    // The full tier at high quality: Auto turns temporal antialiasing on.
+    // Medium is the lowest quality at which Auto turns temporal antialiasing on, and the jitter,
+    // the history reset on camera cuts and the pass order do not depend on the tier. High costs
+    // about three times as much per frame under software GL (measured at 960x540: 6.6 s against
+    // 2.2 s), which is what made this test run out of time.
+    await page.addInitScript(() => localStorage.setItem('wave-lab:performance', 'medium'));
+    // The full tier at medium quality: Auto turns temporal antialiasing on.
     await page.goto('/?gfx=full');
     const running = page.getByRole('status').filter({ hasText: 'Simulation running' });
     await expect(running).toBeAttached({ timeout: 60_000 });
@@ -174,7 +176,7 @@ test.describe('temporal antialiasing', () => {
         )
         .toBe(on);
     const looksDrawn = async (where: string) => {
-      await frames(page, 3);
+      await renders(page, 2);
       const { mean, variance } = await canvasLuma(page);
       expect(mean, `${where}: not black`).toBeGreaterThan(8);
       expect(variance, `${where}: not flat`).toBeGreaterThan(1);
@@ -228,7 +230,7 @@ test.describe('temporal antialiasing', () => {
     const running = page.getByRole('status').filter({ hasText: 'Simulation running' });
     await expect(running).toBeAttached({ timeout: 60_000 });
     const looksDrawn = async (where: string) => {
-      await frames(page, 3);
+      await renders(page, 2);
       const { mean, variance } = await canvasLuma(page);
       expect(mean, `${where}: not black`).toBeGreaterThan(8);
       expect(variance, `${where}: not flat`).toBeGreaterThan(1);
@@ -248,14 +250,14 @@ test.describe('temporal antialiasing', () => {
 });
 
 test.describe('storm visuals', () => {
-  test.use({ viewport: { width: 960, height: 540 } });
-
   test('a storm wets the bridge camera lens and hangs rain curtains, no console errors', async ({
     page,
   }) => {
     test.setTimeout(300_000);
     const errors = trackErrors(page);
-    await page.addInitScript(() => localStorage.setItem('wave-lab:performance', 'high'));
+    // Medium is the lowest tier that draws the lens drops and rain curtains (low is 'lite'
+    // scenery); high only costs three times as much per frame under software GL.
+    await page.addInitScript(() => localStorage.setItem('wave-lab:performance', 'medium'));
     await page.goto('/?gfx=full');
     const running = page.getByRole('status').filter({ hasText: 'Simulation running' });
     await expect(running).toBeAttached({ timeout: 60_000 });
@@ -273,7 +275,7 @@ test.describe('storm visuals', () => {
     const camera = (name: string) => page.getByRole('radio', { name, exact: true });
     await camera('Bridge').click();
     await wetLens(true);
-    await frames(page, 3);
+    await renders(page, 2);
     const { mean, variance } = await canvasLuma(page);
     expect(mean, 'not black').toBeGreaterThan(8);
     expect(variance, 'not flat').toBeGreaterThan(1);
