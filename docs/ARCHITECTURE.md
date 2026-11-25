@@ -98,7 +98,28 @@
   or the canvas is scrolled off-screen (resuming without a time jump), and caps drawing at 30 fps
   on software renderers, Save-Data connections and a low (<= 20 %) unplugged battery. The governor's
   fps target follows the cap so a deliberate cap never reads as slowness.
+- **Tier governor (auto only):** when the render scale is already at its floor and frames are still
+  below ~85 % of the target for two seconds in a row, `ResolutionGovernor` steps the quality tier down
+  one level (down to `low`); it steps back up only after a long run of good frames at full scale
+  (20 s, doubling to 160 s whenever a step up is followed by a step down within 25 s, so a device
+  between two tiers settles on the lower one). An explicit Low/Medium/High/Ultra choice keeps its tier;
+  `?gfx=full` (the e2e suite) disables tier steps so runs are deterministic. The Dock fps readout's
+  tooltip shows the current adaptation.
+- **Capabilities (`render/capabilities.ts`):** `decideCapabilities` turns the GL extensions
+  (`EXT_color_buffer_float`, `EXT_color_buffer_half_float`, `OES_texture_float_linear`) and
+  `MAX_TEXTURE_SIZE` into a decision: float or half-float ocean, HDR post on/off, quality ceiling.
+  iOS Safari and older Android therefore degrade rather than fail.
 - **Context loss:** the renderer restores ocean and post resources on `webglcontextrestored`.
+- **Diagnostics:** `?gfx=full` or `?perf` exposes `window.__waveLab.stats()` (fps, draw calls,
+  geometry and texture counts) and `.governor()`; `e2e/resources.spec.ts` uses it to check that GPU
+  object counts return to baseline after adding/removing a vessel and changing quality.
+
+Measured under SwiftShader (software GL, 960x540, 20 s windows, CDP `Performance.getMetrics` and the
+V8 sampling heap profiler): JS heap flat at 13-17 MB, sampled allocation 0.1-0.3 MB per 20 s, script
+time 1-4 % of the main thread. The main thread is bound by software rasterisation (0.2-2.7 fps), not
+by JavaScript, so there are no per-frame allocation hot spots worth touching. Draw calls / geometries
+/ textures: default scene 55/57/35 (low), 121/74/79 (medium), 123/74/85 (high); three-vessel gale
+110/102/35 (low), 233/121/80 (medium).
 
 ## Accessibility
 
