@@ -1440,9 +1440,10 @@ void main() {
     float u = uFoamCascades > 0.5 ? foamAcc : clamp(1.0 - jacobian, 0.0, 1.0);
     col = mix(srgbToLinear(vec3(0.031, 0.188, 0.420)), srgbToLinear(vec3(0.969, 0.984, 1.0)), u);
   } else if (uOverlay > 3.5 && uOverlay < 4.5) {
-    // Jacobian: 0 (folded) orange-red, 1 (undisturbed) white, 1.5 and up (stretched) blue. Diagonal
-    // black stripes flag J below the breaking threshold, so the flag does not rely on colour.
-    col = ramp5(clamp(jacobian / 1.5, 0.0, 1.0),
+    // Jacobian: 0 (folded) orange-red, 1 (undisturbed) white at the ramp's middle stop, 2 and up
+    // (stretched) blue. Diagonal black stripes flag J below the breaking threshold, so the flag
+    // does not rely on colour. The legend (src/ui/overlayLegend.ts) uses the same 0–1–2 scale.
+    col = ramp5(clamp(jacobian * 0.5, 0.0, 1.0),
       srgbToLinear(vec3(0.698, 0.094, 0.169)),
       srgbToLinear(vec3(0.937, 0.541, 0.384)),
       srgbToLinear(vec3(0.969, 0.969, 0.969)),

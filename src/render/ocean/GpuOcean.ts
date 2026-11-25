@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { FFT } from '../../ocean/fft';
 import type { GpuOceanData } from '../../ocean/gpuData';
 import { surfaceDetailTexture } from '../scene/textures';
-import { evolveSpectra } from './evolve';
+import { evolveSpectra, evolveVelocitySpectra } from './evolve';
 import { FOAM_MARGIN, FoamSim, foamShares, MAX_FOAM_CASCADES } from './foamSim';
 import { gpuVerifyWanted } from './gpuVerify';
 import {
@@ -93,7 +93,7 @@ export class GpuOcean {
    * (ux, uy, w, elevation at depth d) per cascade for the velocity and pressure overlays.
    * Allocated and refreshed only while one of those overlays is on.
    */
-  private readonly velocities: THREE.WebGLRenderTarget[] = [];
+  private readonly velocities: (THREE.WebGLRenderTarget | undefined)[] = [];
   private velocityOn = false;
   private overlayDepth = 0;
   private readonly sources: THREE.DataTexture[] = [];
@@ -106,6 +106,8 @@ export class GpuOcean {
   private lastRefresh = 0;
   private readonly live: boolean[] = [];
   private verified = false;
+  /** Whether the velocity/pressure maps were checked against the CPU since they were turned on. */
+  private velocityVerified = false;
   private fftCpu: FFT | null = null;
   private readonly foam: FoamSim;
   /** Foam maps the quality level asks for (FoamSim caps it). */
@@ -275,6 +277,7 @@ export class GpuOcean {
     this.foam.reset();
     this.dirty = true;
     this.verified = false;
+    this.velocityVerified = false;
     this.lastT = Number.NaN;
   }
 
@@ -313,10 +316,13 @@ export class GpuOcean {
     p.x = Math.max(0, depthBelow);
     p.z = scale.height;
     p.w = scale.velocity;
-    if (on !== this.velocityOn || depthBelow !== this.overlayDepth) this.dirty = true;
+    if (on !== this.velocityOn || depthBelow !== this.overlayDepth) {
+      this.dirty = true;
+      this.velocityVerified = false;
+    }
     this.velocityOn = on;
     this.overlayDepth = depthBelow;
-    if (on && this.n >= 2 && this.velocities.length === 0) this.allocateVelocities();
+    // Targets are created per live cascade on the next refresh (see refresh), not up front.
     if (!on) {
       this.disposeVelocities();
       for (let i = 0; i < MAX_CASCADES; i++) this.uniforms[`uV${i}`]!.value = this.black;
@@ -387,8 +393,9 @@ export class GpuOcean {
     }
     const u = this.uniforms;
     for (let i = 0; i < MAX_CASCADES; i++) {
-      const vel = this.velocities[i];
-      if (this.velocityOn && vel && this.live[i]) {
+      if (this.velocityOn && this.live[i] && this.n >= 2) {
+        // Only live cascades get a velocity target (each is an n² RGBA float map).
+        const vel = (this.velocities[i] ??= this.velocityTarget());
         this.synthesizeVelocity(this.sources[i]!, cascades[i]!.size, t, vel);
         u[`uV${i}`]!.value = vel.texture;
       } else {
@@ -420,6 +427,10 @@ export class GpuOcean {
     if (!this.verified) {
       if (gpuVerifyWanted()) this.verify(t);
       else this.verified = true;
+    }
+    if (this.velocityOn && !this.velocityVerified) {
+      this.velocityVerified = true;
+      if (gpuVerifyWanted()) this.verifyVelocity(t);
     }
   }
 
@@ -556,25 +567,22 @@ export class GpuOcean {
       this.slopes[i] = floatTarget(n, this.sampleFilter, THREE.RepeatWrapping, this.texType, mips);
     }
     this.foam.allocate(n);
-    if (this.velocityOn) this.allocateVelocities();
-  }
-
-  private allocateVelocities(): void {
-    this.disposeVelocities();
-    for (let i = 0; i < MAX_CASCADES; i++) {
-      this.velocities[i] = floatTarget(
-        this.n,
-        this.sampleFilter,
-        THREE.RepeatWrapping,
-        this.texType,
-        this.mipmapped,
-      );
-    }
+    // Velocity targets (if that overlay is on) are recreated at the new size on the next refresh.
     this.dirty = true;
   }
 
+  private velocityTarget(): THREE.WebGLRenderTarget {
+    return floatTarget(
+      this.n,
+      this.sampleFilter,
+      THREE.RepeatWrapping,
+      this.texType,
+      this.mipmapped,
+    );
+  }
+
   private disposeVelocities(): void {
-    for (const rt of this.velocities) rt.dispose();
+    for (const rt of this.velocities) rt?.dispose();
     this.velocities.length = 0;
   }
 
@@ -616,6 +624,61 @@ export class GpuOcean {
     if (worst > 0.02) {
       console.error(
         `GPU ocean does not match the CPU FFT (${worst.toExponential(2)} m): ${detail}`,
+      );
+    }
+  }
+
+  /**
+   * The velocity/pressure map of cascade 0 against the CPU mirror (`evolveVelocitySpectra`) at a
+   * few texels, once each time the overlay is turned on (tests and dev only, like `verify`).
+   */
+  private verifyVelocity(t: number): void {
+    if (this.texType !== THREE.FloatType) return;
+    const data = this.data;
+    const vel = this.velocities[0];
+    const cascade = data?.cascades[0];
+    if (!data || !vel || !this.live[0] || !cascade || cascade.variance < 1e-8) return;
+    if (cascade.n !== this.n) return;
+    const spectra = evolveVelocitySpectra(
+      cascade.h0,
+      this.n,
+      cascade.size,
+      t,
+      this.depth,
+      // The shader stops at the seabed.
+      Math.min(this.overlayDepth, this.depth),
+    );
+    if (!this.fftCpu || this.fftCpu.n !== this.n) this.fftCpu = new FFT(this.n);
+    this.fftCpu.inverse2D(spectra.horiz);
+    this.fftCpu.inverse2D(spectra.vert);
+    const buf = new Float32Array(4);
+    let worst = 0;
+    let detail = '';
+    for (const [ix, iy] of [
+      [1, 0],
+      [0, 1],
+      [this.n >> 2, this.n >> 3],
+      [3, 5],
+    ] as const) {
+      if (ix >= this.n || iy >= this.n) continue;
+      this.renderer.readRenderTargetPixels(vel, ix, iy, 1, 1, buf);
+      const cell = 2 * (iy * this.n + ix);
+      const cpu = [
+        spectra.horiz[cell]!,
+        spectra.horiz[cell + 1]!,
+        spectra.vert[cell]!,
+        spectra.vert[cell + 1]!,
+      ];
+      const err = Math.max(...cpu.map((c, i) => Math.abs(buf[i]! - c)));
+      if (err > worst) {
+        worst = err;
+        detail = `(${ix},${iy}) gpu=${[...buf].map((v) => v.toFixed(4)).join(',')} cpu=${cpu.map((v) => v.toFixed(4)).join(',')}`;
+      }
+    }
+    // Speeds are m/s and the attenuated elevation is m: Float32 roundoff is far below 0.02.
+    if (worst > 0.02) {
+      console.error(
+        `GPU velocity map does not match the CPU (${worst.toExponential(2)}): ${detail}`,
       );
     }
   }

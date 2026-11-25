@@ -395,10 +395,15 @@ function HudClock() {
 }
 
 function Legend({ mode }: { mode: Exclude<OverlayMode, 'none'> }) {
-  const hs = useLab((s) => s.diagnostics?.hs ?? 1);
+  // The same H_s the renderer scales the colours by, so the printed range matches the water.
+  const hs = useLab((s) => s.oceanHs);
   const rho = useLab((s) => s.experiment.environment.waterDensity);
   const g = useLab((s) => s.experiment.environment.gravity);
-  const depth = useLab((s) => s.overlayDepth);
+  const waterDepth = useLab((s) => s.experiment.environment.depth);
+  const requested = useLab((s) => s.overlayDepth);
+  // The shader stops at the seabed: label the depth actually drawn.
+  const maxDepth = Math.max(0, Math.min(200, Math.floor(waterDepth)));
+  const depth = Math.min(requested, maxDepth);
   const spec = legendSpec(mode, { hs, rho, g, depth });
   return (
     <figure className="hud__card legend" style={{ margin: 0 }}>
@@ -410,19 +415,36 @@ function Legend({ mode }: { mode: Exclude<OverlayMode, 'none'> }) {
         ))}
       </div>
       <p className="legend__note">{spec.note}</p>
-      {mode === 'pressure' && (
-        <label className="legend__depth">
-          Depth below surface (m)
-          <input
-            type="number"
-            min={0}
-            max={200}
-            step={1}
-            value={depth}
-            onChange={(e) => useLab.getState().setOverlayDepth(Number(e.target.value))}
-          />
-        </label>
-      )}
+      {mode === 'pressure' && <DepthInput depth={depth} max={maxDepth} />}
     </figure>
+  );
+}
+
+/** Pressure-overlay depth. Keeps its own text while typing, so the field can be cleared and retyped. */
+function DepthInput({ depth, max }: { depth: number; max: number }) {
+  const [text, setText] = useState(String(depth));
+  const [shown, setShown] = useState(depth);
+  if (shown !== depth) {
+    // The depth changed from outside (clamped, or a new sea): follow it.
+    setShown(depth);
+    setText(String(depth));
+  }
+  return (
+    <label className="legend__depth">
+      Depth below surface (m)
+      <input
+        type="number"
+        min={0}
+        max={max}
+        step={1}
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          const v = e.target.valueAsNumber;
+          if (Number.isFinite(v)) useLab.getState().setOverlayDepth(Math.min(v, max));
+        }}
+        onBlur={() => setText(String(depth))}
+      />
+    </label>
   );
 }

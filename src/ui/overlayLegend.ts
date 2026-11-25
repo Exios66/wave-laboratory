@@ -63,7 +63,7 @@ export function legendSpec(mode: Exclude<OverlayMode, 'none'>, input: LegendInpu
       return {
         title: 'Jacobian J of the choppy surface',
         gradient: DIVERGING_REVERSED,
-        ticks: ['0 folded', '1 undisturbed', '1.5+ stretched'],
+        ticks: ['0 folded', '1 undisturbed', '2+ stretched'],
         note: `J = (1 + ∂Dx/∂x)(1 + ∂Dy/∂y). Striped = J below ${BREAKING_JACOBIAN.toFixed(2)}: breaking onset (folding is J < 0).`,
       };
     case 'velocity':
@@ -71,7 +71,7 @@ export function legendSpec(mode: Exclude<OverlayMode, 'none'>, input: LegendInpu
         title: 'Orbital speed at the surface',
         gradient: CIVIDIS,
         ticks: ['0 m/s', `${num(sc.velocity / 2)} m/s`, `${num(sc.velocity)}+ m/s`],
-        note: `Speed |u| of the surface water particle (linear theory, finite depth). Top of the scale ω·0.75 H_s with a developed-sea period, from H_s = ${input.hs.toFixed(1)} m.`,
+        note: `Speed |u| of the surface water particle (linear theory, finite depth; no second-order Stokes term). Top of the scale ω·0.75 H_s with a developed-sea period, from H_s = ${input.hs.toFixed(1)} m.`,
       };
     case 'pressure': {
       const kpa = sc.pressure / 1000;

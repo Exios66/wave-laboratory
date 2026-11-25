@@ -101,11 +101,16 @@
   (2 log₂N + 2 passes each) and 1 combine pass per live cascade per refresh, plus
   four vertex-stage texture reads; off, nothing is allocated or drawn. The maps are sampled in the
   vertex shader (the fragment stage is at the 16-sampler limit) with regular and focused
-  components summed analytically in `OCEAN_OVERLAY_GLSL` (`regularSample` is untouched).
+  components summed analytically in `OCEAN_OVERLAY_GLSL` (`regularSample` is untouched), so
+  velocity and pressure are per-vertex values interpolated across each mesh cell: smooth, and
+  coarser in the far LOD rings. Velocity is linear (the second-order Stokes term of regular waves
+  adds to elevation and pressure but not to u, v, w). Velocity targets exist only for live
+  cascades, created on first use.
   `ocean/overlays.ts` is the CPU mirror, checked against `OceanField.fluid`; `evolveVelocitySpectra`
   is checked against finite differences of `evolveSpectra`. `overlayScale(Hs)` sets every colour
-  range (shared by the renderer and `ui/overlayLegend.ts`); the pressure depth is UI state
-  (`overlayDepth`), not saved in experiments.
+  range from the drawn sea's H_s (`GpuOceanData.hs`, kept in the store as `oceanHs` so the legend
+  reads the same value); the pressure depth is UI state (`overlayDepth`), not saved in
+  experiments, and is capped at the water depth (the legend labels the depth actually drawn).
 - **Ambient world.** Decorative scenery is a stack of `SceneryLayer`s updated once per frame with
   a read-only `SceneryFrame` (`calm`, `daylight`, `hs`, vessel positions, `underwater`,
   `waterType`, `tier`); nothing a layer does feeds back into the ocean or the hull forces.

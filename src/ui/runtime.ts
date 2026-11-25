@@ -70,11 +70,13 @@ export class LabRuntime {
     this.client.on('loaded', (msg) => {
       const defs = Object.fromEntries(msg.vessels.map((v) => [v.id, v.definition]));
       useLab.getState().simLoaded(defs, msg.diagnostics);
+      useLab.getState().setOceanHs(msg.ocean.hs);
       this.lastLoaded = msg;
       this.pushSceneToRenderer();
     });
     this.client.on('ocean', (ocean) => {
       if (this.lastLoaded) this.lastLoaded = { ...this.lastLoaded, ocean };
+      useLab.getState().setOceanHs(ocean.hs);
       this.renderer?.setOcean(ocean);
     });
     this.client.on('frame', (frame) => {
