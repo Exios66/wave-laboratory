@@ -39,6 +39,12 @@ async function expectClockContinues(
 }
 
 test.describe('Wave Laboratory app', () => {
+  // Software GL draws a frame in time proportional to the canvas, and every Playwright action
+  // waits on frames (clicks on a stable element, key and pointer input), so a 1440x900 window
+  // costs a test about three times what this does (measured: 72 s against 23 s for the Plane
+  // ride). Layout and accessibility checks that want the full-width bar set their own size.
+  test.use({ viewport: { width: 960, height: 540 } });
+
   test('boots, simulates and renders without errors', async ({ page }) => {
     const errors = trackErrors(page);
     await page.goto('/');
@@ -52,61 +58,66 @@ test.describe('Wave Laboratory app', () => {
     expect(errors).toEqual([]);
   });
 
-  test('chart shows the camera, zooms, and sends the camera exploring', async ({ page }) => {
-    const errors = trackErrors(page);
-    await page.goto('/');
-    await waitForSimulation(page);
-    const chart = page.getByRole('region', { name: 'Chart' });
-    await expect(chart).toBeVisible();
-    await expect(chart.locator('#minimap-readout')).toContainText('Hdg');
-    await expect(chart.getByText('1.0 km', { exact: true })).toBeVisible();
-    await chart.getByRole('button', { name: 'Zoom chart out' }).click();
-    await expect(chart.getByText('2.0 km', { exact: true })).toBeVisible();
+  // The chart opens by itself only in a wide 3D view, and these check the full-width bar too.
+  test.describe('at full width', () => {
+    test.use({ viewport: { width: 1440, height: 900 } });
 
-    // Clicking open water near the rim sends the orbit camera there.
-    const map = chart.locator('canvas');
-    const box = (await map.boundingBox())!;
-    await page.mouse.click(box.x + box.width * 0.85, box.y + box.height * 0.5);
-    const back = chart.getByRole('button', { name: 'Back to fleet' });
-    await expect(back).toBeVisible();
-    await back.click();
-    await expect(back).toBeHidden();
+    test('chart shows the camera, zooms, and sends the camera exploring', async ({ page }) => {
+      const errors = trackErrors(page);
+      await page.goto('/');
+      await waitForSimulation(page);
+      const chart = page.getByRole('region', { name: 'Chart' });
+      await expect(chart).toBeVisible();
+      await expect(chart.locator('#minimap-readout')).toContainText('Hdg');
+      await expect(chart.getByText('1.0 km', { exact: true })).toBeVisible();
+      await chart.getByRole('button', { name: 'Zoom chart out' }).click();
+      await expect(chart.getByText('2.0 km', { exact: true })).toBeVisible();
 
-    // Keyboard: arrows explore, Home returns.
-    await map.focus();
-    await page.keyboard.press('ArrowUp');
-    await expect(back).toBeVisible();
-    await page.keyboard.press('Home');
-    await expect(back).toBeHidden();
+      // Clicking open water near the rim sends the orbit camera there.
+      const map = chart.locator('canvas');
+      const box = (await map.boundingBox())!;
+      await page.mouse.click(box.x + box.width * 0.85, box.y + box.height * 0.5);
+      const back = chart.getByRole('button', { name: 'Back to fleet' });
+      await expect(back).toBeVisible();
+      await back.click();
+      await expect(back).toBeHidden();
 
-    await chart.getByRole('button', { name: 'Hide chart' }).click();
-    await expect(chart).toBeHidden();
-    await page.getByRole('button', { name: 'Show chart' }).click();
-    await expect(page.getByRole('region', { name: 'Chart' })).toBeVisible();
-    expect(errors).toEqual([]);
-  });
+      // Keyboard: arrows explore, Home returns.
+      await map.focus();
+      await page.keyboard.press('ArrowUp');
+      await expect(back).toBeVisible();
+      await page.keyboard.press('Home');
+      await expect(back).toBeHidden();
 
-  test('has no detectable WCAG 2.2 A/AA violations', async ({ page }) => {
-    await page.goto('/');
-    await waitForSimulation(page);
-    const results = await new AxeBuilder({ page })
-      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
-      .analyze();
-    expect(results.violations.map((v) => `${v.id}: ${v.help} (${v.nodes.length})`)).toEqual([]);
-  });
+      await chart.getByRole('button', { name: 'Hide chart' }).click();
+      await expect(chart).toBeHidden();
+      await page.getByRole('button', { name: 'Show chart' }).click();
+      await expect(page.getByRole('region', { name: 'Chart' })).toBeVisible();
+      expect(errors).toEqual([]);
+    });
 
-  test('also passes accessibility checks in the light theme and with dialogs open', async ({
-    page,
-  }) => {
-    await page.emulateMedia({ colorScheme: 'light' });
-    await page.goto('/');
-    await waitForSimulation(page);
-    await page.getByRole('button', { name: 'Presets' }).click();
-    await expect(page.getByRole('dialog', { name: 'Experiment presets' })).toBeVisible();
-    const results = await new AxeBuilder({ page })
-      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
-      .analyze();
-    expect(results.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+    test('has no detectable WCAG 2.2 A/AA violations', async ({ page }) => {
+      await page.goto('/');
+      await waitForSimulation(page);
+      const results = await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+        .analyze();
+      expect(results.violations.map((v) => `${v.id}: ${v.help} (${v.nodes.length})`)).toEqual([]);
+    });
+
+    test('also passes accessibility checks in the light theme and with dialogs open', async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: 'light' });
+      await page.goto('/');
+      await waitForSimulation(page);
+      await page.getByRole('button', { name: 'Presets' }).click();
+      await expect(page.getByRole('dialog', { name: 'Experiment presets' })).toBeVisible();
+      const results = await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
+        .analyze();
+      expect(results.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+    });
   });
 
   test('loads a preset and edits a vessel entirely from the keyboard', async ({ page }) => {
