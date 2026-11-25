@@ -16,24 +16,14 @@
 
 **Branch:** `claude/hopeful-shannon-f2xayr`, pushed. It is ahead of `main` (261979b, after PR #80) by the Phase F commits below. There is no Phase F PR yet. `pnpm vitest run` gives 933 passed at 5dbc20f, and lint and typecheck are clean.
 
-| Task                  | State         | Commit  | Notes                                                                                                                                                                       |
-| --------------------- | ------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| F1 Volumetric clouds  | ✅ done       | 90868c2 | See the deviation below (baked coverage map). Screenshots looked right at noon (40–45 %) and at golden hour (50 %).                                                         |
-| F2 Sun shafts         | 🟡 checkpoint | 5dbc20f | Code, the `sunShafts` display setting (`auto`/`on`/`off`, default `auto`), dialog control and unit tests are done. **Open:** Step 4 (e2e and screenshot) and visual tuning. |
-| F3 Hull–water contact | ⏳ todo       | —       | Start at Task F3, Step 1.                                                                                                                                                   |
-| F4 Docs, PR, deploy   | ⏳ todo       | —       | —                                                                                                                                                                           |
+| Task                  | State   | Commit      | Notes                                                                                                                                                                                                                                                                                                                                         |
+| --------------------- | ------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1 Volumetric clouds  | ✅ done | 90868c2     | See the deviation below (baked coverage map). Screenshots looked right at noon (40–45 %) and at golden hour (50 %).                                                                                                                                                                                                                           |
+| F2 Sun shafts         | ✅ done | ec1f61c     | Tuned (mask 2–5, radius 0.35, decay 0.95, gain 0.55) and e2e added. Screenshot `docs/screenshots/sun-shafts-golden-hour.jpg`. The wash in the first Bridge shot was the golden-hour fog and glow, not the shafts.                                                                                                                             |
+| F3 Hull–water contact | ✅ done | next commit | Pure `hullWetting.ts`, material hook, `OCEAN_DISPLACEMENT_GLSL` chunk, collar, bow cushion and crest in `WAKE_GLSL`, `ship.z` contact, reach growth. Draw calls unchanged. Screenshots `docs/screenshots/hull-contact-*.jpg`. A 0 kn vs 18 kn pair was not taken: under SwiftShader the sim runs too slowly for a speed order to take effect. |
+| F4 Docs, PR, deploy   | ⏳ todo | —           | The F1 Step 4 storm-preset and Plane-through-a-deck screenshots are still owed.                                                                                                                                                                                                                                                               |
 
-**F2 open items, in order:**
-
-1. **Tune the look.** At 17:00 with 45 % cloud from the Bridge (Settings → Display → Sun shafts on vs off), the left half of the frame looked hazy. Separate what the shafts add from the existing golden-hour fog and glow before changing anything. The knobs are in `src/render/post/SunShaftPass.ts`:
-   - `MASK_FRAG`: the `bright` smoothstep (now 1.0 → 2.6) and the `near` radius (now 0.5);
-   - `set()`: the gain `k` (now `strength × 0.45`);
-   - `MARCH_FRAG`: decay 0.965 and the 0.9 ray length.
-
-   The aim is distinct rays through cloud gaps and rigging, with no general wash over the foreground.
-
-2. **Add the e2e test** `test('sun shafts: renders toward a low sun, no console errors')` to `e2e/graphics.spec.ts`. Mirror the existing TAA test, with `localStorage['wave-lab:display'] = {"sunShafts":"on"}`.
-3. Tick the F2 boxes below and commit "Sun shafts through broken cloud and past rigging".
+**F3 note:** `hullHalfWidth` starts its bow curve at the stem (`smoothstep(0, 0.3L, s)`) rather than at −0.02 L, so the half-width is 0 at the stem as the Step 1 test requires. The GLSL mirror uses the live bow-to-stern segment length for L.
 
 **Deviation from §3.1 (already implemented in F1):** the march reads the deck coverage from a **baked, world-anchored map** (`src/render/sky/cloudMap.ts`: 1024², 72 km, RGBA8 with mipmaps). It does not evaluate noise per sample. The per-sample noise version stalled SwiftShader at High from the Bridge camera. The map stores the raw fractal noise, and the cover threshold is applied at sampling, so a change of cover needs no redraw. The map redraws only when the eye (in the drifting frame) moves more than 9 km, snapped to texels. The sky-environment cube is now drawn from the camera position (`SkyEnvironmentKey.eye`).
 
@@ -241,11 +231,11 @@ The new GPU-timer passes need no new bucket: shafts fall in 'post' and clouds in
 
 **Files:** Create `src/render/vessel/hullWetting.ts`, `hullWetting.test.ts` and `hullWettingMaterial.ts`. Modify `shaders.ts` (extract the regular-wave chunk, add collar and bow terms to `WAKE_GLSL`), `scene/wakes.ts` (contact, `hullHalfWidth`, reach), `scene/wakes.test.ts` and `LabRenderer.ts`.
 
-- [ ] **Step 1: Failing tests.** `wetTarget` rises with Hs, roll and speed; the bow is at least the side; the clamps hold. `stepWetEnvelope` rises fast and decays slowly (within 0.4 s and 25 s time constants, ±10 %). `hullHalfWidth` is 0 at the stem, B/2 amidships, and narrower at the transom. The wake upload writes contact into `ship.z` (default 1) and grows the box by the collar width.
-- [ ] **Step 2:** RED, implement, GREEN.
-- [ ] **Step 3:** Write the material hook and the collar GLSL. Check that `budget.test.ts` draw calls are unchanged (no new draws).
-- [ ] **Step 4:** Take screenshots: a ship at 0 kn and at 18 kn in Hs 1 m and 4 m (Bridge and Orbit views). Show them to the user.
-- [ ] **Step 5:** Commit: "Hull–water contact: wet bands, foam collars and bow cushions".
+- [x] **Step 1: Failing tests.** `wetTarget` rises with Hs, roll and speed; the bow is at least the side; the clamps hold. `stepWetEnvelope` rises fast and decays slowly (within 0.4 s and 25 s time constants, ±10 %). `hullHalfWidth` is 0 at the stem, B/2 amidships, and narrower at the transom. The wake upload writes contact into `ship.z` (default 1) and grows the box by the collar width.
+- [x] **Step 2:** RED, implement, GREEN.
+- [x] **Step 3:** Write the material hook and the collar GLSL. Check that `budget.test.ts` draw calls are unchanged (no new draws).
+- [x] **Step 4:** Take screenshots: a ship at 0 kn and at 18 kn in Hs 1 m and 4 m (Bridge and Orbit views). Show them to the user.
+- [x] **Step 5:** Commit: "Hull–water contact: wet bands, foam collars and bow cushions".
 
 ### Task F4: Integrate, review, ship
 
