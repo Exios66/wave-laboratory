@@ -95,23 +95,27 @@
   string, core count, memory and touch; software renderers get the lightest settings. A dynamic
   resolution governor lowers the render scale when frames run long and restores it slowly.
 - **Frame pacing (`framePacing.ts`):** the runtime stops simulating and drawing while the tab is hidden
-  or the canvas is scrolled off-screen (resuming without a time jump), and caps drawing at 30 fps
+  or the canvas is scrolled off-screen (a `visibilitychange` listener restarts the frame clock, so a
+  returning tab never advances the sim by the gap), and caps drawing at 30 fps
   on software renderers, Save-Data connections and a low (<= 20 %) unplugged battery. The governor's
   fps target follows the cap so a deliberate cap never reads as slowness.
 - **Tier governor (auto only):** when the render scale is already at its floor and frames are still
   below ~85 % of the target for two seconds in a row, `ResolutionGovernor` steps the quality tier down
-  one level (down to `low`); it steps back up only after a long run of good frames at full scale
-  (20 s, doubling to 160 s whenever a step up is followed by a step down within 25 s, so a device
+  one level (down to `low`); it steps back up only after a long run of windows at 90 % of the target or better
+  (the looser bar lets a capped stream that drops the odd frame recover; 20 s, doubling to 160 s whenever a step up is followed by a step down within 25 s, so a device
   between two tiers settles on the lower one). An explicit Low/Medium/High/Ultra choice keeps its tier;
   `?gfx=full` (the e2e suite) disables tier steps so runs are deterministic. The Dock fps readout's
   tooltip shows the current adaptation.
-- **Capabilities (`render/capabilities.ts`):** `decideCapabilities` turns the GL extensions
-  (`EXT_color_buffer_float`, `EXT_color_buffer_half_float`, `OES_texture_float_linear`) and
-  `MAX_TEXTURE_SIZE` into a decision: float or half-float ocean, HDR post on/off, quality ceiling.
+- **Capabilities (`render/capabilities.ts`):** `decideCapabilities` turns `EXT_color_buffer_float`,
+  `EXT_color_buffer_half_float` and `MAX_TEXTURE_SIZE` into two decisions: float or half-float ocean
+  textures, and a quality ceiling (the texture limit must be at least `visualGridSize(tier) x 4`).
+  The renderer clamps `setQuality` to the ceiling and exposes it as `maxQuality`; the runtime
+  sends the worker the clamped tier, so no FFT data larger than the GPU can draw is built.
   iOS Safari and older Android therefore degrade rather than fail.
 - **Context loss:** the renderer restores ocean and post resources on `webglcontextrestored`.
 - **Diagnostics:** `?gfx=full` or `?perf` exposes `window.__waveLab.stats()` (fps, draw calls,
-  geometry and texture counts) and `.governor()`; `e2e/resources.spec.ts` uses it to check that GPU
+  geometry and texture counts, plus a `frames` render counter: the counts refresh only when a frame
+  is rendered, so tests wait on it, not on animation frames) and `.governor()`; `e2e/resources.spec.ts` uses it to check that GPU
   object counts return to baseline after adding/removing a vessel and changing quality.
 
 Measured under SwiftShader (software GL, 960x540, 20 s windows, CDP `Performance.getMetrics` and the
