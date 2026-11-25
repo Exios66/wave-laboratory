@@ -221,7 +221,8 @@ test.describe('temporal antialiasing', () => {
       localStorage.setItem('wave-lab:performance', 'medium');
       // Late afternoon: a low sun, so the rays have something to stream from.
       localStorage.setItem('wave-lab:ambience', JSON.stringify({ startHour: 17 }));
-      localStorage.setItem('wave-lab:display', JSON.stringify({ sunShafts: 'on' }));
+      // Shafts key on the HDR sun, which needs bloom (auto leaves it off under software GL).
+      localStorage.setItem('wave-lab:display', JSON.stringify({ sunShafts: 'on', bloom: 'on' }));
     });
     await page.goto('/?gfx=full');
     const running = page.getByRole('status').filter({ hasText: 'Simulation running' });

@@ -80,7 +80,11 @@ varying float vWetAlong;`,
 {
   vec4 wp = modelMatrix * vec4(transformed, 1.0);
   vec4 regSlope;
-  vec3 sea = seaDisplacement(vec2(wp.x, -wp.z) - uDrift, ${WATERLINE_SPACING.toFixed(1)}, regSlope);
+  // The drawn sea moves each point sideways by its chop: find the rest point q whose displaced
+  // position is this vertex (one fixed-point step), then read the height there.
+  vec2 hullXY = vec2(wp.x, -wp.z);
+  vec3 sea = seaDisplacement(hullXY - uDrift, ${WATERLINE_SPACING.toFixed(1)}, regSlope);
+  sea = seaDisplacement(hullXY - sea.xy - uDrift, ${WATERLINE_SPACING.toFixed(1)}, regSlope);
   vWetS = wp.y - sea.z;
   vWetBow = clamp((transformed.x - uHullX.x) * uHullX.y, 0.0, 1.0);
   vWetAlong = transformed.x;

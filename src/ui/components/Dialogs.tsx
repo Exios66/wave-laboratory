@@ -257,7 +257,7 @@ function PostSettings() {
           { value: 'off', label: 'Off' },
         ]}
         onChange={(v) => set({ sunShafts: v })}
-        hint="Rays of sunlight streaming through gaps in the cloud and past masts and islands, strongest with broken cloud in hazy air and the sun in view. Not underwater or on the lowest graphics level. Auto follows the same rule as bloom."
+        hint="Rays of sunlight streaming through gaps in the cloud and past masts and islands, strongest with broken cloud in hazy air and the sun in view. Needs bloom on. Not underwater or on the lowest graphics level. Auto follows the same rule as bloom."
       />
       <Switch
         label="Raindrops on the lens"

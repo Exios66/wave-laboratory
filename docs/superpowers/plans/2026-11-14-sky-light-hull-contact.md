@@ -234,7 +234,7 @@ The new GPU-timer passes need no new bucket: shafts fall in 'post' and clouds in
 - [x] **Step 1: Failing tests.** `wetTarget` rises with Hs, roll and speed; the bow is at least the side; the clamps hold. `stepWetEnvelope` rises fast and decays slowly (within 0.4 s and 25 s time constants, ±10 %). `hullHalfWidth` is 0 at the stem, B/2 amidships, and narrower at the transom. The wake upload writes contact into `ship.z` (default 1) and grows the box by the collar width.
 - [x] **Step 2:** RED, implement, GREEN.
 - [x] **Step 3:** Write the material hook and the collar GLSL. Check that `budget.test.ts` draw calls are unchanged (no new draws).
-- [x] **Step 4:** Take screenshots: a ship at 0 kn and at 18 kn in Hs 1 m and 4 m (Bridge and Orbit views). Show them to the user.
+- [x] **Step 4:** Take screenshots: a ship at 0 kn and at 18 kn in Hs 1 m and 4 m (Bridge and Orbit views). Show them to the user. _(Partial: Hs 1 m and 4 m are done. The 0 kn and 18 kn comparison was not taken: under SwiftShader the speed order never takes effect before the shot, so both came out identical.)_
 - [x] **Step 5:** Commit: "Hull–water contact: wet bands, foam collars and bow cushions".
 
 ### Task F4: Integrate, review, ship

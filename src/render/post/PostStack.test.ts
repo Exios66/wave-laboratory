@@ -145,11 +145,16 @@ describe('PostStack sun shafts', () => {
     post.setSunShafts(sun);
     expect(post.shaftsRunning).toBe(false);
     post.setSettings({ ...DEFAULT_POST, shafts: true });
+    // Without bloom the sun never reaches the mask's HDR threshold, so the pass stays off.
+    expect(post.shaftsRunning).toBe(false);
+    post.setSettings({ ...DEFAULT_POST, bloom: true, shafts: true });
     expect(post.shaftsRunning).toBe(true);
     expect(post.active).toBe(true);
     post.setSunShafts({ ...sun, strength: 0 });
     expect(post.shaftsRunning).toBe(false);
+    post.setSettings({ ...DEFAULT_POST, shafts: true });
     expect(post.active).toBe(false);
+    post.setSettings({ ...DEFAULT_POST, bloom: true, shafts: true });
     post.setSunShafts(sun);
     post.setUnderwater(UNDER);
     expect(post.shaftsRunning).toBe(false);
@@ -162,7 +167,7 @@ describe('PostStack sun shafts', () => {
     expect(
       (() => {
         const { post } = setup(false);
-        post.setSettings({ ...DEFAULT_POST, shafts: true });
+        post.setSettings({ ...DEFAULT_POST, bloom: true, shafts: true });
         post.setSunShafts(sun);
         return post.shaftsRunning;
       })(),
@@ -173,7 +178,7 @@ describe('PostStack sun shafts', () => {
       new THREE.PerspectiveCamera(),
       'light',
     );
-    light.setSettings({ ...DEFAULT_POST, shafts: true });
+    light.setSettings({ ...DEFAULT_POST, bloom: true, shafts: true });
     light.setSunShafts(sun);
     expect(light.shaftsRunning).toBe(false);
   });

@@ -185,6 +185,8 @@ export class PostStack {
     return (
       this.supported &&
       this.settings.shafts &&
+      // The mask keys on the HDR sun, which is only above 1 while bloom is on.
+      this.settings.bloom &&
       this.tier !== 'light' &&
       this.underwater === null &&
       this.shaftParams !== null &&

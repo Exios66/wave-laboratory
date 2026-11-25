@@ -268,10 +268,19 @@ float deckCoverageMap(vec2 pKm) {
   float cover = uCloud;
   return smoothstep(1.0 - cover - 0.08, 1.0 - cover + 0.32, f + 0.12 * cover);
 }
+// Where cloud rays start (world, metres) when gCloudOriginSet > 0.5; otherwise the camera. The
+// water sets it to its own surface point so reflected clouds are the world-anchored deck.
+vec3 gCloudOrigin = vec3(0.0);
+float gCloudOriginSet = 0.0;
+vec3 cloudEyeKm() {
+  return (gCloudOriginSet > 0.5 ? gCloudOrigin : cameraPosition) * 1.0e-3;
+}
+// Opacity of the cloud the last skyColorSteps call composited (the dome masks its stars with it).
+float gSkyCloudA = 0.0;
 // Flat estimate: the coverage where the ray meets the middle of the deck.
 float cloudDensity(vec3 dir) {
   if (uCloud < 0.02) return 0.0;
-  vec3 eye = cameraPosition * 1.0e-3;
+  vec3 eye = cloudEyeKm();
   float mid = 0.5 * (uCloudDeck.x + uCloudDeck.y);
   float rise = mid - eye.y;
   if (dir.y * rise <= 0.0) return 0.0;
@@ -316,7 +325,7 @@ const float CLOUD_PATH_CAP = 8.0; // CLOUD_PATH_CAP_KM
 // Radiance of the deck along dir (premultiplied) and its opacity. steps ≥ 1.
 vec4 cloudMarch(vec3 dir, vec3 sun, float steps) {
   if (uCloud < 0.02) return vec4(0.0);
-  vec3 eye = cameraPosition * 1.0e-3;
+  vec3 eye = cloudEyeKm();
   float base = uCloudDeck.x;
   float top = uCloudDeck.y;
   float t0;
@@ -400,6 +409,7 @@ vec3 skyColorSteps(vec3 dir, vec3 sun, float discs, float steps) {
     * (dir.y >= 0.0 ? 1.0 : 1.0 - clamp(-dir.y * 4.0, 0.0, 1.0));
   vec4 cloud = cloudLayer(dir, sun, steps);
   float cloudA = clamp(cloud.a, 0.0, 1.0);
+  gSkyCloudA = cloudA;
   if (uNight > 0.001) {
     float md = max(dot(nd, uMoonDir), 0.0);
     float moonUp = smoothstep(-0.04, 0.02, uMoonDir.y) * uNight * (1.0 - cloudA) * (1.0 - 0.8 * overcastAmount());
@@ -920,7 +930,10 @@ vec3 underwaterSurface(vec3 V, vec3 N, float foam) {
     float r0 = pow((UNDERWATER_INDEX - 1.0) / (UNDERWATER_INDEX + 1.0), 2.0);
     float refl = r0 + (1.0 - r0) * pow(1.0 - cosT, 5.0);
     // One cloud sample is enough through the rippled window (a full march per fragment is not).
+    gCloudOrigin = vThreePos;
+    gCloudOriginSet = 1.0;
     col = mix(skyColorSteps(normalize(T), uSunDir, 1.0, min(uCloudSteps, 1.0)), uUwScatter, refl);
+    gCloudOriginSet = 0.0;
   }
   return mix(col, uUwScatter * 0.35, foam * 0.85);
 }
@@ -1190,7 +1203,10 @@ void main() {
   Rs = normalize(Rs);
   // One cloud sample for the reflection (a deliberate cost trade-off: the blurred, wave-broken
   // reflection hides the coarser cloud, and a full march per water fragment is too dear).
+  gCloudOrigin = vThreePos;
+  gCloudOriginSet = 1.0;
   vec3 skyR = skyColorSteps(Rs, uSunDir, 0.0, min(uCloudSteps, 1.0));
+  gCloudOriginSet = 0.0;
   skyR = mix(skyR, skyBlurred(Rs, uSunDir), smoothstep(0.08, 0.45, alpha));
   vec3 lowSea = mix(horizonColor() * 0.85, refracted, 0.55);
   vec3 reflection = mix(skyR, lowSea, smoothstep(0.0, 0.25, -R.y));
@@ -1451,7 +1467,8 @@ void main() {
   vec3 dir = normalize(vDir);
   vec3 col = skyColor(dir, uSunDir);
   if (uStars > 0.001 && dir.y > 0.0) {
-    float seen = uStars * (1.0 - cloudDensity(dir)) * (1.0 - overcastAmount());
+    // The cloud the sky just drew (the march from inside a deck sees what the flat estimate misses).
+    float seen = uStars * (1.0 - max(cloudDensity(dir), gSkyCloudA)) * (1.0 - overcastAmount());
     // Extinction: everything dims and reddens toward the horizon.
     float alt = smoothstep(0.0, 0.25, dir.y);
     seen *= mix(0.15, 1.0, alt);
