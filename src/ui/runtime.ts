@@ -432,7 +432,8 @@ export class LabRuntime {
     // Capped: skip this frame; the wall time since the last one accumulates into the next.
     if (!this.pacer.accept(now)) return;
     // Clamp long gaps (tab in background, debugger) so the simulation never jumps.
-    const wall = Math.min(0.1, Math.max(0, (now - this.lastTime) / 1000));
+    const gap = Math.max(0, (now - this.lastTime) / 1000);
+    const wall = Math.min(0.1, gap);
     this.lastTime = now;
     const s = useLab.getState();
     const probe = this.renderer?.cameraProbePoint() ?? undefined;
@@ -441,7 +442,8 @@ export class LabRuntime {
     this.advanceDisplayClock(wall, s.playing && s.status === 'ready', s.timeScale);
     this.renderer?.setVisualTime(this.displayT);
     this.advanceClock(now, wall, s);
-    this.adapt(wall, s);
+    // The governor needs the real frame time: the clamp above would make a 1 s frame look like 10 fps.
+    this.adapt(gap, s);
     this.renderer?.render();
   }
 

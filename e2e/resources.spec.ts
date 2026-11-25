@@ -109,3 +109,40 @@ test('GPU object counts return to baseline after changing the graphics quality',
   for (let i = 0; i < 2; i++) expect(await roundTrip()).toEqual(base);
   expect(errors).toEqual([]);
 });
+
+test('GPU object counts return to baseline after the HDR post composer is built and freed', async ({
+  page,
+}) => {
+  test.setTimeout(240_000);
+  const errors = trackErrors(page);
+  // Low quality leaves every post effect off under software GL, so the composer does not exist
+  // until a setting asks for it: the quality round trip above never builds it.
+  await page.addInitScript(() => localStorage.setItem('wave-lab:performance', 'low'));
+  await page.goto('/?gfx=full');
+  await expect(page.getByRole('status').filter({ hasText: 'Simulation running' })).toBeAttached({
+    timeout: 60_000,
+  });
+  const bloom = async (value: 'on' | 'off') => {
+    await page.getByRole('button', { name: 'Settings' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Settings' });
+    await dialog.getByLabel('Bloom').selectOption(value);
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+  };
+  // Turning bloom on and off again: the first round warms one-off caches (shader programs, the
+  // bloom mip chain's lazily built resources); later rounds must leave the counts where they were.
+  const round = async () => {
+    await bloom('on');
+    const built = await settled(page);
+    await bloom('off');
+    return { built, freed: await settled(page) };
+  };
+  await round();
+  const base = await settled(page);
+  const again = await round();
+  // The composer really was built (render targets are textures) and really was freed.
+  expect(again.built.textures).toBeGreaterThan(base.textures);
+  expect(again.freed).toEqual(base);
+  expect((await round()).freed).toEqual(base);
+  expect(errors).toEqual([]);
+});

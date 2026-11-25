@@ -95,3 +95,26 @@ describe('lowerQuality', () => {
     expect(lowerQuality('medium', 0)).toBe('medium');
   });
 });
+
+describe('ResolutionGovernor on a very slow device', () => {
+  it('lowers the resolution within a few frames when every frame takes a second or more', () => {
+    const g = new ResolutionGovernor(0.5, 1, 30);
+    let frames = 0;
+    while (g.scale > 0.5 && frames < 50) {
+      g.frame(1.2);
+      frames++;
+    }
+    expect(g.scale).toBe(0.5);
+    expect(frames).toBeLessThanOrEqual(8);
+  });
+
+  it('ignores a lone hitch and a long pause', () => {
+    const g = new ResolutionGovernor(0.5, 1, 30);
+    for (let i = 0; i < 30; i++) g.frame(1 / 30);
+    g.frame(0.9);
+    for (let i = 0; i < 30; i++) g.frame(1 / 30);
+    g.frame(60);
+    for (let i = 0; i < 30; i++) g.frame(1 / 30);
+    expect(g.scale).toBe(1);
+  });
+});

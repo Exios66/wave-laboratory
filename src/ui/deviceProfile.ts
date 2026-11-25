@@ -201,6 +201,8 @@ export class ResolutionGovernor {
   tierEnabled = false;
   private frames = 0;
   private elapsed = 0;
+  /** Consecutive frames longer than HITCH_S: a lone one is a hitch, a run is a slow device. */
+  private longRun = 0;
   private goodWindows = 0;
   /** Consecutive windows at 90 % of the target or better (a looser bar for stepping the tier up). */
   private upWindows = 0;
@@ -208,6 +210,10 @@ export class ResolutionGovernor {
   private windows = 0;
   private lastUpWindow = Number.NEGATIVE_INFINITY;
   private upWait = 20;
+  /** A frame longer than this is a possible hitch; two in a row count as real. */
+  static readonly HITCH_S = 0.5;
+  /** Longer gaps are a suspended tab or a debugger pause, never a frame rate. */
+  static readonly PAUSE_S = 5;
   static readonly UP_WAIT = 20;
   static readonly UP_WAIT_MAX = 160;
   /** A down-step this soon after an up-step counts as flapping. */
@@ -221,6 +227,7 @@ export class ResolutionGovernor {
 
   /** Forget tier history (a new experiment or a changed setting). */
   resetTier(): void {
+    this.longRun = 0;
     this.tierSteps = 0;
     this.badAtFloor = 0;
     this.upWindows = 0;
@@ -231,7 +238,15 @@ export class ResolutionGovernor {
   /** Feed a frame duration [s]; returns true when the scale or the tier changed. */
   frame(dt: number): boolean {
     this.tierChanged = false;
-    if (!(dt > 0) || dt > 0.5) return false;
+    if (!(dt > 0) || dt > ResolutionGovernor.PAUSE_S) {
+      this.longRun = 0;
+      return false;
+    }
+    // One long frame is a hitch (a GC pause, a shader compile) and says nothing about the device.
+    // Several in a row are a device drawing a frame a second or slower: count them, so the
+    // resolution comes down in a few frames instead of never (software GL, weak phones).
+    this.longRun = dt > ResolutionGovernor.HITCH_S ? this.longRun + 1 : 0;
+    if (this.longRun === 1) return false;
     this.frames++;
     this.elapsed += dt;
     if (this.elapsed < 1 - 1e-6) return false;
