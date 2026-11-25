@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderCostText, renderCostTitle } from './renderCost';
+import { adaptiveText, renderCostText, renderCostTitle } from './renderCost';
 
 describe('render cost readout', () => {
   it('shows frame rate and GPU time when the browser measures it', () => {
@@ -35,5 +35,17 @@ describe('render cost readout', () => {
     expect(renderCostTitle(null, true, true)).toBe(
       'Frames drawn per second and GPU time per frame. Temporal antialiasing on. Raindrops on the lens',
     );
+  });
+});
+
+describe('adaptiveText', () => {
+  it('is empty at full resolution with no cap', () => {
+    expect(adaptiveText(1, 0, 0)).toBe('');
+  });
+  it('names each adaptation', () => {
+    expect(adaptiveText(0.72, 1, 30)).toBe(
+      'Adapting to this device: render scale 72 %, quality lowered 1 step, 30 fps cap',
+    );
+    expect(adaptiveText(1, 2, 0)).toContain('2 steps');
   });
 });

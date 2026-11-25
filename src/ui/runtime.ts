@@ -6,6 +6,7 @@
  * The renderer always draws the ocean at the time of the latest physics frame, so the vessels
  * and the waves you see are the same state.
  */
+import { gfxForcedFull } from '../core/gfxOverride';
 import type { LabRendererApi } from '../render/api';
 import { SimClient } from '../sim/SimClient';
 import type { FromWorker, SimFrame } from '../sim/types';
@@ -15,6 +16,7 @@ import {
   effectiveQuality,
   resolvePostSettings,
   graphicsBudget,
+  lowerQuality,
   ResolutionGovernor,
 } from './deviceProfile';
 import {
@@ -28,6 +30,8 @@ import {
 import { HealthNotifier } from './health';
 import { useLab } from './store';
 import { telemetry } from './telemetry';
+
+const QUALITY_ORDER = ['low', 'medium', 'high', 'ultra'];
 
 export class LabRuntime {
   readonly client: SimClient;
@@ -146,9 +150,28 @@ export class LabRuntime {
     );
   }
 
-  private targetQuality() {
+  /** The tier the settings ask for, before any adaptive step-down. */
+  private baseQuality() {
     const s = useLab.getState();
     return effectiveQuality(s.experiment.quality, s.performance, detectDeviceProfile());
+  }
+
+  /** The tier to draw at: only the "auto" setting may be stepped down by the governor. */
+  private targetQuality() {
+    return lowerQuality(
+      this.baseQuality(),
+      this.governor.tierEnabled ? this.governor.tierSteps : 0,
+    );
+  }
+
+  /** The governor changed the tier: apply it like a graphics-setting change (no sim restart). */
+  private applyTier(): void {
+    const quality = this.targetQuality();
+    if (quality === this.visualQuality) return;
+    this.visualQuality = quality;
+    this.client.setVisualQuality(quality);
+    this.renderer?.setQuality(quality);
+    this.pushPost();
   }
 
   private load(): void {
@@ -156,6 +179,8 @@ export class LabRuntime {
     this.loadedRevision = s.revision;
     telemetry.clear();
     this.healthNotices.reset();
+    this.governor.resetTier();
+    this.configureTierGovernor();
     const quality = this.targetQuality();
     this.visualQuality = quality;
     this.renderer?.setQuality(quality);
@@ -165,6 +190,8 @@ export class LabRuntime {
 
   /** Re-derive graphics settings after the performance mode changed (no simulation restart). */
   private applyPerformanceMode(): void {
+    this.governor.resetTier();
+    this.configureTierGovernor();
     const quality = this.targetQuality();
     if (quality !== this.visualQuality) {
       this.visualQuality = quality;
@@ -174,6 +201,16 @@ export class LabRuntime {
     this.pushPost();
     this.configureGovernor();
     if (this.canvas) this.resize(this.canvas);
+  }
+
+  /**
+   * Tier steps are only for "auto" (an explicit choice keeps its tier), and not under `?gfx=full`
+   * (the e2e suite and diagnostics pin the quality; software rendering would otherwise step down).
+   */
+  private configureTierGovernor(): void {
+    const g = this.governor;
+    g.tierEnabled = useLab.getState().performance === 'auto' && !gfxForcedFull();
+    g.maxTierSteps = Math.max(0, QUALITY_ORDER.indexOf(this.baseQuality()));
   }
 
   private configureGovernor(): void {
@@ -303,6 +340,16 @@ export class LabRuntime {
     };
   }
 
+  /** Current adaptive-resolution state, for diagnostics. */
+  governorState(): { scale: number; tierSteps: number; capFps: number; tier: string | null } {
+    return {
+      scale: this.governor.scale,
+      tierSteps: this.governor.tierEnabled ? this.governor.tierSteps : 0,
+      capFps: this.pacer.capFps,
+      tier: this.visualQuality,
+    };
+  }
+
   get rendererApi(): LabRendererApi | null {
     return this.renderer;
   }
@@ -355,6 +402,7 @@ export class LabRuntime {
     this.advanceClock(now, wall, s);
     if (document.hidden) return;
     if (this.renderer && this.governor.frame(wall) && this.canvas) {
+      if (this.governor.tierChanged) this.applyTier();
       this.resize(this.canvas);
       s.setRenderScale(this.governor.scale);
     }

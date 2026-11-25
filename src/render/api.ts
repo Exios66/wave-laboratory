@@ -90,6 +90,9 @@ export interface RendererStats {
   taa: boolean;
   /** True while raindrops or spray are drawn on the lens. */
   lens: boolean;
+  /** GPU objects alive (three's `renderer.info.memory`): a leak shows as steady growth. */
+  geometries: number;
+  textures: number;
 }
 
 /** Plane view readout: which flight, and how it is flying. */

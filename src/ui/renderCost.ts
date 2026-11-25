@@ -26,3 +26,12 @@ export function renderCostTitle(
   const withTaa = taa ? `${base}. Temporal antialiasing on` : base;
   return lens ? `${withTaa}. Raindrops on the lens` : withTaa;
 }
+
+/** What the adaptive governor is doing, or "" when it is at full resolution and not capping. */
+export function adaptiveText(scale: number, tierSteps: number, capFps: number): string {
+  const parts: string[] = [];
+  if (scale < 0.995) parts.push(`render scale ${Math.round(scale * 100)} %`);
+  if (tierSteps > 0) parts.push(`quality lowered ${tierSteps} step${tierSteps === 1 ? '' : 's'}`);
+  if (capFps > 0) parts.push(`${capFps} fps cap`);
+  return parts.length === 0 ? '' : `Adapting to this device: ${parts.join(', ')}`;
+}
