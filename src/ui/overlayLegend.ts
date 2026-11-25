@@ -76,7 +76,7 @@ export function legendSpec(mode: Exclude<OverlayMode, 'none'>, input: LegendInpu
         title: 'Orbital speed at the surface',
         gradient: CIVIDIS,
         ticks: ['0 m/s', `${num(sc.velocity / 2)} m/s`, `${num(sc.velocity)}+ m/s`],
-        note: `Speed |u| of the surface water particle (linear theory, finite depth; no second-order Stokes term). Top of the scale ω·0.75 H_s with a developed-sea period, from H_s = ${input.hs.toFixed(1)} m.`,
+        note: `Speed |u| of the surface water particle (linear theory, finite depth; no second-order Stokes term). Top of the scale ω·0.75 H_s (amplitude at least 0.25 m) with a developed-sea period, from H_s = ${input.hs.toFixed(1)} m.`,
       };
     case 'pressure': {
       const kpa = sc.pressure / 1000;
@@ -84,7 +84,7 @@ export function legendSpec(mode: Exclude<OverlayMode, 'none'>, input: LegendInpu
         title: `Dynamic pressure at ${depthLabel(input.depth)} m depth`,
         gradient: DIVERGING,
         ticks: [`−${num(kpa)} kPa`, '0', `+${num(kpa)} kPa`],
-        note: `ρ g η·cosh k(h−d)/cosh kh at depth d below the mean surface (hydrostatic part removed). Range ±ρ g·0.75 H_s, from H_s = ${input.hs.toFixed(1)} m.`,
+        note: `ρ g η·cosh k(h−d)/cosh kh at depth d below the mean surface (hydrostatic part removed). Range ±ρ g·0.75 H_s (at least 0.25 m), from H_s = ${input.hs.toFixed(1)} m.`,
       };
     }
     case 'energy': {
@@ -94,7 +94,7 @@ export function legendSpec(mode: Exclude<OverlayMode, 'none'>, input: LegendInpu
         title: 'Wave energy density',
         gradient: VIRIDIS,
         ticks: ['0 J/m²', fmt(top / 2), `${fmt(top)}+`],
-        note: `Instantaneous potential energy density ½ρgη² (not time-averaged). Top of the scale ½ρg(0.75 H_s)², from H_s = ${input.hs.toFixed(1)} m.`,
+        note: `Instantaneous potential energy density ½ρgη² (not time-averaged). Top of the scale ½ρg(0.75 H_s)² (amplitude at least 0.25 m), from H_s = ${input.hs.toFixed(1)} m.`,
       };
     }
   }

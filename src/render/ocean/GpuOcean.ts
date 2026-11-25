@@ -400,6 +400,11 @@ export class GpuOcean {
         u[`uV${i}`]!.value = vel.texture;
       } else {
         u[`uV${i}`]!.value = this.black;
+        // A cascade that went quiet gives its map back; it is rebuilt if the cascade returns.
+        if (this.velocityOn && this.velocities[i]) {
+          this.velocities[i]!.dispose();
+          this.velocities[i] = undefined;
+        }
       }
     }
     for (let i = 0; i < MAX_CASCADES; i++) {
