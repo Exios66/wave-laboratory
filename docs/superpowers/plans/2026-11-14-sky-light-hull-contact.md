@@ -234,8 +234,8 @@ The new GPU-timer passes need no new bucket: shafts fall in 'post' and clouds in
 - [x] **Step 1: Failing tests.** `sunScreen` gives the centre for a sun straight ahead and `facing ≤ 0` behind the camera. `shaftStrength` is 0 at night, with the sun behind, with the sun below the horizon, and at cover 1; it peaks near cover 0.5; it rises with fog density; it fades off screen. The display sanitiser reads missing `sunShafts` as `'auto'` and resolves `auto` to on only on the full tier. The `PostStack.active` truth table covers shafts with strength 0 and > 0.
 - [x] **Step 2:** RED, implement, GREEN.
 - [x] **Step 3:** Write the pass (mask → march → composite) and wire it up.
-- [ ] **Step 4:** Add the e2e test `test('sun shafts: renders toward a low sun, no console errors')` in `graphics.spec.ts`. Take a screenshot of the sun behind broken cloud and the sloop's rig.
-- [ ] **Step 5:** Commit: "Sun shafts through broken cloud and past rigging".
+- [x] **Step 4:** Add the e2e test `test('sun shafts: renders toward a low sun, no console errors')` in `graphics.spec.ts`. Take a screenshot of the sun behind broken cloud and the sloop's rig.
+- [x] **Step 5:** Commit: "Sun shafts through broken cloud and past rigging".
 
 ### Task F3: Hull–water contact
 
