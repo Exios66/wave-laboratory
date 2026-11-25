@@ -11,7 +11,14 @@ import { surfaceDetailTexture } from '../scene/textures';
 import { evolveSpectra } from './evolve';
 import { FOAM_MARGIN, FoamSim, foamShares, MAX_FOAM_CASCADES } from './foamSim';
 import { gpuVerifyWanted } from './gpuVerify';
-import { COMBINE_FRAG, FFT_FRAG, FFT_VERT, GRADIENT_FRAG, SPECTRUM_FRAG } from './shaders';
+import {
+  COMBINE_FRAG,
+  COMBINE_VEL_FRAG,
+  FFT_FRAG,
+  FFT_VERT,
+  GRADIENT_FRAG,
+  SPECTRUM_FRAG,
+} from './shaders';
 
 const MAX_CASCADES = 4;
 /** Regular waves plus the components of focused (rogue) wave groups. */
@@ -68,6 +75,7 @@ export class GpuOcean {
   private readonly fftMat: THREE.ShaderMaterial;
   private readonly spectrumMat: THREE.ShaderMaterial;
   private readonly combineMat: THREE.ShaderMaterial;
+  private readonly combineVelMat: THREE.ShaderMaterial;
   private readonly gradientMat: THREE.ShaderMaterial;
   /** Whether the outputs carry mip chains (needs linear filtering of float textures). */
   readonly mipmapped: boolean;
@@ -81,6 +89,13 @@ export class GpuOcean {
   private complexD: THREE.WebGLRenderTarget | null = null;
   private readonly outputs: THREE.WebGLRenderTarget[] = [];
   private readonly slopes: THREE.WebGLRenderTarget[] = [];
+  /**
+   * (ux, uy, w, elevation at depth d) per cascade for the velocity and pressure overlays.
+   * Allocated and refreshed only while one of those overlays is on.
+   */
+  private readonly velocities: THREE.WebGLRenderTarget[] = [];
+  private velocityOn = false;
+  private overlayDepth = 0;
   private readonly sources: THREE.DataTexture[] = [];
   private data: GpuOceanData | null = null;
   private n = 0;
@@ -145,6 +160,12 @@ export class GpuOcean {
       uUnderwater: { value: 0 },
       uUwScatter: { value: new THREE.Vector3(0.01, 0.05, 0.1) },
       uOverlay: { value: 0 },
+      // (depth under the mean surface [m], water depth [m], elevation scale [m], speed scale [m/s])
+      uOverlayP: { value: new THREE.Vector4(0, 1000, 1, 1) },
+      uV0: { value: this.black },
+      uV1: { value: this.black },
+      uV2: { value: this.black },
+      uV3: { value: this.black },
       uFogDensity: { value: 1e-4 },
       uWakeCount: { value: 0 },
       // Set by the renderer from its WakeField.
@@ -179,10 +200,15 @@ export class GpuOcean {
       uDepth: { value: 1000 },
       uLambda: { value: 1 },
       uField: { value: 0 },
+      uDepthBelow: { value: 0 },
     });
     this.combineMat = this.passMaterial(COMBINE_FRAG, {
       uHeight: { value: this.black },
       uDisp: { value: this.black },
+    });
+    this.combineVelMat = this.passMaterial(COMBINE_VEL_FRAG, {
+      uHoriz: { value: this.black },
+      uVert: { value: this.black },
     });
     this.gradientMat = this.passMaterial(GRADIENT_FRAG, {
       uDisp: { value: this.black },
@@ -217,6 +243,7 @@ export class GpuOcean {
     this.uniforms.uCount!.value = count;
     this.uniforms.uN!.value = n;
     this.uniforms.uLambda!.value = data.choppiness;
+    this.overlayP().y = Math.min(data.depth, 1e4);
     this.uniforms.uHs!.value = Math.max(data.hs, 0.05);
     const sizes = [
       this.uniforms.uSize0,
@@ -263,7 +290,33 @@ export class GpuOcean {
     this.lambda = lambda;
     this.depth = depth;
     this.uniforms.uLambda!.value = lambda;
+    this.overlayP().y = Math.min(depth, 1e4);
     this.dirty = true;
+  }
+
+  private overlayP(): THREE.Vector4 {
+    return this.uniforms.uOverlayP!.value as THREE.Vector4;
+  }
+
+  /**
+   * Velocity and dynamic-pressure overlays: while `on`, every refresh also builds the
+   * (ux, uy, w, elevation at `depthBelow`) maps. Per live cascade that is 2 more spectrum passes,
+   * 2 more inverse FFTs and 1 combine pass; nothing is allocated or drawn when off.
+   * `scale` = (elevation scale [m], speed scale [m/s]) of the legend ramps.
+   */
+  setOverlayFields(on: boolean, depthBelow: number, scale: { height: number; velocity: number }): void {
+    const p = this.overlayP();
+    p.x = Math.max(0, depthBelow);
+    p.z = scale.height;
+    p.w = scale.velocity;
+    if (on !== this.velocityOn || depthBelow !== this.overlayDepth) this.dirty = true;
+    this.velocityOn = on;
+    this.overlayDepth = depthBelow;
+    if (on && this.n >= 2 && this.velocities.length === 0) this.allocateVelocities();
+    if (!on) {
+      this.disposeVelocities();
+      for (let i = 0; i < MAX_CASCADES; i++) this.uniforms[`uV${i}`]!.value = this.black;
+    }
   }
 
   /**
@@ -330,6 +383,15 @@ export class GpuOcean {
     }
     const u = this.uniforms;
     for (let i = 0; i < MAX_CASCADES; i++) {
+      const vel = this.velocities[i];
+      if (this.velocityOn && vel && this.live[i]) {
+        this.synthesizeVelocity(this.sources[i]!, cascades[i]!.size, t, vel);
+        u[`uV${i}`]!.value = vel.texture;
+      } else {
+        u[`uV${i}`]!.value = this.black;
+      }
+    }
+    for (let i = 0; i < MAX_CASCADES; i++) {
       const live = this.live[i];
       u[`uC${i}`]!.value = (live && this.outputs[i]?.texture) || this.black;
       u[`uS${i}`]!.value = (live && this.slopes[i]?.texture) || this.black;
@@ -366,6 +428,7 @@ export class GpuOcean {
     this.fftMat.dispose();
     this.spectrumMat.dispose();
     this.combineMat.dispose();
+    this.combineVelMat.dispose();
     this.gradientMat.dispose();
     this.quad.geometry.dispose();
   }
@@ -394,6 +457,30 @@ export class GpuOcean {
     this.combineMat.uniforms.uHeight!.value = complexH.texture;
     this.combineMat.uniforms.uDisp!.value = complexD.texture;
     this.blit(this.combineMat, out);
+  }
+
+  private synthesizeVelocity(
+    h0: THREE.Texture,
+    size: number,
+    t: number,
+    out: THREE.WebGLRenderTarget,
+  ): void {
+    const mat = this.spectrumMat;
+    mat.uniforms.uH0!.value = h0;
+    mat.uniforms.uN!.value = this.n;
+    mat.uniforms.uSize!.value = size;
+    mat.uniforms.uTime!.value = t;
+    mat.uniforms.uDepth!.value = this.depth;
+    mat.uniforms.uDepthBelow!.value = this.overlayDepth;
+    mat.uniforms.uField!.value = 2;
+    this.blit(mat, this.spec!);
+    this.ifft(this.spec!, this.complexH!);
+    mat.uniforms.uField!.value = 3;
+    this.blit(mat, this.spec!);
+    this.ifft(this.spec!, this.complexD!);
+    this.combineVelMat.uniforms.uHoriz!.value = this.complexH!.texture;
+    this.combineVelMat.uniforms.uVert!.value = this.complexD!.texture;
+    this.blit(this.combineVelMat, out);
   }
 
   /** Inverse FFT, unnormalised, positive exponent. Result lands in `dst`. */
@@ -465,6 +552,26 @@ export class GpuOcean {
       this.slopes[i] = floatTarget(n, this.sampleFilter, THREE.RepeatWrapping, this.texType, mips);
     }
     this.foam.allocate(n);
+    if (this.velocityOn) this.allocateVelocities();
+  }
+
+  private allocateVelocities(): void {
+    this.disposeVelocities();
+    for (let i = 0; i < MAX_CASCADES; i++) {
+      this.velocities[i] = floatTarget(
+        this.n,
+        this.sampleFilter,
+        THREE.RepeatWrapping,
+        this.texType,
+        this.mipmapped,
+      );
+    }
+    this.dirty = true;
+  }
+
+  private disposeVelocities(): void {
+    for (const rt of this.velocities) rt.dispose();
+    this.velocities.length = 0;
   }
 
   private verify(t: number): void {
@@ -537,12 +644,14 @@ export class GpuOcean {
       this.complexD,
       ...this.outputs,
       ...this.slopes,
+      ...this.velocities,
     ]) {
       rt?.dispose();
     }
     this.scratchA = this.scratchB = this.spec = this.complexH = this.complexD = null;
     this.outputs.length = 0;
     this.slopes.length = 0;
+    this.velocities.length = 0;
     this.n = 0;
   }
 }

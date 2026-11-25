@@ -109,6 +109,7 @@ export class LabRuntime {
         }
         if (!this.renderer) return;
         if (s.overlay !== prev.overlay) this.renderer.setOverlay(s.overlay);
+        if (s.overlayDepth !== prev.overlayDepth) this.renderer.setOverlayDepth(s.overlayDepth);
         if (s.duckMode !== prev.duckMode) this.renderer.setDuckMode(s.duckMode);
         if (s.camera !== prev.camera || s.cameraTarget !== prev.cameraTarget) {
           this.renderer.setCamera(s.camera, s.cameraTarget);
@@ -272,6 +273,7 @@ export class LabRuntime {
       this.client.setVisualQuality(attachedQuality);
     }
     this.renderer.setOverlay(s.overlay);
+    this.renderer.setOverlayDepth(s.overlayDepth);
     this.renderer.setDuckMode(s.duckMode);
     this.renderer.setCamera(s.camera, s.cameraTarget);
     this.renderer.setRideView(s.rideView);

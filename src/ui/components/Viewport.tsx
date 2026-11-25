@@ -1,6 +1,7 @@
 import { beaufortFromWind } from '../../core/units';
 import { useEffect, useRef, useState } from 'react';
 import type { CameraMode, OverlayMode, RideTelemetry } from '../../render/api';
+import { legendSpec } from '../overlayLegend';
 import { RIDE_VIEW_LABELS, RIDE_VIEWS } from '../../render/rideViews';
 import { errorText, isChunkLoadError } from '../errorText';
 import { getRuntime } from '../runtime';
@@ -25,6 +26,10 @@ const OVERLAYS: { mode: OverlayMode; label: string }[] = [
   { mode: 'height', label: 'Surface height η' },
   { mode: 'steepness', label: 'Slope / steepness' },
   { mode: 'foam', label: 'Breaking & foam' },
+  { mode: 'jacobian', label: 'Jacobian (breaking flag)' },
+  { mode: 'velocity', label: 'Orbital velocity' },
+  { mode: 'pressure', label: 'Dynamic pressure' },
+  { mode: 'energy', label: 'Energy density' },
 ];
 
 export function Viewport() {
@@ -389,27 +394,12 @@ function HudClock() {
   );
 }
 
-function Legend({ mode }: { mode: OverlayMode }) {
+function Legend({ mode }: { mode: Exclude<OverlayMode, 'none'> }) {
   const hs = useLab((s) => s.diagnostics?.hs ?? 1);
-  const a = Math.max(0.25, hs * 0.75);
-  const spec =
-    mode === 'height'
-      ? {
-          title: 'Surface elevation η',
-          gradient: 'linear-gradient(90deg,#2166ac,#67a9cf,#f7f7f7,#ef8a62,#b2182b)',
-          ticks: [`−${a.toFixed(1)} m`, '0', `+${a.toFixed(1)} m`],
-        }
-      : mode === 'steepness'
-        ? {
-            title: 'Slope |∇η|',
-            gradient: 'linear-gradient(90deg,#0d0887,#7e03a8,#cc4778,#f89540,#f0f921)',
-            ticks: ['0', '0.15', '0.3+'],
-          }
-        : {
-            title: 'Breaking (Jacobian) & foam',
-            gradient: 'linear-gradient(90deg,#08306b,#4292c6,#f7fbff)',
-            ticks: ['none', '', 'breaking'],
-          };
+  const rho = useLab((s) => s.experiment.environment.waterDensity);
+  const g = useLab((s) => s.experiment.environment.gravity);
+  const depth = useLab((s) => s.overlayDepth);
+  const spec = legendSpec(mode, { hs, rho, g, depth });
   return (
     <figure className="hud__card legend" style={{ margin: 0 }}>
       <figcaption>{spec.title}</figcaption>
@@ -419,6 +409,20 @@ function Legend({ mode }: { mode: OverlayMode }) {
           <span key={i}>{t}</span>
         ))}
       </div>
+      <p className="legend__note">{spec.note}</p>
+      {mode === 'pressure' && (
+        <label className="legend__depth">
+          Depth below surface (m)
+          <input
+            type="number"
+            min={0}
+            max={200}
+            step={1}
+            value={depth}
+            onChange={(e) => lab().setOverlayDepth(Number(e.target.value))}
+          />
+        </label>
+      )}
     </figure>
   );
 }

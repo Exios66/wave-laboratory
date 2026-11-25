@@ -18,7 +18,16 @@ import { useLab, type MobilePanel } from './store';
 import './styles.css';
 
 const CAMERA_CYCLE: CameraMode[] = ['orbit', 'top', 'follow', 'bridge', 'underwater', 'plane'];
-const OVERLAY_CYCLE: OverlayMode[] = ['none', 'height', 'steepness', 'foam'];
+const OVERLAY_CYCLE: OverlayMode[] = [
+  'none',
+  'height',
+  'steepness',
+  'foam',
+  'jacobian',
+  'velocity',
+  'pressure',
+  'energy',
+];
 
 function isTyping(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;

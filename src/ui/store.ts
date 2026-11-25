@@ -78,6 +78,8 @@ export interface LabState {
   vesselDefinitions: Record<string, VesselDefinition>;
 
   overlay: OverlayMode;
+  /** Depth under the mean surface [m] of the pressure overlay. */
+  overlayDepth: number;
   camera: CameraMode;
   cameraTarget: string | null;
   /** The camera to go back to when leaving the plane view (never `plane`). */
@@ -114,6 +116,7 @@ export interface LabState {
   setPlaying(playing: boolean): void;
   setTimeScale(scale: number): void;
   setOverlay(mode: OverlayMode): void;
+  setOverlayDepth(depth: number): void;
   setCamera(mode: CameraMode, target?: string | null): void;
   /** Ride one of the lost flights over the lab, or come back down to the previous view. */
   togglePlaneView(): void;
@@ -261,6 +264,7 @@ export const useLab = create<LabState>()((set, get) => ({
   vesselDefinitions: {},
 
   overlay: 'none',
+  overlayDepth: 0,
   camera: 'orbit',
   cameraTarget: null,
   groundCamera: 'orbit',
@@ -381,6 +385,9 @@ export const useLab = create<LabState>()((set, get) => ({
   },
   setOverlay(overlay) {
     set({ overlay });
+  },
+  setOverlayDepth(depth) {
+    set({ overlayDepth: Math.min(200, Math.max(0, Number.isFinite(depth) ? depth : 0)) });
   },
   setCamera(camera, target) {
     set((s) => ({
