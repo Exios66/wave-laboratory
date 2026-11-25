@@ -239,6 +239,6 @@ The new GPU-timer passes need no new bucket: shafts fall in 'post' and clouds in
 
 ### Task F4: Integrate, review, ship
 
-- [ ] Update `docs/ARCHITECTURE.md` (sky, post chain, hull contact) and the PLAN.md §0 table (Phase 7 rows).
+- [x] Update `docs/ARCHITECTURE.md` (sky, post chain, hull contact) and the PLAN.md §0 table (Phase 7 rows).
 - [ ] Run `pnpm run check && pnpm test:e2e --trace off`.
 - [ ] Open the PR "Volumetric clouds, sun shafts and hull–water contact" and merge it under the constraints. Then `pnpm deploy:pages` and a deploy PR, as before.

@@ -919,7 +919,8 @@ vec3 underwaterSurface(vec3 V, vec3 N, float foam) {
     // Schlick on the transmitted side: reflectance climbs to 1 at the edge of the window.
     float r0 = pow((UNDERWATER_INDEX - 1.0) / (UNDERWATER_INDEX + 1.0), 2.0);
     float refl = r0 + (1.0 - r0) * pow(1.0 - cosT, 5.0);
-    col = mix(skyColor(normalize(T), uSunDir), uUwScatter, refl);
+    // One cloud sample is enough through the rippled window (a full march per fragment is not).
+    col = mix(skyColorSteps(normalize(T), uSunDir, 1.0, min(uCloudSteps, 1.0)), uUwScatter, refl);
   }
   return mix(col, uUwScatter * 0.35, foam * 0.85);
 }
@@ -1187,6 +1188,8 @@ void main() {
   vec3 Rs = vec3(R.x, max(R.y, 0.0), R.z);
   Rs.y += alpha * 0.6 * (1.0 - Rs.y);
   Rs = normalize(Rs);
+  // One cloud sample for the reflection (a deliberate cost trade-off: the blurred, wave-broken
+  // reflection hides the coarser cloud, and a full march per water fragment is too dear).
   vec3 skyR = skyColorSteps(Rs, uSunDir, 0.0, min(uCloudSteps, 1.0));
   skyR = mix(skyR, skyBlurred(Rs, uSunDir), smoothstep(0.08, 0.45, alpha));
   vec3 lowSea = mix(horizonColor() * 0.85, refracted, 0.55);

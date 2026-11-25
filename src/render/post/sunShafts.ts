@@ -36,15 +36,27 @@ function smoothstep(e0: number, e1: number, x: number): number {
 const scratch = new THREE.Vector3();
 const forward = new THREE.Vector3();
 
-/** The sun (a direction, at infinity) on screen: uv and the cosine to the view direction. */
+export interface SunOnScreen {
+  x: number;
+  y: number;
+  facing: number;
+}
+
+/**
+ * The sun (a direction, at infinity) on screen: uv and the cosine to the view direction.
+ * Pass `out` to reuse an object (the renderer calls this every frame).
+ */
 export function sunScreen(
   sunDir: THREE.Vector3,
   camera: THREE.Camera,
-): { x: number; y: number; facing: number } {
+  out: SunOnScreen = { x: 0, y: 0, facing: 0 },
+): SunOnScreen {
   camera.getWorldDirection(forward);
-  const facing = forward.dot(sunDir);
+  out.facing = forward.dot(sunDir);
   scratch.copy(camera.position).addScaledVector(sunDir, 1000).project(camera);
-  return { x: scratch.x * 0.5 + 0.5, y: scratch.y * 0.5 + 0.5, facing };
+  out.x = scratch.x * 0.5 + 0.5;
+  out.y = scratch.y * 0.5 + 0.5;
+  return out;
 }
 
 /** Strength of the shafts 0–1 (0 skips the pass). */

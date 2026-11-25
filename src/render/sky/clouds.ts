@@ -63,7 +63,7 @@ export function slabSpan(
   capKm: number,
 ): [number, number] | null {
   const inside = eyeKm >= baseKm && eyeKm <= topKm;
-  if (Math.abs(dirY) < 1e-6) return inside ? [0, capKm] : null;
+  if (Math.abs(dirY) < 1e-4) return inside ? [0, capKm] : null;
   const ta = (baseKm - eyeKm) / dirY;
   const tb = (topKm - eyeKm) / dirY;
   const t0 = Math.max(0, Math.min(ta, tb));

@@ -9,7 +9,7 @@ import { ScenePrepass } from './water/ScenePrepass';
 import { SkyEnvironment } from './sky/SkyEnvironment';
 import { cloudDeck } from './sky/clouds';
 import { CloudMap } from './sky/cloudMap';
-import { shaftStrength, sunScreen } from './post/sunShafts';
+import { shaftStrength, sunScreen, type SunOnScreen } from './post/sunShafts';
 import { smoothstep } from '../core/mathUtil';
 import { rotate, type Quat, type Vec3 } from '../core/vec';
 import type { GpuOceanData } from '../ocean/gpuData';
@@ -481,6 +481,9 @@ export class LabRenderer implements LabRendererApi {
   private duckMode = false;
   /** Time-of-day factors from SkyLighting (night, dusk, exposure and hemisphere tint). */
   private lightState: LightingState | null = null;
+  /** Reused every frame by `updateSunShafts` (no per-frame allocation). */
+  private readonly shaftScreen: SunOnScreen = { x: 0, y: 0, facing: 0 };
+  private readonly shaftParams = { x: 0, y: 0, strength: 0, tint: [1, 1, 1] as number[] };
   /** Last frame's weather at the camera, as 0–1 storm intensity and wind [m/s]. */
   private weatherStorm = 0;
   private localWind = 0;
@@ -1621,8 +1624,11 @@ export class LabRenderer implements LabRendererApi {
   private updateSunShafts(): void {
     const u = this.ocean.uniforms;
     const sunDir = u.uSunDir!.value as THREE.Vector3;
-    const screen = sunScreen(sunDir, this.camera);
-    const strength = shaftStrength({
+    const screen = sunScreen(sunDir, this.camera, this.shaftScreen);
+    const p = this.shaftParams;
+    p.x = screen.x;
+    p.y = screen.y;
+    p.strength = shaftStrength({
       sunY: sunDir.y,
       cloud: u.uCloud!.value as number,
       fogDensity: u.uFogDensity!.value as number,
@@ -1631,8 +1637,11 @@ export class LabRenderer implements LabRendererApi {
       x: screen.x,
       y: screen.y,
     });
-    const tint = (u.uSunTint?.value as THREE.Vector3 | undefined) ?? new THREE.Vector3(1, 1, 1);
-    this.post.setSunShafts({ x: screen.x, y: screen.y, strength, tint: [tint.x, tint.y, tint.z] });
+    const tint = u.uSunTint?.value as THREE.Vector3 | undefined;
+    p.tint[0] = tint?.x ?? 1;
+    p.tint[1] = tint?.y ?? 1;
+    p.tint[2] = tint?.z ?? 1;
+    this.post.setSunShafts(p);
   }
 
   /**
