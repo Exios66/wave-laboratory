@@ -91,8 +91,10 @@
   it falls back to a scalar `FogExp2` from the green-channel K_d.
 - **Scientific overlays.** `OverlayMode` adds `jacobian`, `velocity`, `pressure` and `energy`
   to height, slope and foam (shader codes 4 to 7 of `uOverlay`). Jacobian is the fragment
-  shader's existing J = (1 + ∂Dx/∂x)(1 + ∂Dy/∂y); J below `BREAKING_JACOBIAN` (0.30) is striped,
-  so the flag does not rely on colour. Energy is the instantaneous ½ρgη² (not a local mean).
+  shader's existing J = (1 + ∂Dx/∂x)(1 + ∂Dy/∂y), the same value that drives foam and normals;
+  it omits the cross term ∂Dx/∂y·∂Dy/∂x (the slope maps hold no mixed derivative), so it reads
+  high for waves oblique to the axes. J below `BREAKING_JACOBIAN` (0.30) is striped, so the flag
+  does not rely on colour. Energy is the instantaneous ½ρgη² (not a local mean).
   Velocity and dynamic pressure need data the cascade textures do not hold, so while one of those
   two overlays is on `GpuOcean` builds one extra RGBA target per live cascade, (ux, uy, w,
   elevation attenuated to depth d), with `SPECTRUM_FRAG` fields 2 and 3: ∂ĥ/∂t = −iω e1 + iω e2

@@ -669,7 +669,10 @@ export class GpuOcean {
         spectra.vert[cell]!,
         spectra.vert[cell + 1]!,
       ];
-      const err = Math.max(...cpu.map((c, i) => Math.abs(buf[i]! - c)));
+      // A NaN would compare false against `worst` and pass silently: count it as a mismatch.
+      const finite =
+        cpu.every(Number.isFinite) && [0, 1, 2, 3].every((i) => Number.isFinite(buf[i]));
+      const err = finite ? Math.max(...cpu.map((c, i) => Math.abs(buf[i]! - c))) : Infinity;
       if (err > worst) {
         worst = err;
         detail = `(${ix},${iy}) gpu=${[...buf].map((v) => v.toFixed(4)).join(',')} cpu=${cpu.map((v) => v.toFixed(4)).join(',')}`;

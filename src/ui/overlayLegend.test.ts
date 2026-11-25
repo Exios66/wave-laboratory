@@ -33,7 +33,8 @@ describe('overlay legends', () => {
   });
 
   it('names the depth of the pressure overlay and the instantaneous energy', () => {
-    expect(legendSpec('pressure', { ...sea, depth: 5 }).title).toMatch(/5 m/);
+    expect(legendSpec('pressure', { ...sea, depth: 5 }).title).toMatch(/at 5 m/);
+    expect(legendSpec('pressure', { ...sea, depth: 2.5 }).title).toMatch(/at 2\.5 m/);
     expect(legendSpec('energy', { ...sea, depth: 0 }).note).toMatch(/instantaneous/i);
   });
 

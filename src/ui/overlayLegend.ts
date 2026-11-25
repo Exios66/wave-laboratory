@@ -30,6 +30,11 @@ const DIVERGING_REVERSED = 'linear-gradient(90deg,#b2182b,#ef8a62,#f7f7f7,#67a9c
 const CIVIDIS = 'linear-gradient(90deg,#00204d,#414d6b,#7c7b78,#bcae6c,#ffea46)';
 const VIRIDIS = 'linear-gradient(90deg,#440154,#3b528b,#21918c,#5ec962,#fde725)';
 
+/** A depth as typed: whole metres without decimals, otherwise up to two decimals. */
+function depthLabel(d: number): string {
+  return String(Number(d.toFixed(2)));
+}
+
 function num(v: number): string {
   return v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
 }
@@ -64,7 +69,7 @@ export function legendSpec(mode: Exclude<OverlayMode, 'none'>, input: LegendInpu
         title: 'Jacobian J of the choppy surface',
         gradient: DIVERGING_REVERSED,
         ticks: ['0 folded', '1 undisturbed', '2+ stretched'],
-        note: `J = (1 + ∂Dx/∂x)(1 + ∂Dy/∂y). Striped = J below ${BREAKING_JACOBIAN.toFixed(2)}: breaking onset (folding is J < 0).`,
+        note: `J = (1 + ∂Dx/∂x)(1 + ∂Dy/∂y), the value the foam uses; it leaves out the cross term ∂Dx/∂y·∂Dy/∂x, so oblique waves read slightly high. Striped = J below ${BREAKING_JACOBIAN.toFixed(2)}: breaking onset (folding is J < 0).`,
       };
     case 'velocity':
       return {
@@ -76,7 +81,7 @@ export function legendSpec(mode: Exclude<OverlayMode, 'none'>, input: LegendInpu
     case 'pressure': {
       const kpa = sc.pressure / 1000;
       return {
-        title: `Dynamic pressure at ${input.depth.toFixed(0)} m depth`,
+        title: `Dynamic pressure at ${depthLabel(input.depth)} m depth`,
         gradient: DIVERGING,
         ticks: [`−${num(kpa)} kPa`, '0', `+${num(kpa)} kPa`],
         note: `ρ g η·cosh k(h−d)/cosh kh at depth d below the mean surface (hydrostatic part removed). Range ±ρ g·0.75 H_s, from H_s = ${input.hs.toFixed(1)} m.`,

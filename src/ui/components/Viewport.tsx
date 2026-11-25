@@ -402,7 +402,7 @@ function Legend({ mode }: { mode: Exclude<OverlayMode, 'none'> }) {
   const waterDepth = useLab((s) => s.experiment.environment.depth);
   const requested = useLab((s) => s.overlayDepth);
   // The shader stops at the seabed: label the depth actually drawn.
-  const maxDepth = Math.max(0, Math.min(200, Math.floor(waterDepth)));
+  const maxDepth = Math.max(0, Math.min(200, waterDepth));
   const depth = Math.min(requested, maxDepth);
   const spec = legendSpec(mode, { hs, rho, g, depth });
   return (
