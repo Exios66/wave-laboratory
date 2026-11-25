@@ -262,7 +262,15 @@ describe('LabRuntime.attach with an async renderer', () => {
     return { parentElement: { getBoundingClientRect: () => rect } } as unknown as HTMLCanvasElement;
   }
 
+  const handlers: Record<string, () => void> = {};
+
   beforeEach(() => {
+    for (const k of Object.keys(handlers)) delete handlers[k];
+    vi.stubGlobal('document', {
+      hidden: false,
+      addEventListener: (t: string, f: () => void) => void (handlers[t] = f),
+      removeEventListener: (t: string) => void delete handlers[t],
+    });
     vi.stubGlobal(
       'requestAnimationFrame',
       vi.fn(() => 1),
@@ -306,6 +314,43 @@ describe('LabRuntime.attach with an async renderer', () => {
     resolve(fake);
     await attached;
     expect(fake.setTimeOfDay).toHaveBeenLastCalledWith(hours);
+  });
+
+  it('resumes after a hidden tab without advancing the simulation by the whole gap', async () => {
+    let loop: ((t: number) => void) | null = null;
+    vi.stubGlobal(
+      'requestAnimationFrame',
+      vi.fn((cb: (t: number) => void) => {
+        loop = cb;
+        return 1;
+      }),
+    );
+    loadReply();
+    lab().setPlaying(true);
+    await runtime!.attach(fakeCanvas(), () => fakeRenderer());
+    expect(handlers.visibilitychange).toBeTypeOf('function');
+    const advances = () => worker.sent.filter((m) => m.type === 'advance');
+    // A minute in the background: rAF stopped, then the tab comes back.
+    now = 61_000;
+    handlers.visibilitychange!();
+    loop!(61_016);
+    const sent = advances().at(-1);
+    expect(sent).toBeDefined();
+    expect((sent as { dt: number }).dt).toBeLessThan(0.05 * lab().timeScale + 1e-9);
+    runtime!.detach();
+    expect(handlers.visibilitychange).toBeUndefined();
+  });
+
+  it('tells the worker the tier the renderer can actually draw', async () => {
+    const fake = fakeRenderer();
+    Object.defineProperty(fake, 'maxQuality', { value: 'low' });
+    const wrapped = new Proxy(fake, {
+      get: (t, k) => (k === 'maxQuality' ? 'low' : (t as never)[k]),
+    });
+    lab().setPerformance('ultra');
+    await runtime!.attach(fakeCanvas(), () => wrapped as LabRendererApi);
+    const quality = worker.sent.filter((m) => m.type === 'visual').at(-1);
+    expect(quality).toMatchObject({ quality: 'low' });
   });
 
   it('reports a rejected renderer import as unsupported', async () => {

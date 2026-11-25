@@ -40,7 +40,7 @@ describe('ResolutionGovernor quality tiers', () => {
     expect(g.tierSteps).toBe(3);
     const log = run(g, 200, 60);
     expect(log.map((l) => l.tier)).toEqual([2, 1, 0]);
-    expect(log[0]!.t).toBeGreaterThanOrEqual(20);
+    expect(log[0]!.t).toBeGreaterThanOrEqual(19);
   });
 
   it('does not flip-flop on a device that only fits the lower tier', () => {
@@ -51,8 +51,19 @@ describe('ResolutionGovernor quality tiers', () => {
       for (let i = 0; i < fps; i++) if (g.frame(1 / fps) && g.tierChanged) changes.push(sec);
     }
     // Retries back off (20, 40, 80, 160 s waits): about one retry per 3 minutes once backed off.
-    expect(changes.length).toBeLessThanOrEqual(18);
+    expect(changes.length).toBeLessThanOrEqual(22);
     expect(changes.filter((s) => s > 600).length).toBeLessThanOrEqual(8);
+  });
+
+  it('steps back up on a capped stream that drops an odd frame (windows at 90 % count)', () => {
+    const g = new ResolutionGovernor(0.5, 1, 30);
+    g.tierEnabled = true;
+    g.maxTierSteps = 2;
+    run(g, 40, 8);
+    expect(g.tierSteps).toBe(2);
+    // 28 fps against a 30 fps cap: below the 98 % bar of the scale logic, above 90 %.
+    const log = run(g, 200, 28);
+    expect(log.map((l) => l.tier)).toEqual([1, 0]);
   });
 
   it('holds steady at the target with no change at all', () => {

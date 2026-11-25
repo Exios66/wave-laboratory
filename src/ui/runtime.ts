@@ -17,6 +17,7 @@ import {
   resolvePostSettings,
   graphicsBudget,
   lowerQuality,
+  minQuality,
   ResolutionGovernor,
 } from './deviceProfile';
 import {
@@ -158,10 +159,13 @@ export class LabRuntime {
 
   /** The tier to draw at: only the "auto" setting may be stepped down by the governor. */
   private targetQuality() {
-    return lowerQuality(
+    const wanted = lowerQuality(
       this.baseQuality(),
       this.governor.tierEnabled ? this.governor.tierSteps : 0,
     );
+    // What the GPU can hold: the worker must not build FFT data the renderer would not draw.
+    const cap = this.renderer?.maxQuality;
+    return typeof cap === 'string' ? minQuality(wanted, cap) : wanted;
   }
 
   /** The governor changed the tier: apply it like a graphics-setting change (no sim restart). */
@@ -254,7 +258,13 @@ export class LabRuntime {
     const s = useLab.getState();
     // Edits made while the renderer loaded skipped the store subscription; take them now.
     this.clockHours = s.timeOfDay;
-    this.renderer.setQuality(this.targetQuality());
+    // The renderer may cap the tier (small texture limit): tell the worker the real one.
+    const attachedQuality = this.targetQuality();
+    this.renderer.setQuality(attachedQuality);
+    if (attachedQuality !== this.visualQuality) {
+      this.visualQuality = attachedQuality;
+      this.client.setVisualQuality(attachedQuality);
+    }
     this.renderer.setOverlay(s.overlay);
     this.renderer.setDuckMode(s.duckMode);
     this.renderer.setCamera(s.camera, s.cameraTarget);
@@ -320,23 +330,35 @@ export class LabRuntime {
     };
     let dead = false;
     let detachBattery = () => {};
-    nav.getBattery?.().then(
-      (b) => {
-        if (dead) return;
-        const read = () => update({ batteryLevel: b.level, charging: b.charging });
-        read();
-        b.addEventListener('levelchange', read);
-        b.addEventListener('chargingchange', read);
-        detachBattery = () => {
-          b.removeEventListener('levelchange', read);
-          b.removeEventListener('chargingchange', read);
-        };
-      },
-      () => {},
-    );
+    try {
+      nav.getBattery?.().then(
+        (b) => {
+          if (dead) return;
+          const read = () => update({ batteryLevel: b.level, charging: b.charging });
+          read();
+          b.addEventListener('levelchange', read);
+          b.addEventListener('chargingchange', read);
+          detachBattery = () => {
+            b.removeEventListener('levelchange', read);
+            b.removeEventListener('chargingchange', read);
+          };
+        },
+        () => {},
+      );
+    } catch {
+      // A browser that throws synchronously (permissions policy) just has no battery signal.
+    }
+    // rAF does not fire in a hidden tab, so the first frame after returning would otherwise
+    // advance the simulation by the whole clamped gap: start the clock afresh instead.
+    const onVisibility = () => {
+      this.lastTime = performance.now();
+      this.pacer.reset();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
     this.powerCleanup = () => {
       dead = true;
       detachBattery();
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }
 
@@ -400,7 +422,6 @@ export class LabRuntime {
     this.advanceDisplayClock(wall, s.playing && s.status === 'ready', s.timeScale);
     this.renderer?.setVisualTime(this.displayT);
     this.advanceClock(now, wall, s);
-    if (document.hidden) return;
     if (this.renderer && this.governor.frame(wall) && this.canvas) {
       if (this.governor.tierChanged) this.applyTier();
       this.resize(this.canvas);

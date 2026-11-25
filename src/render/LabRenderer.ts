@@ -367,6 +367,7 @@ export class LabRenderer implements LabRendererApi {
     lens: false,
     geometries: 0,
     textures: 0,
+    frames: 0,
   };
 
   private readonly renderer: THREE.WebGLRenderer;
@@ -476,6 +477,10 @@ export class LabRenderer implements LabRendererApi {
   private readonly wakeSources: WakeSource[] = [];
   private readonly look = new THREE.Vector3();
   private capsMaxQuality: OceanQuality = 'ultra';
+
+  get maxQuality(): OceanQuality {
+    return this.capsMaxQuality;
+  }
   private readonly onLost: (ev: Event) => void;
   private readonly onRestored: () => void;
   private readonly onPointerDown: (ev: PointerEvent) => void;
@@ -1571,6 +1576,7 @@ export class LabRenderer implements LabRendererApi {
     this.stats.triangles = this.renderer.info.render.triangles;
     this.stats.geometries = this.renderer.info.memory.geometries;
     this.stats.textures = this.renderer.info.memory.textures;
+    this.stats.frames += 1;
     // Frame rate from the interval between frames, not the time spent inside render().
     if (this.lastFrameAt > 0) {
       this.fpsFrames += 1;

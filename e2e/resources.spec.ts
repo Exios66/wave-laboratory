@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { expect, frames, test, trackErrors } from './fixtures';
+import { expect, test, trackErrors } from './fixtures';
 
 /**
  * Resource hygiene on real WebGL (SwiftShader): GPU objects (three's `renderer.info.memory`)
@@ -14,12 +14,27 @@ interface Counts {
   textures: number;
 }
 
-async function counts(page: Page): Promise<Counts> {
-  await frames(page, 2);
+type LabHook = { __waveLab: { stats: () => (Counts & { frames: number }) | null } };
+
+/**
+ * Counts as of at least `renders` fresh renders from now. The stats only refresh inside the
+ * renderer's render(), and software GL draws well under one frame a second, so waiting on
+ * animation frames (which tick regardless) would just re-read a stale render.
+ */
+async function counts(page: Page, renders = 2): Promise<Counts> {
+  const start = await page.evaluate(
+    () => (window as unknown as LabHook).__waveLab.stats()?.frames ?? 0,
+  );
+  await page.waitForFunction(
+    ([from, n]) => {
+      const s = (window as unknown as LabHook).__waveLab.stats();
+      return s !== null && s.frames >= (from as number) + (n as number);
+    },
+    [start, renders],
+    { timeout: 120_000 },
+  );
   return page.evaluate(() => {
-    const s = (
-      window as unknown as { __waveLab: { stats: () => Counts | null } }
-    ).__waveLab.stats();
+    const s = (window as unknown as LabHook).__waveLab.stats();
     if (!s) throw new Error('renderer not ready');
     return { geometries: s.geometries, textures: s.textures };
   });
