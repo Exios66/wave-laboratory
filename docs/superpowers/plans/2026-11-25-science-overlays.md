@@ -3,12 +3,12 @@
 Goal: four new surface overlays next to height / slope / foam, each physically correct for the linear
 spectral sea plus the regular and focused components, each with an accessible legend.
 
-| Mode | Quantity | Unit |
-|---|---|---|
-| `jacobian` | Jacobian J of the horizontal displacement map; J below a threshold is flagged as breaking | - |
-| `velocity` | surface orbital speed sqrt(u_h^2 + w^2) = |d(Dx,Dy,eta)/dt| | m/s |
-| `pressure` | dynamic pressure rho g eta cosh(k(z+h))/cosh(kh) at a chosen depth (default 0 m) | kPa |
-| `energy` | instantaneous potential energy density 1/2 rho g eta^2 (not a local mean) | J/m2 |
+| Mode       | Quantity                                                                                  | Unit            |
+| ---------- | ----------------------------------------------------------------------------------------- | --------------- |
+| `jacobian` | Jacobian J of the horizontal displacement map; J below a threshold is flagged as breaking | -               |
+| `velocity` | surface orbital speed sqrt(u_h^2 + w^2) =                                                 | d(Dx,Dy,eta)/dt |     | m/s |
+| `pressure` | dynamic pressure rho g eta cosh(k(z+h))/cosh(kh) at a chosen depth (default 0 m)          | kPa             |
+| `energy`   | instantaneous potential energy density 1/2 rho g eta^2 (not a local mean)                 | J/m2            |
 
 ## Design
 

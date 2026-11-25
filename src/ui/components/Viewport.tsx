@@ -419,7 +419,7 @@ function Legend({ mode }: { mode: Exclude<OverlayMode, 'none'> }) {
             max={200}
             step={1}
             value={depth}
-            onChange={(e) => lab().setOverlayDepth(Number(e.target.value))}
+            onChange={(e) => useLab.getState().setOverlayDepth(Number(e.target.value))}
           />
         </label>
       )}
