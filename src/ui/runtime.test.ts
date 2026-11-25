@@ -365,6 +365,44 @@ describe('LabRuntime.attach with an async renderer', () => {
     expect(governor.maxTierSteps).toBe(0);
   });
 
+  it('follows a Save-Data change while attached, and stops listening on detach', async () => {
+    const listeners = new Map<string, () => void>();
+    const connection = {
+      saveData: false,
+      addEventListener: (t: string, f: () => void) => void listeners.set(t, f),
+      removeEventListener: (t: string) => void listeners.delete(t),
+    };
+    vi.stubGlobal('navigator', { hardwareConcurrency: 8, connection });
+    await runtime!.attach(fakeCanvas(), () => fakeRenderer());
+    expect(runtime!.governorState().capFps).toBe(0);
+    connection.saveData = true;
+    listeners.get('change')!();
+    expect(runtime!.governorState().capFps).toBe(30);
+    runtime!.detach();
+    expect(listeners.size).toBe(0);
+  });
+
+  it('drops the last battery reading on detach', async () => {
+    const battery = {
+      level: 0.1,
+      charging: false,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    };
+    vi.stubGlobal('navigator', {
+      hardwareConcurrency: 8,
+      getBattery: () => Promise.resolve(battery),
+    });
+    await runtime!.attach(fakeCanvas(), () => fakeRenderer());
+    await Promise.resolve();
+    expect(runtime!.governorState().capFps).toBe(30);
+    runtime!.detach();
+    // The next attach has no battery signal at all: the old low-battery cap must not stick.
+    vi.stubGlobal('navigator', { hardwareConcurrency: 8 });
+    await runtime!.attach(fakeCanvas(), () => fakeRenderer());
+    expect(runtime!.governorState().capFps).toBe(0);
+  });
+
   it('reports a rejected renderer import as unsupported', async () => {
     await runtime!.attach(fakeCanvas(), () => Promise.reject(new Error('chunk')));
     expect(lab().status).toBe('unsupported');

@@ -305,6 +305,8 @@ export class LabRuntime {
     this.intersection = null;
     this.powerCleanup?.();
     this.powerCleanup = null;
+    // The next attach reads the battery afresh; a stale low-battery cap must not outlive it.
+    this.power = { ...this.power, batteryLevel: null, charging: true };
     this.onScreen = true;
     this.renderer?.dispose();
     this.renderer = null;
@@ -324,8 +326,18 @@ export class LabRuntime {
       this.power = { ...this.power, ...patch };
       this.configureGovernor();
     };
-    const conn = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
-    update({ saveData: conn?.saveData === true });
+    const conn = (
+      navigator as Navigator & {
+        connection?: {
+          saveData?: boolean;
+          addEventListener?: (t: string, f: () => void) => void;
+          removeEventListener?: (t: string, f: () => void) => void;
+        };
+      }
+    ).connection;
+    const readSaveData = () => update({ saveData: conn?.saveData === true });
+    readSaveData();
+    conn?.addEventListener?.('change', readSaveData);
     const nav = navigator as Navigator & {
       getBattery?: () => Promise<{
         level: number;
@@ -364,6 +376,7 @@ export class LabRuntime {
     this.powerCleanup = () => {
       dead = true;
       detachBattery();
+      conn?.removeEventListener?.('change', readSaveData);
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }
