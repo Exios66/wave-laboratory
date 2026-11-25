@@ -259,6 +259,8 @@ export class PostStack {
   setUnderwater(params: UnderwaterParams | null): void {
     this.underwater = params;
     this.underwaterPass?.set(params);
+    // Surfacing with every effect off: the HDR targets are not needed any more.
+    if (params === null && this.composer && !this.active) this.disposeComposer();
   }
 
   /** Whether the sun glint and lightning should be boosted above 1.0 for the bloom pass. */
@@ -269,6 +271,9 @@ export class PostStack {
   setSettings(settings: PostSettings): void {
     this.settings = { ...settings };
     this.applySettings();
+    // Every effect off (a drop to Low quality): free the full-resolution HDR targets now rather
+    // than carrying them, unused, until the page closes. They rebuild when something needs them.
+    if (this.composer && !this.active) this.disposeComposer();
   }
 
   setSize(width: number, height: number, pixelRatio: number): void {

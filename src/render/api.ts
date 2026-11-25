@@ -95,6 +95,11 @@ export interface RendererStats {
   lens: boolean;
   /** True while sun shafts are drawn. */
   shafts: boolean;
+  /** GPU objects alive (three's `renderer.info.memory`): a leak shows as steady growth. */
+  geometries: number;
+  textures: number;
+  /** Frames rendered so far: counts and timings above refresh only when this advances. */
+  frames: number;
 }
 
 /** Plane view readout: which flight, and how it is flying. */
@@ -174,5 +179,7 @@ export interface LabRendererApi {
   /** Easter egg: draw every hull as a rubber duck. The physics is unchanged. */
   setDuckMode(on: boolean): void;
   readonly stats: RendererStats;
+  /** Highest quality tier this GPU's texture limits allow (`setQuality` clamps to it). */
+  readonly maxQuality: OceanQuality;
   dispose(): void;
 }

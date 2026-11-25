@@ -8,7 +8,7 @@ import {
 } from '../../instruments/analysis';
 import { downloadText, slug } from '../fileOps';
 import { getRuntime } from '../runtime';
-import { renderCostText, renderCostTitle } from '../renderCost';
+import { adaptiveText, renderCostText, renderCostTitle } from '../renderCost';
 import { useLab, type DockTab } from '../store';
 import { telemetry } from '../telemetry';
 import type { ChartSeries } from './Chart';
@@ -193,9 +193,14 @@ function RenderCost() {
     const read = () => {
       const stats = getRuntime().rendererApi?.stats;
       setText(stats ? renderCostText(stats.fps, stats.gpuMs) : '');
-      setTitle(
-        renderCostTitle(stats?.gpuPasses ?? null, stats?.taa ?? false, stats?.lens ?? false),
+      const gov = getRuntime().governorState();
+      const adapt = adaptiveText(gov.scale, gov.tierSteps, gov.capFps);
+      const title = renderCostTitle(
+        stats?.gpuPasses ?? null,
+        stats?.taa ?? false,
+        stats?.lens ?? false,
       );
+      setTitle(adapt ? `${title}. ${adapt}` : title);
     };
     const id = window.setInterval(read, 500);
     return () => window.clearInterval(id);

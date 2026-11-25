@@ -6,6 +6,7 @@
  * The renderer always draws the ocean at the time of the latest physics frame, so the vessels
  * and the waves you see are the same state.
  */
+import { gfxForcedFull } from '../core/gfxOverride';
 import type { LabRendererApi } from '../render/api';
 import { SimClient } from '../sim/SimClient';
 import type { FromWorker, SimFrame } from '../sim/types';
@@ -15,11 +16,23 @@ import {
   effectiveQuality,
   resolvePostSettings,
   graphicsBudget,
+  lowerQuality,
+  minQuality,
   ResolutionGovernor,
 } from './deviceProfile';
+import {
+  FramePacer,
+  frameCapFor,
+  governorTarget,
+  NO_SIGNALS,
+  shouldRun,
+  type PowerSignals,
+} from './framePacing';
 import { HealthNotifier } from './health';
 import { useLab } from './store';
 import { telemetry } from './telemetry';
+
+const QUALITY_ORDER = ['low', 'medium', 'high', 'ultra'];
 
 export class LabRuntime {
   readonly client: SimClient;
@@ -35,6 +48,12 @@ export class LabRuntime {
   private readonly governor = new ResolutionGovernor();
   private readonly healthNotices = new HealthNotifier();
   private canvas: HTMLCanvasElement | null = null;
+  /** Frame cap on battery saver / save-data / software rendering; 0 = display rate. */
+  private readonly pacer = new FramePacer(0);
+  private power: PowerSignals = NO_SIGNALS;
+  private onScreen = true;
+  private intersection: IntersectionObserver | null = null;
+  private powerCleanup: (() => void) | null = null;
   private visualQuality: string | null = null;
   /** Smoothed time the picture is drawn at. Physics frames arrive in bursts; this glides. */
   private displayT = 0;
@@ -132,9 +151,34 @@ export class LabRuntime {
     );
   }
 
-  private targetQuality() {
+  /**
+   * The tier the settings ask for, capped at what the GPU can hold, before any adaptive
+   * step-down. Capping first keeps every governor step a real step below the drawn tier.
+   */
+  private baseQuality() {
     const s = useLab.getState();
-    return effectiveQuality(s.experiment.quality, s.performance, detectDeviceProfile());
+    const wanted = effectiveQuality(s.experiment.quality, s.performance, detectDeviceProfile());
+    // What the GPU can hold: the worker must not build FFT data the renderer would not draw.
+    const cap = this.renderer?.maxQuality;
+    return typeof cap === 'string' ? minQuality(wanted, cap) : wanted;
+  }
+
+  /** The tier to draw at: only the "auto" setting may be stepped down by the governor. */
+  private targetQuality() {
+    return lowerQuality(
+      this.baseQuality(),
+      this.governor.tierEnabled ? this.governor.tierSteps : 0,
+    );
+  }
+
+  /** The governor changed the tier: apply it like a graphics-setting change (no sim restart). */
+  private applyTier(): void {
+    const quality = this.targetQuality();
+    if (quality === this.visualQuality) return;
+    this.visualQuality = quality;
+    this.client.setVisualQuality(quality);
+    this.renderer?.setQuality(quality);
+    this.pushPost();
   }
 
   private load(): void {
@@ -142,6 +186,8 @@ export class LabRuntime {
     this.loadedRevision = s.revision;
     telemetry.clear();
     this.healthNotices.reset();
+    this.governor.resetTier();
+    this.configureTierGovernor();
     const quality = this.targetQuality();
     this.visualQuality = quality;
     this.renderer?.setQuality(quality);
@@ -151,6 +197,8 @@ export class LabRuntime {
 
   /** Re-derive graphics settings after the performance mode changed (no simulation restart). */
   private applyPerformanceMode(): void {
+    this.governor.resetTier();
+    this.configureTierGovernor();
     const quality = this.targetQuality();
     if (quality !== this.visualQuality) {
       this.visualQuality = quality;
@@ -162,12 +210,25 @@ export class LabRuntime {
     if (this.canvas) this.resize(this.canvas);
   }
 
+  /**
+   * Tier steps are only for "auto" (an explicit choice keeps its tier), and not under `?gfx=full`
+   * (the e2e suite and diagnostics pin the quality; software rendering would otherwise step down).
+   */
+  private configureTierGovernor(): void {
+    const g = this.governor;
+    g.tierEnabled = useLab.getState().performance === 'auto' && !gfxForcedFull();
+    g.maxTierSteps = Math.max(0, QUALITY_ORDER.indexOf(this.baseQuality()));
+    g.tierSteps = Math.min(g.tierSteps, g.maxTierSteps);
+  }
+
   private configureGovernor(): void {
     const budget = graphicsBudget(useLab.getState().performance, detectDeviceProfile());
     const g = this.governor;
     g.maxScale = 1;
     g.minScale = budget.minScale;
-    g.targetFps = budget.targetFps;
+    this.power = { ...this.power, software: detectDeviceProfile().software };
+    this.pacer.capFps = frameCapFor(this.power);
+    g.targetFps = governorTarget(budget.targetFps, this.pacer.capFps);
     g.scale = Math.min(Math.max(g.scale, g.minScale), g.maxScale);
     useLab.getState().setRenderScale(g.scale);
   }
@@ -201,7 +262,15 @@ export class LabRuntime {
     const s = useLab.getState();
     // Edits made while the renderer loaded skipped the store subscription; take them now.
     this.clockHours = s.timeOfDay;
-    this.renderer.setQuality(this.targetQuality());
+    // The renderer may cap the tier (small texture limit): tell the worker the real one.
+    // The renderer's ceiling is known only now: re-derive the governor's room to step down.
+    this.configureTierGovernor();
+    const attachedQuality = this.targetQuality();
+    this.renderer.setQuality(attachedQuality);
+    if (attachedQuality !== this.visualQuality) {
+      this.visualQuality = attachedQuality;
+      this.client.setVisualQuality(attachedQuality);
+    }
     this.renderer.setOverlay(s.overlay);
     this.renderer.setDuckMode(s.duckMode);
     this.renderer.setCamera(s.camera, s.cameraTarget);
@@ -217,6 +286,7 @@ export class LabRuntime {
     this.resizeObserver = new ResizeObserver(() => this.resize(canvas));
     this.resizeObserver.observe(parent);
     this.resize(canvas);
+    this.watchPowerAndVisibility(canvas);
     this.lastTime = performance.now();
     const loop = (now: number) => {
       this.raf = requestAnimationFrame(loop);
@@ -231,9 +301,94 @@ export class LabRuntime {
     this.raf = 0;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.intersection?.disconnect();
+    this.intersection = null;
+    this.powerCleanup?.();
+    this.powerCleanup = null;
+    // The next attach reads the battery afresh; a stale low-battery cap must not outlive it.
+    this.power = { ...this.power, batteryLevel: null, charging: true };
+    this.onScreen = true;
     this.renderer?.dispose();
     this.renderer = null;
     this.canvas = null;
+  }
+
+  /** Stop drawing off-screen, and cap the frame rate when power is short. */
+  private watchPowerAndVisibility(canvas: HTMLCanvasElement): void {
+    if (typeof IntersectionObserver !== 'undefined') {
+      this.intersection = new IntersectionObserver((entries) => {
+        const e = entries[entries.length - 1];
+        if (e) this.onScreen = e.isIntersecting;
+      });
+      this.intersection.observe(canvas);
+    }
+    const update = (patch: Partial<PowerSignals>) => {
+      this.power = { ...this.power, ...patch };
+      this.configureGovernor();
+    };
+    const conn = (
+      navigator as Navigator & {
+        connection?: {
+          saveData?: boolean;
+          addEventListener?: (t: string, f: () => void) => void;
+          removeEventListener?: (t: string, f: () => void) => void;
+        };
+      }
+    ).connection;
+    const readSaveData = () => update({ saveData: conn?.saveData === true });
+    readSaveData();
+    conn?.addEventListener?.('change', readSaveData);
+    const nav = navigator as Navigator & {
+      getBattery?: () => Promise<{
+        level: number;
+        charging: boolean;
+        addEventListener: (t: string, f: () => void) => void;
+        removeEventListener: (t: string, f: () => void) => void;
+      }>;
+    };
+    let dead = false;
+    let detachBattery = () => {};
+    try {
+      nav.getBattery?.().then(
+        (b) => {
+          if (dead) return;
+          const read = () => update({ batteryLevel: b.level, charging: b.charging });
+          read();
+          b.addEventListener('levelchange', read);
+          b.addEventListener('chargingchange', read);
+          detachBattery = () => {
+            b.removeEventListener('levelchange', read);
+            b.removeEventListener('chargingchange', read);
+          };
+        },
+        () => {},
+      );
+    } catch {
+      // A browser that throws synchronously (permissions policy) just has no battery signal.
+    }
+    // rAF does not fire in a hidden tab, so the first frame after returning would otherwise
+    // advance the simulation by the whole clamped gap: start the clock afresh instead.
+    const onVisibility = () => {
+      this.lastTime = performance.now();
+      this.pacer.reset();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    this.powerCleanup = () => {
+      dead = true;
+      detachBattery();
+      conn?.removeEventListener?.('change', readSaveData);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }
+
+  /** Current adaptive-resolution state, for diagnostics. */
+  governorState(): { scale: number; tierSteps: number; capFps: number; tier: string | null } {
+    return {
+      scale: this.governor.scale,
+      tierSteps: this.governor.tierEnabled ? this.governor.tierSteps : 0,
+      capFps: this.pacer.capFps,
+      tier: this.visualQuality,
+    };
   }
 
   get rendererApi(): LabRendererApi | null {
@@ -268,6 +423,14 @@ export class LabRuntime {
   }
 
   private tick(now: number): void {
+    if (!shouldRun(document.hidden, this.onScreen)) {
+      // Nothing to see: stop the simulation and the draw, and resume without a time jump.
+      this.lastTime = now;
+      this.pacer.reset();
+      return;
+    }
+    // Capped: skip this frame; the wall time since the last one accumulates into the next.
+    if (!this.pacer.accept(now)) return;
     // Clamp long gaps (tab in background, debugger) so the simulation never jumps.
     const wall = Math.min(0.1, Math.max(0, (now - this.lastTime) / 1000));
     this.lastTime = now;
@@ -278,12 +441,16 @@ export class LabRuntime {
     this.advanceDisplayClock(wall, s.playing && s.status === 'ready', s.timeScale);
     this.renderer?.setVisualTime(this.displayT);
     this.advanceClock(now, wall, s);
-    if (document.hidden) return;
-    if (this.renderer && this.governor.frame(wall) && this.canvas) {
-      this.resize(this.canvas);
-      s.setRenderScale(this.governor.scale);
-    }
+    this.adapt(wall, s);
     this.renderer?.render();
+  }
+
+  /** Feed the frame to the governor; apply a new render scale or quality tier. */
+  private adapt(wall: number, s: ReturnType<typeof useLab.getState>): void {
+    if (!this.renderer || !this.governor.frame(wall) || !this.canvas) return;
+    if (this.governor.tierChanged) this.applyTier();
+    this.resize(this.canvas);
+    s.setRenderScale(this.governor.scale);
   }
 
   /** Paused: the waves stand still but the camera can still move below them. */

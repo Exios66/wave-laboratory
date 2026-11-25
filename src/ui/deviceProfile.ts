@@ -175,15 +175,43 @@ export function graphicsBudget(mode: PerformanceMode, profile: DeviceProfile): G
   }
 }
 
+/** One quality level lower per step, never below `low`. */
+export function lowerQuality(q: OceanQuality, steps: number): OceanQuality {
+  return ORDER[Math.max(0, ORDER.indexOf(q) - Math.max(0, Math.floor(steps)))]!;
+}
+
 /**
  * Dynamic resolution controller: lowers the render scale when frames take too long and raises it
  * again (slowly) when there is headroom. Hysteresis avoids oscillation.
+ *
+ * With `tierEnabled` (graphics setting "auto" only) it also steps the quality tier down when the
+ * scale is already at its floor and frames are still too slow, and back up after a long run of
+ * good frames at full scale. Each step up that is followed by a step down within a short time
+ * doubles the wait before the next step up, so a device that sits between two tiers settles on
+ * the lower one instead of flipping between them.
  */
 export class ResolutionGovernor {
   scale = 1;
+  /** How many quality levels below the requested one we are running (0 = as requested). */
+  tierSteps = 0;
+  /** Set when the last `frame()` call changed `tierSteps`. */
+  tierChanged = false;
+  /** Most steps allowed (levels above `low` at the requested quality). */
+  maxTierSteps = 0;
+  tierEnabled = false;
   private frames = 0;
   private elapsed = 0;
   private goodWindows = 0;
+  /** Consecutive windows at 90 % of the target or better (a looser bar for stepping the tier up). */
+  private upWindows = 0;
+  private badAtFloor = 0;
+  private windows = 0;
+  private lastUpWindow = Number.NEGATIVE_INFINITY;
+  private upWait = 20;
+  static readonly UP_WAIT = 20;
+  static readonly UP_WAIT_MAX = 160;
+  /** A down-step this soon after an up-step counts as flapping. */
+  static readonly FLAP_WINDOWS = 25;
 
   constructor(
     public minScale = 0.5,
@@ -191,8 +219,18 @@ export class ResolutionGovernor {
     public targetFps = 55,
   ) {}
 
-  /** Feed a frame duration [s]; returns true when the scale changed. */
+  /** Forget tier history (a new experiment or a changed setting). */
+  resetTier(): void {
+    this.tierSteps = 0;
+    this.badAtFloor = 0;
+    this.upWindows = 0;
+    this.upWait = ResolutionGovernor.UP_WAIT;
+    this.lastUpWindow = Number.NEGATIVE_INFINITY;
+  }
+
+  /** Feed a frame duration [s]; returns true when the scale or the tier changed. */
   frame(dt: number): boolean {
+    this.tierChanged = false;
     if (!(dt > 0) || dt > 0.5) return false;
     this.frames++;
     this.elapsed += dt;
@@ -200,19 +238,61 @@ export class ResolutionGovernor {
     const fps = this.frames / this.elapsed;
     this.frames = 0;
     this.elapsed = 0;
+    this.windows++;
+    this.upWindows = fps >= this.targetFps * 0.9 ? this.upWindows + 1 : 0;
     const before = this.scale;
-    if (fps < this.targetFps * 0.85) {
+    if (fps < this.targetFps * 0.85) this.slowWindow();
+    else if (fps > this.targetFps * 0.98) this.fastWindow();
+    else {
       this.goodWindows = 0;
-      this.scale = Math.max(this.minScale, this.scale * 0.85);
-    } else if (fps > this.targetFps * 0.98) {
-      if (++this.goodWindows >= 3 && this.scale < this.maxScale) {
-        this.goodWindows = 0;
-        this.scale = Math.min(this.maxScale, this.scale * 1.1);
-      }
-    } else {
-      this.goodWindows = 0;
+      this.badAtFloor = 0;
     }
-    return Math.abs(this.scale - before) > 1e-6;
+    this.maybeStepTierUp();
+    return this.tierChanged || Math.abs(this.scale - before) > 1e-6;
+  }
+
+  /** A slow second: lower the resolution, and at the floor cut detail. */
+  private slowWindow(): void {
+    this.goodWindows = 0;
+    if (this.scale > this.minScale + 1e-6) {
+      this.badAtFloor = 0;
+      this.scale = Math.max(this.minScale, this.scale * 0.85);
+      return;
+    }
+    if (!this.tierEnabled || this.tierSteps >= this.maxTierSteps) return;
+    // Resolution cannot go lower: two bad seconds in a row at the floor, then cut detail.
+    if (++this.badAtFloor < 2) return;
+    this.badAtFloor = 0;
+    this.tierSteps++;
+    this.tierChanged = true;
+    this.scale = Math.min(this.maxScale, Math.max(this.minScale, 0.85));
+    if (this.windows - this.lastUpWindow < ResolutionGovernor.FLAP_WINDOWS) {
+      this.upWait = Math.min(ResolutionGovernor.UP_WAIT_MAX, this.upWait * 2);
+    }
+  }
+
+  /** A fast second: after three in a row, raise the resolution a step. */
+  private fastWindow(): void {
+    this.badAtFloor = 0;
+    this.goodWindows++;
+    if (this.scale < this.maxScale && this.goodWindows >= 3) {
+      this.goodWindows = 0;
+      this.scale = Math.min(this.maxScale, this.scale * 1.1);
+    }
+  }
+
+  /**
+   * Tier step up: a long run of windows at 90 % of the target or better. Looser than the
+   * scale-up bar (98 %) so a capped stream that drops an odd frame still recovers.
+   */
+  private maybeStepTierUp(): void {
+    if (!this.tierEnabled || this.tierSteps <= 0 || this.upWindows < this.upWait) return;
+    this.goodWindows = 0;
+    this.upWindows = 0;
+    this.tierSteps--;
+    this.tierChanged = true;
+    this.lastUpWindow = this.windows;
+    this.scale = Math.max(this.minScale, 0.9);
   }
 }
 

@@ -113,6 +113,7 @@ import {
 } from './scene/sprayMath';
 import { ChainView } from './scene/chain';
 import { ForeAftRigView } from './scene/foreAftRig';
+import { decideCapabilities, readCapabilities, type CapabilityDecision } from './capabilities';
 import { RigView } from './scene/rig';
 import { WakeField, type WakeSource } from './scene/wakes';
 import { HullWetState } from './vessel/hullWetting';
@@ -334,11 +335,13 @@ function rendererTier(gl: WebGL2RenderingContext): 'light' | 'full' {
   return software || (coarse && small) ? 'light' : 'full';
 }
 
-function oceanTextureType(gl: WebGL2RenderingContext): THREE.TextureDataType {
-  if (gl.getExtension('EXT_color_buffer_float')) return THREE.FloatType;
-  if (gl.getExtension('EXT_color_buffer_half_float')) return THREE.HalfFloatType;
+function oceanTextureType(caps: CapabilityDecision): THREE.TextureDataType {
+  if (caps.oceanTexture === 'float') return THREE.FloatType;
+  if (caps.oceanTexture === 'half') return THREE.HalfFloatType;
   throw new Error('This browser cannot render the ocean (missing floating-point colour buffers).');
 }
+
+const QUALITY_ORDER: readonly OceanQuality[] = ['low', 'medium', 'high', 'ultra'];
 
 /** Underwater camera: eye depth [m] and limits, how far it floats from the vessel, gaze. */
 const UNDERWATER_VIEW = {
@@ -385,6 +388,9 @@ export class LabRenderer implements LabRendererApi {
     taa: false,
     lens: false,
     shafts: false,
+    geometries: 0,
+    textures: 0,
+    frames: 0,
   };
 
   private readonly renderer: THREE.WebGLRenderer;
@@ -497,6 +503,11 @@ export class LabRenderer implements LabRendererApi {
   private readonly wakes = new WakeField();
   private readonly wakeSources: WakeSource[] = [];
   private readonly look = new THREE.Vector3();
+  private capsMaxQuality: OceanQuality = 'ultra';
+
+  get maxQuality(): OceanQuality {
+    return this.capsMaxQuality;
+  }
   private readonly onLost: (ev: Event) => void;
   private readonly onRestored: () => void;
   private readonly onPointerDown: (ev: PointerEvent) => void;
@@ -615,7 +626,9 @@ export class LabRenderer implements LabRendererApi {
       powerPreference: 'high-performance',
     });
     if (!gl) throw new Error('WebGL 2 is not available in this browser.');
-    const texType = oceanTextureType(gl);
+    const caps = decideCapabilities(readCapabilities(gl));
+    this.capsMaxQuality = caps.maxQuality;
+    const texType = oceanTextureType(caps);
     this.gpuTimer = new GpuTimer(gl);
     this.renderer = new THREE.WebGLRenderer({
       canvas,
@@ -916,7 +929,12 @@ export class LabRenderer implements LabRendererApi {
     }
   }
 
-  setQuality(quality: OceanQuality): void {
+  setQuality(requested: OceanQuality): void {
+    // Small-texture devices (some older phones) cannot hold the biggest FFT grids.
+    const quality =
+      QUALITY_ORDER[
+        Math.min(QUALITY_ORDER.indexOf(requested), QUALITY_ORDER.indexOf(this.capsMaxQuality))
+      ]!;
     if (quality === this.quality) return;
     this.quality = quality;
     this.oceanMesh.geometry.dispose();
@@ -1607,6 +1625,9 @@ export class LabRenderer implements LabRendererApi {
     this.stats.frameMs = now - t0;
     this.stats.drawCalls = this.renderer.info.render.calls;
     this.stats.triangles = this.renderer.info.render.triangles;
+    this.stats.geometries = this.renderer.info.memory.geometries;
+    this.stats.textures = this.renderer.info.memory.textures;
+    this.stats.frames += 1;
     // Frame rate from the interval between frames, not the time spent inside render().
     if (this.lastFrameAt > 0) {
       this.fpsFrames += 1;
