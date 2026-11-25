@@ -115,6 +115,8 @@ import { ChainView } from './scene/chain';
 import { ForeAftRigView } from './scene/foreAftRig';
 import { RigView } from './scene/rig';
 import { WakeField, type WakeSource } from './scene/wakes';
+import { HullWetState } from './vessel/hullWetting';
+import { applyHullWetting, type HullWetHandle } from './vessel/hullWettingMaterial';
 import {
   clampBelowSurface,
   fallbackFogDensity,
@@ -252,6 +254,8 @@ interface VesselView {
   smokeFrom: Vec3;
   /** Bounds of hull and superstructure in the group's (Three.js body) axes. */
   bounds: THREE.Box3;
+  /** How high the sea has wetted the hull, and the shader uniform that draws it. */
+  wetting: { state: HullWetState; handle: HullWetHandle };
 }
 
 /** Hull and superstructure bounds of a vessel, in its group's Three.js body axes. */
@@ -502,6 +506,7 @@ export class LabRenderer implements LabRendererApi {
   private shownT = 0;
   private readonly quatA = new THREE.Quaternion();
   private readonly quatB = new THREE.Quaternion();
+  private readonly quatInv = new THREE.Quaternion();
   private mode: CameraMode = 'orbit';
   private cameraTarget: string | null = null;
   private selection: string | null = null;
@@ -1923,17 +1928,34 @@ export class LabRenderer implements LabRendererApi {
       const sub = def.submarine !== null;
       const bowX = sub ? def.points.bridge.x + 1.5 : def.points.bow.x;
       const sternX = sub ? def.points.bridge.x - 1.5 : def.points.propeller.x;
+      const speed = Math.hypot(state.velocity.x - current.x, state.velocity.y - current.y);
+      // How high the sea has climbed the topsides: the hull's roll about its own axis.
+      const up = this.tmpV
+        .set(0, 1, 0)
+        .applyQuaternion(this.quatInv.copy(view.group.quaternion).invert());
+      const wet = view.wetting.state.step(
+        t,
+        this.hs,
+        Math.atan2(up.z, up.y),
+        p.y,
+        speed,
+        def.length,
+        def.beam,
+      );
+      view.wetting.handle.wet.set(wet.side, wet.bow);
       sources.push({
         id: state.id,
         length: sub ? 6 : def.length,
         beam: sub ? 1.2 : def.beam,
         bow: { x: p.x + (fx / norm) * bowX, y: -p.z + (fy / norm) * bowX },
         stern: { x: p.x + (fx / norm) * sternX, y: -p.z + (fy / norm) * sternX },
-        speed: Math.hypot(state.velocity.x - current.x, state.velocity.y - current.y),
+        speed,
+        // A submerged submarine has no collar or bow cushion.
+        contact: sub ? 0 : 1,
       });
     }
     this.traffic.appendWakeSources(sources, Math.max(0, 8 - sources.length));
-    this.wakes.update(t, sources, { x: current.x * t, y: current.y * t });
+    this.wakes.update(t, sources, { x: current.x * t, y: current.y * t }, this.hs);
     this.ocean.uniforms.uWakeCount!.value = this.wakes.count;
   }
 
@@ -2070,6 +2092,13 @@ export class LabRenderer implements LabRendererApi {
       hullMat.normalMap = detailTextures().plate;
       hullMat.normalScale.set(0.35, 0.35);
     }
+    // The sea climbs the topsides: a wet band above the moving waterline (vessel/hullWetting.ts).
+    const wetHandle = applyHullWetting(
+      hullMat,
+      this.ocean.uniforms,
+      definition.points.propeller.x,
+      definition.points.bow.x,
+    );
     materials.push(hullMat);
     group.add(
       this.meshFromHull(
@@ -2262,6 +2291,7 @@ export class LabRenderer implements LabRendererApi {
       shownHealth: 1,
       smokeFrom,
       bounds: vesselBounds(definition),
+      wetting: { state: new HullWetState(), handle: wetHandle },
     };
     this.applyDuck(view);
     return view;

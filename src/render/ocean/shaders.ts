@@ -154,7 +154,7 @@ void main() {
 `;
 
 /** Shared noise helpers. */
-const NOISE = /* glsl */ `
+export const NOISE = /* glsl */ `
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -503,8 +503,12 @@ void main() {
 }
 `;
 
-export const OCEAN_VERT = /* glsl */ `
-attribute float aCell;
+/**
+ * The sea's surface displacement at a point of the water frame: the cascades and the regular
+ * (Stokes) waves. Shared by the ocean mesh and by the hull-wetting hook, which finds the
+ * waterline with it (the render side has no CPU ocean; these textures are the drawn sea).
+ */
+export const OCEAN_DISPLACEMENT_GLSL = /* glsl */ `
 uniform sampler2D uC0;
 uniform sampler2D uC1;
 uniform sampler2D uC2;
@@ -518,17 +522,9 @@ uniform float uN;
 uniform float uTime;
 uniform float uLambda;
 uniform float uHasMips;
-uniform float uMeshScale;
-uniform vec2 uDrift;
 uniform vec4 uRegA[48];
 uniform vec4 uRegB[48];
 uniform float uRegularCount;
-varying vec3 vThreePos;
-varying vec2 vLabel;
-varying float vEta;
-varying vec4 vRegSlope;
-varying float vCell;
-
 // Displacement of one cascade, low-passed to the local vertex spacing h: the mip level whose
 // texels are about as large as the mesh cells (or a fade when mips are unavailable).
 vec3 cascadeSample(sampler2D tex, float size, vec2 worldXY, float h) {
@@ -569,6 +565,28 @@ vec3 regularSample(vec2 worldXY, float h, out vec4 slope) {
   return d;
 }
 
+/** Total displacement (x, y, z-up) at a water-frame point; h is the local mesh spacing [m]. */
+vec3 seaDisplacement(vec2 waterXY, float h, out vec4 regSlope) {
+  vec3 d = regularSample(waterXY, h, regSlope);
+  if (uCount > 0.5) d += cascadeSample(uC0, uSize0, waterXY, h);
+  if (uCount > 1.5) d += cascadeSample(uC1, uSize1, waterXY, h);
+  if (uCount > 2.5) d += cascadeSample(uC2, uSize2, waterXY, h);
+  if (uCount > 3.5) d += cascadeSample(uC3, uSize3, waterXY, h);
+  return d;
+}
+`;
+
+export const OCEAN_VERT = /* glsl */ `
+attribute float aCell;
+uniform float uMeshScale;
+uniform vec2 uDrift;
+varying vec3 vThreePos;
+varying vec2 vLabel;
+varying float vEta;
+varying vec4 vRegSlope;
+varying float vCell;
+${OCEAN_DISPLACEMENT_GLSL}
+
 void main() {
   vec3 base = (modelMatrix * vec4(position, 1.0)).xyz;
   vec2 worldXY = vec2(base.x, -base.z);
@@ -577,11 +595,7 @@ void main() {
   vec2 waterXY = worldXY - uDrift;
   float h = max(aCell * uMeshScale, 0.02);
   vec4 regSlope;
-  vec3 d = regularSample(waterXY, h, regSlope);
-  if (uCount > 0.5) d += cascadeSample(uC0, uSize0, waterXY, h);
-  if (uCount > 1.5) d += cascadeSample(uC1, uSize1, waterXY, h);
-  if (uCount > 2.5) d += cascadeSample(uC2, uSize2, waterXY, h);
-  if (uCount > 3.5) d += cascadeSample(uC3, uSize3, waterXY, h);
+  vec3 d = seaDisplacement(waterXY, h, regSlope);
   vec3 p = vec3(worldXY.x + d.x, d.z, -(worldXY.y + d.y));
   vThreePos = p;
   vLabel = waterXY;
@@ -692,6 +706,54 @@ vec4 slopeSample(sampler2D tex, float size, vec2 p) {
   return s;
 }
 
+// Half-width of a hull of length L and beam B at s aft of the stem; mirrors hullHalfWidth() in
+// scene/wakes.ts.
+float hullHalfWidth(float s, float L, float B) {
+  return 0.5 * B * pow(smoothstep(0.0, 0.3 * L, s), 0.6) * (1.0 - 0.25 * smoothstep(0.8 * L, L, s));
+}
+
+// Where the hull meets the water (see ship.z = contact): a foam collar hugging the live hull
+// (segment 0-1 of the track), a cushion of white water ahead of the stem and a bow-wave crest
+// along the forward flanks, all growing with Froude number and sea state. p is the water-frame
+// label, so the breakup rides with the water while the hull moves through it. Mirrors
+// collarWidth() in scene/wakes.ts.
+float hullContactFoam(vec2 p, int i, float L, float B, float contact) {
+  vec4 h0 = texelFetch(uWakeTex, ivec2(0, 2 * i), 0);
+  vec4 h1 = texelFetch(uWakeTex, ivec2(1, 2 * i), 0);
+  float u = texelFetch(uWakeTex, ivec2(0, 2 * i + 1), 0).x;
+  vec2 hd = h1.xy - h0.xy;
+  float hl = max(length(hd), 1.0);
+  vec2 hdir = hd / hl;
+  vec2 rel = p - h0.xy;
+  float s = dot(rel, hdir);
+  float lat = abs(rel.x * hdir.y - rel.y * hdir.x);
+  float fn = u / sqrt(9.81 * hl);
+  float go = smoothstep(0.4, 3.0, u);
+  float hw = hullHalfWidth(s, hl, B);
+  float noise = vnoise(p * 0.9 + vec2(uTime * 0.12, -uTime * 0.07));
+  float breakup = smoothstep(0.35, 0.75, noise);
+
+  // Collar along the hull, from just ahead of the stem to just past the transom.
+  float w = 0.35 + 0.04 * B + 0.12 * u + 0.2 * uHs;
+  float along = smoothstep(-0.03 * hl, 0.0, s) * (1.0 - smoothstep(hl, 1.02 * hl, s));
+  float band = (1.0 - smoothstep(0.0, w, lat - hw)) * smoothstep(hw - 0.4, hw - 0.1, lat);
+  float collar = band * along * breakup
+    * (0.3 + 0.35 * go + 0.25 * min(uHs / 3.0, 1.0));
+
+  // Cushion ahead of the stem, only once the hull pushes water (Froude number).
+  float r = 0.4 * B * (0.4 + fn);
+  float cushion = (1.0 - smoothstep(0.5 * r, r, length(p - (h0.xy - hdir * 0.2 * r))))
+    * smoothstep(0.05, 0.15, fn) * (0.4 + 0.6 * breakup);
+
+  // Bow-wave crest: a band riding a little outside the forward flanks.
+  float crestLat = hw + 0.15 * B * fn;
+  float crest = (1.0 - smoothstep(0.0, 0.1 * B + 0.3, abs(lat - crestLat)))
+    * smoothstep(-0.03 * hl, 0.0, s) * (1.0 - smoothstep(0.15 * hl, 0.25 * hl, s))
+    * smoothstep(0.08, 0.3, fn) * (0.5 + 0.5 * breakup);
+
+  return clamp(max(collar, max(0.7 * cushion, 0.85 * crest)) * contact, 0.0, 1.0);
+}
+
 // Ship wakes along each hull's recorded track (see render/scene/wakes.ts). Row 2i of uWakeTex
 // holds (x, y, time laid, odometer) in the water frame, bow first; row 2i + 1 the speed then.
 // p is the water-frame label, so the foam rides the orbital motion and drifts with the current.
@@ -707,6 +769,7 @@ float wakeFoam(vec2 p, float foot) {
     vec4 info = uWakeInfo[i];
     float L = max(ship.x, 2.0);
     float B = max(ship.y, 1.0);
+    float hullFoam = ship.z > 0.01 ? hullContactFoam(p, i, L, B, ship.z) : 0.0;
     // Nearest point on the track polyline.
     float best = 1e20;
     float age = 0.0;
@@ -742,7 +805,10 @@ float wakeFoam(vec2 p, float foot) {
       a = b;
       ua = ub;
     }
-    if (outside) continue;
+    if (outside) {
+      foam = max(foam, hullFoam);
+      continue;
+    }
     float lat = sqrt(best);
     float tau = info.z;
     float life = 1.0 - smoothstep(0.6, 1.0, age / info.w);
@@ -788,7 +854,7 @@ float wakeFoam(vec2 p, float foot) {
       arm = (1.0 - smoothstep(0.3 * wa, wa, off)) * cusps * mix(0.6, broken, fine)
         * smoothstep(0.12, 0.3, fn) * exp(-s / (1.3 * L)) * exp(-age / tau) * 0.45;
     }
-    foam = max(foam, c + arm);
+    foam = max(foam, max(c + arm, hullFoam));
   }
   return foam;
 }

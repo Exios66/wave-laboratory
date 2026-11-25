@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  collarWidth,
   foamDecay,
+  hullHalfWidth,
   KELVIN_TAN,
   WAKE_POINTS,
   WAKE_VESSELS,
@@ -98,6 +100,42 @@ describe('ship wake trails', () => {
     expect(box.z).toBeGreaterThan(140);
     field.update(3, [], drift);
     expect(field.count).toBe(0);
+    field.dispose();
+  });
+
+  it('has a hull half-width of 0 at the stem, B/2 amidships and less at the transom', () => {
+    const L = 100;
+    const B = 16;
+    expect(hullHalfWidth(0, L, B)).toBeCloseTo(0, 9);
+    expect(hullHalfWidth(0.5 * L, L, B)).toBeCloseTo(B / 2, 9);
+    expect(hullHalfWidth(L, L, B)).toBeLessThan(B / 2);
+    expect(hullHalfWidth(L, L, B)).toBeGreaterThan(0.6 * (B / 2));
+    expect(hullHalfWidth(-5, L, B)).toBe(0);
+  });
+
+  it('writes the contact strength into ship.z (default 1) and grows the box by the collar', () => {
+    // An absurd sea state, so that the collar (not the Kelvin arm at the stern) sets the box.
+    const src = {
+      id: 'a',
+      length: 100,
+      beam: 2,
+      bow: { x: 150, y: 0 },
+      stern: { x: 50, y: 0 },
+      speed: 0,
+    };
+    const field = new WakeField();
+    field.update(2, [src], { x: 0, y: 0 }, 0);
+    expect(field.ship[0]!.z).toBe(1);
+    const calm = field.box[0]!.clone();
+    field.update(2, [src], { x: 0, y: 0 }, 300);
+    const rough = field.box[0]!;
+    expect(rough.w - rough.y).toBeGreaterThan(calm.w - calm.y);
+    // The live hull is covered out to the collar on both sides.
+    expect(rough.w).toBeGreaterThanOrEqual(1 + collarWidth(2, 0, 300));
+    field.update(3, [{ ...src, contact: 0 }], { x: 0, y: 0 }, 300);
+    expect(field.ship[0]!.z).toBe(0);
+    expect(collarWidth(16, 0, 0)).toBeGreaterThan(0.35);
+    expect(collarWidth(16, 9, 2)).toBeGreaterThan(collarWidth(16, 0, 0));
     field.dispose();
   });
 });

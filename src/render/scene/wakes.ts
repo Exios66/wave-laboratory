@@ -31,6 +31,11 @@ export interface WakeSource {
   stern: { x: number; y: number };
   /** Speed through the water [m/s]. */
   speed: number;
+  /**
+   * How much the hull is in contact with the surface, 0–1 (default 1): 0 for a submerged
+   * submarine or an airborne craft, which have no collar or bow cushion.
+   */
+  contact?: number;
 }
 
 export interface WakePoint {
@@ -58,6 +63,27 @@ export function wakeLifetime(length: number): number {
 /** Half-width of the turbulent wake at a distance astern of the stern [m]. */
 export function wakeHalfWidth(beam: number, astern: number): number {
   return 0.5 * beam * (0.85 + 0.55 * Math.cbrt(Math.max(0, astern) / Math.max(beam, 1)));
+}
+
+/**
+ * Half-width of a hull of length L and beam B at a distance `s` aft of the stem [m]: 0 at the
+ * stem, B/2 amidships, a quarter narrower at the transom. Mirrors the footprint in `WAKE_GLSL`.
+ */
+export function hullHalfWidth(s: number, length: number, beam: number): number {
+  const L = Math.max(length, 1e-6);
+  const smooth = (e0: number, e1: number, x: number) => {
+    const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+    return t * t * (3 - 2 * t);
+  };
+  return 0.5 * beam * Math.pow(smooth(0, 0.3 * L, s), 0.6) * (1 - 0.25 * smooth(0.8 * L, L, s));
+}
+
+/**
+ * Width of the foam collar hugging a hull [m]: grows with beam, speed and sea state, with a
+ * gentle collar even when stopped. Mirrors `w` in `WAKE_GLSL`.
+ */
+export function collarWidth(beam: number, speed: number, hs: number): number {
+  return 0.35 + 0.04 * beam + 0.12 * speed + 0.2 * hs;
 }
 
 /** tan(19.47°): the Kelvin half-angle for deep water. */
@@ -151,7 +177,7 @@ export class WakeTrail {
 /** Keeps the trails of all vessels and packs them for the ocean shader. */
 export class WakeField {
   readonly texture: THREE.DataTexture;
-  /** Per wake: (length, beam, unused, head odometer) — the shader reads only x/y/w. */
+  /** Per wake: (length, beam, contact 0–1, head odometer). */
   readonly ship = Array.from({ length: WAKE_VESSELS }, () => new THREE.Vector4());
   /** Per wake: (point count, unused, foam decay [s], lifetime [s]) — only x/z/w read. */
   readonly info = Array.from({ length: WAKE_VESSELS }, () => new THREE.Vector4());
@@ -179,7 +205,7 @@ export class WakeField {
   /**
    * @param drift current × t: the offset between world and water frames [m]
    */
-  update(t: number, sources: readonly WakeSource[], drift: { x: number; y: number }): void {
+  update(t: number, sources: readonly WakeSource[], drift: { x: number; y: number }, hs = 0): void {
     let n = 0;
     for (const src of sources) {
       if (n >= WAKE_VESSELS) break;
@@ -191,7 +217,7 @@ export class WakeField {
         x: src.bow.x - src.stern.x,
         y: src.bow.y - src.stern.y,
       });
-      this.pack(n, t, src, trail, drift);
+      this.pack(n, t, src, trail, drift, hs);
       n++;
     }
     for (const id of this.trails.keys())
@@ -211,12 +237,16 @@ export class WakeField {
     src: WakeSource,
     trail: WakeTrail,
     drift: { x: number; y: number },
+    hs: number,
   ): void {
     const d = this.data;
     const w = WAKE_POINTS * 4;
     const base = row * 2 * w;
     const L = src.length;
     const head = trail.odo + L;
+    // The foam collar hugs the live hull (points 0 and 1) out to its own width.
+    const contact = Math.min(1, Math.max(0, src.contact ?? 1));
+    const collar = contact > 0 ? 0.5 * src.beam + collarWidth(src.beam, src.speed, hs) + 1 : 0;
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -233,7 +263,8 @@ export class WakeField {
       // Everything the shader can draw around this point: the turbulent wake or a Kelvin arm.
       const s = head - odo;
       const arm = s < 4 * L ? KELVIN_TAN * s + 0.1 * s + src.beam : 0;
-      const reach = Math.max(wakeHalfWidth(src.beam, s - L) * 1.3, arm) + 2;
+      const live = j < 2 ? collar : 0;
+      const reach = Math.max(wakeHalfWidth(src.beam, s - L) * 1.3, arm, live) + 2;
       minX = Math.min(minX, x - reach);
       minY = Math.min(minY, y - reach);
       maxX = Math.max(maxX, x + reach);
@@ -248,7 +279,7 @@ export class WakeField {
       if (j === 2 && Math.hypot(p.x - d[base + 4]!, p.y - d[base + 5]!) < 1e-3) continue;
       put(j++, p.x, p.y, p.t, p.odo, p.speed);
     }
-    this.ship[row]!.set(L, src.beam, 0, head);
+    this.ship[row]!.set(L, src.beam, contact, head);
     this.info[row]!.set(j, 0, foamDecay(L), wakeLifetime(L));
     this.box[row]!.set(minX, minY, maxX, maxY);
   }
