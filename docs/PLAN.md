@@ -18,6 +18,7 @@ commits the static build into `docs/` on `main`. There is no GitHub Actions work
 | Tooling, local tests, schema, deterministic core                                                                         | ✅ Done                |
 | Spectral ocean (JONSWAP/PM/Bretschneider, TMA, wind-sea growth, spreading, 4 cascades, choppy)                           | ✅ CPU reference + GPU |
 | Regular (Airy) waves                                                                                                     | ✅                     |
+| Stokes 5th order (Fenton 1985), cnoidal (KdV) and solitary waves, V4 validated, GPU and CPU in agreement                 | ✅                     |
 | Vessel dynamics: pressure integration with waterline clipping, L0 radiation, viscous drag, propulsion, rudder, autopilot | ✅                     |
 | Damage and flooding: watertight compartments, orifice flooding, floodwater weight with free-surface GM loss, foundering  | ✅                     |
 | Anchors and moorings: elastic catenary chain, holding limit and dragging, buoy mooring, drawn chain                      | ✅                     |
@@ -32,7 +33,7 @@ commits the static build into `docs/` on `main`. There is no GitHub Actions work
 | Volumetric clouds anchored to the world (baked deck map, tiered march), cloud shadows on the sea                         | ✅                     |
 | Sun shafts through broken cloud and past rigging (quarter-res post pass, full tier, display toggle)                      | ✅                     |
 | Hull–water contact: wet bands with drip streaks, foam collars, bow cushions and bow-wave crests                          | ✅                     |
-| Stokes/cnoidal/focused waves, grid (SWE/Boussinesq) solvers, scripting API, L1/L2 radiation                              | ⏳ Later phases        |
+| Peregrine breather, second-order bound waves, event scheduler, RAO sweep, grid (SWE/Boussinesq) solvers, scripting API   | ⏳ Later phases        |
 
 **Deviation from §2:** the renderer uses **WebGL 2 through Three.js**, not raw WebGPU. Every
 current desktop and mobile browser supports WebGL 2. Playwright runs it under SwiftShader, and

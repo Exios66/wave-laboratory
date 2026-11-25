@@ -25,6 +25,12 @@
   new sea the renderer reads one texel back and compares it with the CPU transform; a mismatch
   is `console.error`, which `e2e/app.spec.ts` fails on. Devices without 32-bit float render
   targets use 16-bit half-float and skip that readback.
+- **Nonlinear steady waves follow the same rule.** `ocean/nonlinear.ts` solves Fenton Stokes 5,
+  cnoidal and solitary waves; `ocean/nonlinearEval.ts` samples them on the CPU (surface, pressure,
+  velocity, vessel columns) and `render/ocean/nonlinearMirror.ts` packs them into the
+  `uNlA/uNlB/uNlH` uniforms read by `nonlinearSample` in the ocean shader (up to 4 waves, 24
+  harmonics each). The same file holds a CPU mirror of the GLSL; its unit test checks elevation,
+  horizontal displacement and slopes against the CPU field.
 - **Fixed timestep, deterministic.** Physics advances in exact steps of `experiment.timestep`.
   The main thread only says how much simulated time should pass. The `SimClient` keeps at most
   one request in flight, so a slow machine runs slower than real time (and says so) instead of

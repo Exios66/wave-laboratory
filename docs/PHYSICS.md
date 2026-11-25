@@ -147,6 +147,54 @@ loses freeboard. The boot-top paint stays at the design waterline.
 - **Spreading**: cos-2s, Mitsuyasu (frequency-dependent s), Donelan–Banner sech², all
   normalised to ∫D dθ = 1.
 
+## Nonlinear steady waves (`src/ocean/nonlinear.ts`)
+
+A `regular` wave system has a `theory` option, and there is a separate `solitary` system. All of
+them are steady profiles, so the CPU field, the shader and vessel forces share one definition.
+Elevation is measured from the mean water level (the environment depth is the mean depth), every
+periodic profile has zero mean, and the mean Eulerian current is zero (Stokes' first definition
+of wave speed): there is no return flow under the wave and a Stokes wave carries a net forward
+mass transport.
+
+- **Airy** is the linear wave. **Stokes 2** (the default, and what every earlier file means) adds
+  the second-order harmonic described above when choppiness is above zero.
+- **Stokes 5** is Fenton's (1985) fifth-order solution, with S = sech 2kd and
+  ε = kH/2: `kη = kd + ε cos θ + ε² B22 cos 2θ + ε³ B31 (cos θ − cos 3θ) + ε⁴ (B42 cos 2θ +
+B44 cos 4θ) + ε⁵ (−(B53 + B55) cos θ + B53 cos 3θ + B55 cos 5θ)`, so the crest-to-trough
+  height is exactly H. The speed is `c = √(g/k) (C0 + ε² C2 + ε⁴ C4)` and k is solved from
+  ω = c k for the given H, T and depth. The coefficients B, C are transcribed from Fenton's
+  published STOKES program and checked in the tests against Table 2 of the paper (kd = 0.753982)
+  and its deep-water limits. Height is reduced to the Miche limit H/L = 0.142 tanh kd, and the
+  inspector warns when the Stokes–Ursell number (kH/2)/(kd)³ exceeds 1/2, where Fenton says the
+  series is unreliable.
+- **Cnoidal** is the first-order KdV wave (Korteweg & de Vries 1895, Wiegel 1960):
+  `η = η_t + H cn²(2Kξ/L | m)`, `L = 4K √(m h³ / 3H)`,
+  `c = √(g h) [1 + (H / m h)(1 − m/2 − 3E/2K)]`, `η_t = (H/m)(1 − m − E/K)`. The elliptic
+  parameter m is solved so that L/c = T. The Jacobi functions and K, E are in
+  `src/ocean/elliptic.ts` (AGM, tested against tabulated values and the Legendre relation). The
+  profile is carried as a 24-term cosine series on both CPU and GPU; the series error is reported
+  (below 0.05 % of H for Ursell numbers of 200 and more, larger for very peaked waves). The Ursell
+  number H L² / h³ is shown, and below about 20 the inspector says Stokes theory is the better
+  model. Height is limited to 0.78 h.
+- **Solitary** is the Boussinesq wave `η = H sech²(κ ξ)`, `κ = √(3H / 4h²(h + H))`,
+  `c = √(g (h + H))`. It is evaluated analytically for the nearest hump, so there is no series
+  truncation; humps repeat every `spacing` metres because the lab is periodic. The horizontal
+  displacement is the integral of the long-wave velocity u = c η / h, minus a linear ramp so it is
+  periodic (a real solitary wave leaves a permanent forward shift).
+
+Kinematics are linear per harmonic: harmonic n has wavenumber n k, frequency n ω, pressure
+attenuation cosh(nk(z + h))/cosh(nkh) and orbital ratio coth(nkh). The elevation is exact to the
+stated theory; velocities and pressure are first-order accurate in each harmonic, not the
+rotational stream-function kinematics of the full theory. The solitary wave is hydrostatic with
+u = c η / h.
+
+Validation (V4): the Stokes 5 profile matches an independent numerical stream-function Fourier
+solution (Rienecker & Fenton 1981, 24 modes, `src/test/fentonReference.ts`) to within 1 % of H
+for kd from about 0.9 to deep water at steepnesses up to H/L = 0.09 (the test tolerance). Cnoidal
+profiles matched it to within 0.5–3.3 % of H for Ursell numbers of 200 to 800 (tests allow 5 %,
+the error grows with H/h because the theory is first order), and the solitary profile to within
+5 % at H/h = 0.15.
+
 ## Focused (rogue) waves
 
 A `focused` wave system is a NewWave group (Tromans, Anaturk & Hagemeijer 1991): 40 linear
