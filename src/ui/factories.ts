@@ -45,6 +45,15 @@ export function newWaveSystem(kind: WaveSystem['kind'], count: number): WaveSyst
         period: 8,
         phaseDeg: 0,
       };
+    case 'solitary':
+      return {
+        ...base,
+        kind,
+        name: `Solitary wave ${count + 1}`,
+        height: 1,
+        spacing: 0,
+        phaseDeg: 0,
+      };
     case 'focused':
       return {
         ...base,

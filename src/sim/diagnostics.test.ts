@@ -73,3 +73,49 @@ describe('focused-group model validity', () => {
     expect(d.warnings.some((w) => /Miche|breaking/.test(w))).toBe(false);
   });
 });
+
+describe('nonlinear wave diagnostics', () => {
+  const regularWith = (theory: 'stokes5' | 'cnoidal', height: number, period: number) =>
+    ({
+      id: 'r',
+      name: 'R',
+      kind: 'regular',
+      enabled: true,
+      directionDeg: 270,
+      height,
+      period,
+      phaseDeg: 0,
+      theory,
+    }) as WaveSystem;
+
+  it('lists a Stokes-5 wave with its theory and warns when the height was clamped', () => {
+    const e = env({ depth: 300 });
+    const d = seaDiagnostics(resolveSea([regularWith('stokes5', 20, 8)], e), 0);
+    expect(d.systems[0]!.note).toMatch(/Stokes fifth order/);
+    expect(d.systems[0]!.hs).toBeLessThan(20);
+    expect(d.warnings.join(' ')).toMatch(/Miche/);
+  });
+  it('shows the Ursell number and elliptic parameter of a cnoidal wave', () => {
+    const e = env({ depth: 3 });
+    const d = seaDiagnostics(resolveSea([regularWith('cnoidal', 0.6, 20)], e), 0);
+    expect(d.systems[0]!.note).toMatch(/Ursell \d+/);
+    expect(d.systems[0]!.note).toMatch(/m = 0\.\d+/);
+    expect(d.warnings).toHaveLength(0);
+  });
+  it('lists a solitary wave and warns about the breaking limit', () => {
+    const e = env({ depth: 3 });
+    const sol: WaveSystem = {
+      id: 's',
+      name: 'S',
+      kind: 'solitary',
+      enabled: true,
+      directionDeg: 270,
+      height: 3,
+      spacing: 0,
+      phaseDeg: 0,
+    };
+    const d = seaDiagnostics(resolveSea([sol], e), 0);
+    expect(d.systems[0]!.note).toMatch(/Solitary/);
+    expect(d.warnings.join(' ')).toMatch(/0\.78/);
+  });
+});

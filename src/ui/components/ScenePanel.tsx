@@ -28,7 +28,11 @@ function waveMeta(w: WaveSystem): string {
     case 'wind':
       return w.followWeather ? 'Follows the weather wind' : `${w.windSpeed.toFixed(0)} m/s wind`;
     case 'regular':
-      return `H ${w.height.toFixed(1)} m · T ${w.period.toFixed(0)} s`;
+      return `H ${w.height.toFixed(1)} m · T ${w.period.toFixed(0)} s${
+        w.theory === 'stokes5' ? ' · Stokes 5' : w.theory === 'cnoidal' ? ' · cnoidal' : ''
+      }`;
+    case 'solitary':
+      return `Solitary · H ${w.height.toFixed(1)} m`;
     case 'focused':
       return `Crest ${w.crestHeight.toFixed(1)} m at ${w.focusTime.toFixed(0)} s`;
   }
@@ -201,6 +205,7 @@ export function ScenePanel() {
                 { label: 'Spectrum (Hs, Tp)', onSelect: () => addWave('spectrum') },
                 { label: 'Wind sea (wind, fetch)', onSelect: () => addWave('wind') },
                 { label: 'Regular waves (H, T)', onSelect: () => addWave('regular') },
+                { label: 'Solitary wave (sech² hump)', onSelect: () => addWave('solitary') },
                 { label: 'Rogue wave (focused group)', onSelect: () => addWave('focused') },
               ]}
             />

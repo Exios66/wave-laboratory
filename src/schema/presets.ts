@@ -521,6 +521,94 @@ export const PRESETS: readonly Preset[] = [
     ),
   },
   {
+    id: 'steep-stokes-5',
+    title: 'Steep regular wave · Stokes 5th order',
+    summary:
+      "A 7 m, 10 s wave in deep water (H/L = 0.045) drawn with Fenton's fifth-order Stokes " +
+      'theory: sharp crests, flat troughs, a longer wave than linear theory gives.',
+    experiment: experiment(
+      'Steep regular wave · Stokes 5th order',
+      'Fifth-order Stokes theory (Fenton 1985) in deep water. Compare with the 2nd-order ' +
+        'default by switching the wave theory in the inspector: at this steepness the crest ' +
+        'is ~15 % higher than the trough is deep, and the wavelength is a little longer than ' +
+        'linear theory gives for the same period. The height is clamped at the Miche limit.',
+      env({ depth: 200, windSpeed: 3 }),
+      [
+        {
+          id: 'stokes-1',
+          name: 'Stokes 5 wave',
+          kind: 'regular',
+          enabled: true,
+          height: 7,
+          period: 10,
+          phaseDeg: 0,
+          directionDeg: 270,
+          theory: 'stokes5',
+        },
+      ],
+      [vessel('lifeboat-1', 'lifeboat', 'Lifeboat', { headingDeg: 90, speedKn: 4 })],
+      [gauge(60, 0)],
+    ),
+  },
+  {
+    id: 'shoaling-cnoidal',
+    title: 'Shoaling swell · cnoidal waves',
+    summary:
+      'A long 18 s swell in 3 m of water (Ursell number in the hundreds): peaked crests ' +
+      'and broad flat troughs, the cnoidal regime.',
+    experiment: experiment(
+      'Shoaling swell · cnoidal waves',
+      'In water this shallow a long swell is no longer sinusoidal. The cnoidal solution of the ' +
+        'Korteweg-de Vries equation gives narrow crests separated by wide troughs, and a wave ' +
+        'that travels faster than √(g h). The elliptic parameter m and the Ursell number are ' +
+        'shown in the wave inspector. A lifeboat rides over the crests.',
+      env({ depth: 3, windSpeed: 2 }),
+      [
+        {
+          id: 'cnoidal-1',
+          name: 'Cnoidal swell',
+          kind: 'regular',
+          enabled: true,
+          height: 0.7,
+          period: 18,
+          phaseDeg: 0,
+          directionDeg: 270,
+          theory: 'cnoidal',
+        },
+      ],
+      [vessel('lifeboat-1', 'lifeboat', 'Lifeboat', { headingDeg: 90, speedKn: 0 })],
+      [gauge(30, 0)],
+    ),
+  },
+  {
+    id: 'solitary-basin',
+    title: 'Solitary wave · shallow basin',
+    summary:
+      'A single 1.2 m sech² hump rolls through 4 m of water and passes a moored barge: ' +
+      'no trough, no dispersion.',
+    experiment: experiment(
+      'Solitary wave · shallow basin',
+      'A Boussinesq solitary wave: a single elevation that keeps its shape and moves at ' +
+        '√(g (h + H)). The basin is periodic, so the hump returns every few hundred metres. ' +
+        'Tsunami-style demonstration; the wave height is limited to 0.78 of the depth.',
+      env({ depth: 4, windSpeed: 0 }),
+      [
+        {
+          id: 'solitary-1',
+          name: 'Solitary wave',
+          kind: 'solitary',
+          enabled: true,
+          height: 1.2,
+          spacing: 0,
+          phaseDeg: 0,
+          directionDeg: 270,
+        },
+      ],
+      [vessel('barge-1', 'box-barge', 'Barge', { x: 40, headingDeg: 0, speedKn: 0 })],
+      [gauge(80, 0)],
+    ),
+  },
+  {
     id: 'at-anchor',
     title: 'At anchor in a swell',
     summary:

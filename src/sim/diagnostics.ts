@@ -91,6 +91,28 @@ export function seaDiagnostics(
     checkShallow(r.id, 2 * r.amplitude, wavelength, r.k);
   }
 
+  for (const w of sea.nonlinear) {
+    const wavelength = (2 * Math.PI) / w.k;
+    const period = (2 * Math.PI) / w.omega;
+    let note: string;
+    if (w.theory === 'solitary') {
+      note =
+        `Solitary wave: H ${w.height.toFixed(2)} m, speed ${w.c.toFixed(2)} m/s, a hump every ` +
+        `${w.solitary!.spacing.toFixed(0)} m. First-order (Boussinesq) profile.`;
+    } else if (w.theory === 'cnoidal') {
+      note =
+        `Cnoidal (KdV): Ursell ${(w.ursell ?? 0).toFixed(0)}, m = ${(w.m ?? 0).toFixed(5)}, ` +
+        `speed ${w.c.toFixed(2)} m/s. Ursell above ~20 is the cnoidal regime; the profile is a ` +
+        `24-term series (error ${(100 * w.truncationError).toFixed(2)} % of H).`;
+    } else {
+      note =
+        `Stokes fifth order (Fenton 1985): speed ${w.c.toFixed(2)} m/s, ` +
+        `wavelength ${wavelength.toFixed(1)} m, zero mean current.`;
+    }
+    systems.push({ id: w.id, hs: w.height, tp: period, wavelength, note });
+    if (w.notice) warnings.push(`${w.id}: ${w.notice}`);
+  }
+
   /**
    * Wave–current interaction. The lab advects the sea with a uniform current, which is exact for
    * the Doppler shift, but against a strong opposing current real waves shorten and steepen,

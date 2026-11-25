@@ -596,7 +596,12 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
         <Readout
           items={[
             {
-              label: wave.kind === 'focused' ? 'Crest' : wave.kind === 'regular' ? 'H' : 'Hs',
+              label:
+                wave.kind === 'focused'
+                  ? 'Crest'
+                  : wave.kind === 'regular' || wave.kind === 'solitary'
+                    ? 'H'
+                    : 'Hs',
               value: fmt(diag.hs, 2, 'm'),
               title:
                 wave.kind === 'focused'
@@ -773,6 +778,18 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
       )}
       {wave.kind === 'regular' && (
         <>
+          <SelectField
+            label="Wave theory"
+            value={wave.theory ?? 'stokes2'}
+            options={[
+              { value: 'airy', label: 'Airy (linear)' },
+              { value: 'stokes2', label: 'Stokes 2nd order (default)' },
+              { value: 'stokes5', label: 'Stokes 5th order (Fenton 1985)' },
+              { value: 'cnoidal', label: 'Cnoidal (shallow, long waves)' },
+            ]}
+            onChange={(v) => update((w) => w.kind === 'regular' && void (w.theory = v))}
+            hint="Stokes 5 is for deep and intermediate water (Stokes–Ursell number below 1/2); cnoidal for long waves in shallow water (Ursell number above ~20). Height is clamped at the breaking limit."
+          />
           <NumberField
             label="Wave height H"
             value={wave.height}
@@ -806,6 +823,42 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
           />
         </>
       )}
+      {wave.kind === 'solitary' && (
+        <>
+          <NumberField
+            label="Wave height H"
+            value={wave.height}
+            min={0}
+            max={15}
+            step={0.05}
+            unit="m"
+            unitLabel="metres"
+            onCommit={(v) => update((w) => w.kind === 'solitary' && void (w.height = v))}
+            hint="Crest height above still water. Limited to 0.78 of the depth (it would break); the depth is set under Environment."
+          />
+          <NumberField
+            label="Hump spacing"
+            value={wave.spacing}
+            min={0}
+            max={5000}
+            step={10}
+            unit="m"
+            unitLabel="metres"
+            onCommit={(v) => update((w) => w.kind === 'solitary' && void (w.spacing = v))}
+            hint="The lab world is periodic, so the hump repeats at this distance. 0 = automatic (24 decay lengths)."
+          />
+          <NumberField
+            label="Phase"
+            value={wave.phaseDeg}
+            min={-180}
+            max={180}
+            step={5}
+            unit="°"
+            unitLabel="degrees"
+            onCommit={(v) => update((w) => w.kind === 'solitary' && void (w.phaseDeg = v))}
+          />
+        </>
+      )}
       {!(wave.kind === 'wind' && wave.followWeather) && (
         <NumberField
           label="Coming from"
@@ -827,7 +880,7 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
           }
         />
       )}
-      {wave.kind !== 'regular' && (
+      {wave.kind !== 'regular' && wave.kind !== 'solitary' && (
         <>
           <NumberField
             label="Random seed"
@@ -837,7 +890,12 @@ function WaveInspector({ wave }: { wave: WaveSystem }) {
             step={1}
             slider={false}
             precision={0}
-            onCommit={(v) => update((w) => w.kind !== 'regular' && void (w.seed = Math.round(v)))}
+            onCommit={(v) =>
+              update(
+                (w) =>
+                  w.kind !== 'regular' && w.kind !== 'solitary' && void (w.seed = Math.round(v)),
+              )
+            }
             hint="Same seed + same settings = the identical sea, every time."
           />
         </>
