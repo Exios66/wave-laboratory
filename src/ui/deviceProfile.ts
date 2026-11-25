@@ -241,47 +241,58 @@ export class ResolutionGovernor {
     this.windows++;
     this.upWindows = fps >= this.targetFps * 0.9 ? this.upWindows + 1 : 0;
     const before = this.scale;
-    if (fps < this.targetFps * 0.85) {
-      this.goodWindows = 0;
-      if (this.scale > this.minScale + 1e-6) {
-        this.badAtFloor = 0;
-        this.scale = Math.max(this.minScale, this.scale * 0.85);
-      } else if (this.tierEnabled && this.tierSteps < this.maxTierSteps) {
-        // Resolution cannot go lower: two bad seconds in a row at the floor, then cut detail.
-        if (++this.badAtFloor >= 2) {
-          this.badAtFloor = 0;
-          this.tierSteps++;
-          this.tierChanged = true;
-          this.scale = Math.min(this.maxScale, Math.max(this.minScale, 0.85));
-          if (this.windows - this.lastUpWindow < ResolutionGovernor.FLAP_WINDOWS) {
-            this.upWait = Math.min(ResolutionGovernor.UP_WAIT_MAX, this.upWait * 2);
-          }
-        }
-      }
-    } else if (fps > this.targetFps * 0.98) {
-      this.badAtFloor = 0;
-      this.goodWindows++;
-      if (this.scale < this.maxScale) {
-        if (this.goodWindows >= 3) {
-          this.goodWindows = 0;
-          this.scale = Math.min(this.maxScale, this.scale * 1.1);
-        }
-      }
-    } else {
+    if (fps < this.targetFps * 0.85) this.slowWindow();
+    else if (fps > this.targetFps * 0.98) this.fastWindow();
+    else {
       this.goodWindows = 0;
       this.badAtFloor = 0;
     }
-    // Tier step up: a long run of windows at 90 % of the target or better. Looser than the
-    // scale-up bar (98 %) so a capped stream that drops an odd frame still recovers.
-    if (this.tierEnabled && this.tierSteps > 0 && this.upWindows >= this.upWait) {
-      this.goodWindows = 0;
-      this.upWindows = 0;
-      this.tierSteps--;
-      this.tierChanged = true;
-      this.lastUpWindow = this.windows;
-      this.scale = Math.max(this.minScale, 0.9);
-    }
+    this.maybeStepTierUp();
     return this.tierChanged || Math.abs(this.scale - before) > 1e-6;
+  }
+
+  /** A slow second: lower the resolution, and at the floor cut detail. */
+  private slowWindow(): void {
+    this.goodWindows = 0;
+    if (this.scale > this.minScale + 1e-6) {
+      this.badAtFloor = 0;
+      this.scale = Math.max(this.minScale, this.scale * 0.85);
+      return;
+    }
+    if (!this.tierEnabled || this.tierSteps >= this.maxTierSteps) return;
+    // Resolution cannot go lower: two bad seconds in a row at the floor, then cut detail.
+    if (++this.badAtFloor < 2) return;
+    this.badAtFloor = 0;
+    this.tierSteps++;
+    this.tierChanged = true;
+    this.scale = Math.min(this.maxScale, Math.max(this.minScale, 0.85));
+    if (this.windows - this.lastUpWindow < ResolutionGovernor.FLAP_WINDOWS) {
+      this.upWait = Math.min(ResolutionGovernor.UP_WAIT_MAX, this.upWait * 2);
+    }
+  }
+
+  /** A fast second: after three in a row, raise the resolution a step. */
+  private fastWindow(): void {
+    this.badAtFloor = 0;
+    this.goodWindows++;
+    if (this.scale < this.maxScale && this.goodWindows >= 3) {
+      this.goodWindows = 0;
+      this.scale = Math.min(this.maxScale, this.scale * 1.1);
+    }
+  }
+
+  /**
+   * Tier step up: a long run of windows at 90 % of the target or better. Looser than the
+   * scale-up bar (98 %) so a capped stream that drops an odd frame still recovers.
+   */
+  private maybeStepTierUp(): void {
+    if (!this.tierEnabled || this.tierSteps <= 0 || this.upWindows < this.upWait) return;
+    this.goodWindows = 0;
+    this.upWindows = 0;
+    this.tierSteps--;
+    this.tierChanged = true;
+    this.lastUpWindow = this.windows;
+    this.scale = Math.max(this.minScale, 0.9);
   }
 }
 

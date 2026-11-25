@@ -422,12 +422,16 @@ export class LabRuntime {
     this.advanceDisplayClock(wall, s.playing && s.status === 'ready', s.timeScale);
     this.renderer?.setVisualTime(this.displayT);
     this.advanceClock(now, wall, s);
-    if (this.renderer && this.governor.frame(wall) && this.canvas) {
-      if (this.governor.tierChanged) this.applyTier();
-      this.resize(this.canvas);
-      s.setRenderScale(this.governor.scale);
-    }
+    this.adapt(wall, s);
     this.renderer?.render();
+  }
+
+  /** Feed the frame to the governor; apply a new render scale or quality tier. */
+  private adapt(wall: number, s: ReturnType<typeof useLab.getState>): void {
+    if (!this.renderer || !this.governor.frame(wall) || !this.canvas) return;
+    if (this.governor.tierChanged) this.applyTier();
+    this.resize(this.canvas);
+    s.setRenderScale(this.governor.scale);
   }
 
   /** Paused: the waves stand still but the camera can still move below them. */
