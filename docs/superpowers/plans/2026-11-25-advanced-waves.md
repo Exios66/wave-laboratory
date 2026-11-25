@@ -38,15 +38,15 @@ sim/diagnostics.ts, ui Inspector/factories/ScenePanel, docs.
 
 ## Tasks
 
-- [ ] Elliptic functions with tests against known values
-- [ ] Stokes 5 solver; V4 test against an independent numerical Fourier solution and Fenton's tables
-- [ ] Cnoidal solver and Fourier profile; compare with the numerical solution (long waves)
-- [ ] Solitary profile; compare with the numerical solution at small H/h
-- [ ] Schema (backward compatible), systems resolution, clamps and notices
-- [ ] OceanField integration; vessel in Stokes-5 sea stays finite and stable
-- [ ] GPU uniforms, shader, CPU mirror test
-- [ ] Presets, UI controls, diagnostics, docs
-- [ ] `pnpm run check`, e2e
+- [x] Elliptic functions with tests against known values
+- [x] Stokes 5 solver; V4 test against an independent numerical Fourier solution and Fenton's tables
+- [x] Cnoidal solver and Fourier profile; compare with the numerical solution (long waves)
+- [x] Solitary profile; compare with the numerical solution at small H/h
+- [x] Schema (backward compatible), systems resolution, clamps and notices
+- [x] OceanField integration; vessel in Stokes-5 sea stays finite and stable
+- [x] GPU uniforms, shader, CPU mirror test
+- [x] Presets, UI controls, diagnostics, docs
+- [x] `pnpm run check`, e2e
 
 ## Validation
 
