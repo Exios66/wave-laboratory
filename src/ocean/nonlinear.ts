@@ -211,4 +211,139 @@ export function solveStokes5(input: NonlinearInput): HarmonicWaveSolution {
   };
 }
 
-export { ellipticE, ellipticK, jacobi };
+// ---------------------------------------------------------------------------------------------
+// Cnoidal waves (first-order KdV)
+// ---------------------------------------------------------------------------------------------
+
+export interface CnoidalSolution extends HarmonicWaveSolution {
+  /** Elliptic parameter m = k² of the Jacobi functions (m → 1 is the solitary wave). */
+  m: number;
+  /** Ursell number H L² / h³ of the wave. */
+  ursell: number;
+}
+
+/** Wave speed and length of a KdV cnoidal wave for elliptic parameter m (Wiegel 1960). */
+function cnoidalGeometry(m: number, height: number, depth: number, g: number) {
+  const K = ellipticK(m);
+  const E = ellipticE(m);
+  const L = 4 * K * Math.sqrt((m * depth ** 3) / (3 * height));
+  const c = Math.sqrt(g * depth) * (1 + (height / (m * depth)) * (1 - m / 2 - (3 * E) / (2 * K)));
+  return { K, E, L, c };
+}
+
+/** Elevation of the cnoidal wave at phase θ = 2π ξ/L, crest at θ = 0, zero mean level. */
+function cnoidalEta(theta: number, m: number, height: number, K: number, E: number): number {
+  const cn = jacobi((K * theta) / Math.PI, m).cn;
+  return (height / m) * (1 - m - E / K) + height * cn * cn;
+}
+
+/** Cosine series of a function even about θ = 0 and 2π-periodic, harmonics 1..n (mean dropped). */
+function cosineSeries(f: (theta: number) => number, n: number, samples = 1024): number[] {
+  const v = new Float64Array(samples);
+  for (let i = 0; i < samples; i++) v[i] = f((2 * Math.PI * i) / samples);
+  const out: number[] = [];
+  for (let j = 1; j <= n; j++) {
+    let a = 0;
+    for (let i = 0; i < samples; i++) a += v[i]! * Math.cos((j * 2 * Math.PI * i) / samples);
+    out.push((2 * a) / samples);
+  }
+  return out;
+}
+
+/**
+ * Cnoidal wave from the first-order KdV theory (Korteweg & de Vries 1895; Wiegel 1960):
+ *   η = η_t + H cn²(2K ξ/L | m),  L = 4K √(m h³ / 3H),
+ *   c = √(g h) [1 + (H / m h)(1 − m/2 − 3E/2K)],  η_t = (H/m)(1 − m − E/K),
+ * with the origin of η at the mean level (zero-mean form), so the water depth h is the mean
+ * depth. m is solved from H, T and h so that L / c = T. The periodic profile is carried as a
+ * 24-term cosine series; `truncationError` is the largest elevation error of that series
+ * relative to H. It grows as m → 1 and is returned so the UI can say so.
+ * Valid for Ursell numbers ≳ 20 (long waves); below that the notice recommends Stokes theory.
+ */
+export function solveCnoidal(input: NonlinearInput): CnoidalSolution {
+  const { depth, gravity: g } = input;
+  const limit = BREAKING_H_OVER_D * depth;
+  let height = Math.max(input.height, 1e-6);
+  let clamped = false;
+  let notice: string | undefined;
+  if (height > limit) {
+    notice =
+      `Height reduced from ${height.toFixed(2)} m to ${limit.toFixed(2)} m: waves higher than ` +
+      '0.78 times the depth break.';
+    height = limit;
+    clamped = true;
+  }
+  const T = input.period;
+  // Smallest m for which KdV gives a sensible speed (c > ½ √gh); below it the wave is not long
+  // enough for shallow-water theory.
+  const mMax = 1 - 1e-10;
+  let mMin = 1e-6;
+  {
+    let lo = 1e-6;
+    let hi = mMax;
+    if (cnoidalGeometry(lo, height, depth, g).c >= 0.5 * Math.sqrt(g * depth)) hi = lo;
+    for (let i = 0; i < 80 && hi > lo; i++) {
+      const mid = Math.sqrt(lo * hi);
+      if (cnoidalGeometry(mid, height, depth, g).c >= 0.5 * Math.sqrt(g * depth)) hi = mid;
+      else lo = mid;
+    }
+    mMin = hi;
+  }
+  const period = (m: number) => {
+    const gm = cnoidalGeometry(m, height, depth, g);
+    return gm.L / gm.c;
+  };
+  let m: number;
+  if (period(mMin) >= T) {
+    m = mMin;
+  } else if (period(mMax) <= T) {
+    m = mMax;
+  } else {
+    let lo = mMin;
+    let hi = mMax;
+    for (let i = 0; i < 200; i++) {
+      // Bisection in log(1 − m), because T grows like log(1/(1 − m)) near m = 1.
+      const mid = 1 - Math.sqrt((1 - lo) * (1 - hi));
+      if (period(mid) > T) hi = mid;
+      else lo = mid;
+    }
+    m = 0.5 * (lo + hi);
+  }
+  const { K, E, L, c } = cnoidalGeometry(m, height, depth, g);
+  const k = (2 * Math.PI) / L;
+  const ursell = (height * L * L) / depth ** 3;
+  if (ursell < 20 || period(mMin) >= T) {
+    notice =
+      (notice ? notice + ' ' : '') +
+      `Ursell number ${ursell.toFixed(0)} is below about 20: this wave is not long enough for ` +
+      'cnoidal (shallow-water) theory; Stokes fifth order is the better model.';
+  }
+  const f = (th: number) => cnoidalEta(th, m, height, K, E);
+  const harmonics = cosineSeries(f, MAX_HARMONICS);
+  let worst = 0;
+  for (let i = 0; i <= 720; i++) {
+    const th = (Math.PI * i) / 720;
+    const approx = harmonics.reduce((a, h, j) => a + h * Math.cos((j + 1) * th), 0);
+    worst = Math.max(worst, Math.abs(approx - f(th)));
+  }
+  const truncationError = worst / height;
+  if (truncationError > 0.02) {
+    notice =
+      (notice ? notice + ' ' : '') +
+      `The 24-term series for this very peaked wave is off by ${(100 * truncationError).toFixed(1)} % of H.`;
+  }
+  // The wave speed must reproduce the requested period when m was not clamped; when it was, the
+  // period of the wave actually drawn differs and is reported through omega.
+  return {
+    k,
+    omega: k * c,
+    c,
+    harmonics,
+    heightUsed: height,
+    clamped,
+    ...(notice ? { notice } : {}),
+    truncationError,
+    m,
+    ursell,
+  };
+}

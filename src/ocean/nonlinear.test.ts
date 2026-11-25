@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fourierWave } from '../test/fentonReference';
-import { fentonCoefficients, solveStokes5 } from './nonlinear';
+import { fentonCoefficients, solveCnoidal, solveStokes5 } from './nonlinear';
 
 describe('Stokes fifth-order coefficients (Fenton 1985)', () => {
   it('reproduce Table 2, column 4, for d/λ = 0.12 (kd = 0.753982)', () => {
@@ -92,5 +92,54 @@ describe('solveStokes5', () => {
   it('flags shallow, long waves where Stokes theory is unreliable', () => {
     const s = solveStokes5({ height: 0.8, period: 14, depth: 4, gravity: g });
     expect(s.notice).toMatch(/cnoidal/i);
+  });
+});
+
+describe('solveCnoidal', () => {
+  const g = 9.81;
+  it('has height H, zero mean and a flatter trough than crest', () => {
+    const s = solveCnoidal({ height: 0.6, period: 20, depth: 3, gravity: g });
+    const eta = (th: number) => s.harmonics.reduce((a, h, i) => a + h * Math.cos((i + 1) * th), 0);
+    expect(eta(0) - eta(Math.PI)).toBeCloseTo(0.6, 2);
+    expect(eta(0)).toBeGreaterThan(-eta(Math.PI)); // peaked crest, flat trough
+    expect(s.m).toBeGreaterThan(0.5);
+    expect(s.m).toBeLessThan(1);
+  });
+  it('satisfies c = L / T with the KdV speed', () => {
+    const s = solveCnoidal({ height: 0.6, period: 20, depth: 3, gravity: g });
+    const L = (2 * Math.PI) / s.k;
+    expect(L / s.c).toBeCloseTo(20, 6);
+    expect(s.c).toBeGreaterThan(Math.sqrt(g * 3) * 0.95);
+  });
+  it('is close to the numerical stream-function solution for long, low waves', () => {
+    // Long waves (Ursell number in the hundreds): KdV is first order in H/h, so the profile is
+    // checked to 5 % of H, the wavenumber to 2 %.
+    for (const cs of [
+      { height: 0.3, period: 25, depth: 3 },
+      { height: 0.6, period: 20, depth: 3 },
+      { height: 0.45, period: 30, depth: 2.5 },
+    ]) {
+      const s = solveCnoidal({ ...cs, gravity: g });
+      const ref = fourierWave(cs.height, cs.period, cs.depth, g, 32, 12);
+      expect(Math.abs(s.k - ref.k) / ref.k).toBeLessThan(0.02);
+      let worst = 0;
+      for (let i = 0; i <= 180; i++) {
+        const th = (Math.PI * i) / 180;
+        const e = s.harmonics.reduce((a, h, j) => a + h * Math.cos((j + 1) * th), 0);
+        worst = Math.max(worst, Math.abs(e - ref.eta(th)));
+      }
+      expect(worst / cs.height).toBeLessThan(0.05);
+    }
+  });
+  it('reports a small truncation error for the 24-harmonic series', () => {
+    const s = solveCnoidal({ height: 0.6, period: 20, depth: 3, gravity: g });
+    expect(s.truncationError).toBeLessThan(0.01);
+  });
+  it('clamps at H/h = 0.78 with a notice, and notes low Ursell numbers', () => {
+    const s = solveCnoidal({ height: 3, period: 20, depth: 3, gravity: g });
+    expect(s.clamped).toBe(true);
+    expect(s.heightUsed).toBeCloseTo(0.78 * 3, 6);
+    const low = solveCnoidal({ height: 0.5, period: 6, depth: 20, gravity: g });
+    expect(low.notice).toMatch(/Ursell/);
   });
 });
