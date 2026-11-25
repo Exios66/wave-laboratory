@@ -26,6 +26,8 @@ export interface PostSettings {
   taa: boolean;
   /** Rain and spray drops on the lens in storms (never on the lite tier). */
   lens: boolean;
+  /** Sun shafts through broken cloud and past rigging (never on the lite tier). */
+  shafts: boolean;
 }
 
 export const DEFAULT_POST: PostSettings = {
@@ -34,6 +36,7 @@ export const DEFAULT_POST: PostSettings = {
   vignette: false,
   taa: false,
   lens: false,
+  shafts: false,
 };
 
 export type OverlayMode = 'none' | 'height' | 'steepness' | 'foam';
@@ -90,6 +93,8 @@ export interface RendererStats {
   taa: boolean;
   /** True while raindrops or spray are drawn on the lens. */
   lens: boolean;
+  /** True while sun shafts are drawn. */
+  shafts: boolean;
   /** GPU objects alive (three's `renderer.info.memory`): a leak shows as steady growth. */
   geometries: number;
   textures: number;

@@ -136,3 +136,50 @@ describe('PostStack wet lens', () => {
     expect(post.lensRunning).toBe(false);
   });
 });
+
+describe('PostStack sun shafts', () => {
+  const sun = { x: 0.5, y: 0.7, strength: 0.6, tint: [1, 0.9, 0.8] as const };
+
+  it('run only when asked for, with some strength, above water', () => {
+    const { post } = setup();
+    post.setSunShafts(sun);
+    expect(post.shaftsRunning).toBe(false);
+    post.setSettings({ ...DEFAULT_POST, shafts: true });
+    // Without bloom the sun never reaches the mask's HDR threshold, so the pass stays off.
+    expect(post.shaftsRunning).toBe(false);
+    post.setSettings({ ...DEFAULT_POST, bloom: true, shafts: true });
+    expect(post.shaftsRunning).toBe(true);
+    expect(post.active).toBe(true);
+    post.setSunShafts({ ...sun, strength: 0 });
+    expect(post.shaftsRunning).toBe(false);
+    post.setSettings({ ...DEFAULT_POST, shafts: true });
+    expect(post.active).toBe(false);
+    post.setSettings({ ...DEFAULT_POST, bloom: true, shafts: true });
+    post.setSunShafts(sun);
+    post.setUnderwater(UNDER);
+    expect(post.shaftsRunning).toBe(false);
+    post.setUnderwater(null);
+    post.setSunShafts(null);
+    expect(post.shaftsRunning).toBe(false);
+  });
+
+  it('never run without half-float targets or on the light tier', () => {
+    expect(
+      (() => {
+        const { post } = setup(false);
+        post.setSettings({ ...DEFAULT_POST, bloom: true, shafts: true });
+        post.setSunShafts(sun);
+        return post.shaftsRunning;
+      })(),
+    ).toBe(false);
+    const light = new PostStack(
+      fakeRenderer(),
+      new THREE.Scene(),
+      new THREE.PerspectiveCamera(),
+      'light',
+    );
+    light.setSettings({ ...DEFAULT_POST, bloom: true, shafts: true });
+    light.setSunShafts(sun);
+    expect(light.shaftsRunning).toBe(false);
+  });
+});

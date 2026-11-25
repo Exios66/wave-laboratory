@@ -7,6 +7,9 @@ import * as THREE from 'three';
 import { GpuTimer } from './gpuTimer';
 import { ScenePrepass } from './water/ScenePrepass';
 import { SkyEnvironment } from './sky/SkyEnvironment';
+import { cloudDeck } from './sky/clouds';
+import { CloudMap } from './sky/cloudMap';
+import { shaftStrength, sunScreen, type SunOnScreen } from './post/sunShafts';
 import { smoothstep } from '../core/mathUtil';
 import { rotate, type Quat, type Vec3 } from '../core/vec';
 import type { GpuOceanData } from '../ocean/gpuData';
@@ -113,6 +116,8 @@ import { ForeAftRigView } from './scene/foreAftRig';
 import { decideCapabilities, readCapabilities, type CapabilityDecision } from './capabilities';
 import { RigView } from './scene/rig';
 import { WakeField, type WakeSource } from './scene/wakes';
+import { HullWetState } from './vessel/hullWetting';
+import { applyHullWetting, type HullWetHandle } from './vessel/hullWettingMaterial';
 import {
   clampBelowSurface,
   fallbackFogDensity,
@@ -160,6 +165,8 @@ const BUDGET: Record<
     rain: number;
     spray: number;
     octaves: number;
+    /** Steps marched through the volumetric cloud deck (0 = the flat deck). */
+    cloudSteps: number;
     detail: number;
     foam: number;
     scene: number;
@@ -167,11 +174,22 @@ const BUDGET: Record<
     shadow: number;
   }
 > = {
-  low: { rain: 1200, spray: 500, octaves: 3, detail: 3, foam: 0, scene: 0, ibl: false, shadow: 0 },
+  low: {
+    rain: 1200,
+    spray: 500,
+    octaves: 3,
+    cloudSteps: 0,
+    detail: 3,
+    foam: 0,
+    scene: 0,
+    ibl: false,
+    shadow: 0,
+  },
   medium: {
     rain: 3500,
     spray: 1400,
     octaves: 4,
+    cloudSteps: 4,
     detail: 4,
     foam: 1,
     scene: 1,
@@ -182,6 +200,7 @@ const BUDGET: Record<
     rain: 7000,
     spray: 2600,
     octaves: 5,
+    cloudSteps: 6,
     detail: 4,
     foam: 2,
     scene: 2,
@@ -192,6 +211,7 @@ const BUDGET: Record<
     rain: 11000,
     spray: 4000,
     octaves: 6,
+    cloudSteps: 8,
     detail: 4,
     foam: 3,
     scene: 2,
@@ -235,6 +255,8 @@ interface VesselView {
   smokeFrom: Vec3;
   /** Bounds of hull and superstructure in the group's (Three.js body) axes. */
   bounds: THREE.Box3;
+  /** How high the sea has wetted the hull, and the shader uniform that draws it. */
+  wetting: { state: HullWetState; handle: HullWetHandle };
 }
 
 /** Hull and superstructure bounds of a vessel, in its group's Three.js body axes. */
@@ -365,6 +387,7 @@ export class LabRenderer implements LabRendererApi {
     cameraDepth: 0,
     taa: false,
     lens: false,
+    shafts: false,
     geometries: 0,
     textures: 0,
     frames: 0,
@@ -381,6 +404,7 @@ export class LabRenderer implements LabRendererApi {
   private readonly hemi: THREE.HemisphereLight;
   private readonly lighting: SkyLighting;
   private readonly skyEnv: SkyEnvironment;
+  private readonly cloudMap = new CloudMap();
   /** Lightning flash this frame (0 … 1). */
   private flash = 0;
   private readonly islands = new IslandLayer();
@@ -463,6 +487,9 @@ export class LabRenderer implements LabRendererApi {
   private duckMode = false;
   /** Time-of-day factors from SkyLighting (night, dusk, exposure and hemisphere tint). */
   private lightState: LightingState | null = null;
+  /** Reused every frame by `updateSunShafts` (no per-frame allocation). */
+  private readonly shaftScreen: SunOnScreen = { x: 0, y: 0, facing: 0 };
+  private readonly shaftParams = { x: 0, y: 0, strength: 0, tint: [1, 1, 1] as number[] };
   /** Last frame's weather at the camera, as 0–1 storm intensity and wind [m/s]. */
   private weatherStorm = 0;
   private localWind = 0;
@@ -493,6 +520,7 @@ export class LabRenderer implements LabRendererApi {
   private shownT = 0;
   private readonly quatA = new THREE.Quaternion();
   private readonly quatB = new THREE.Quaternion();
+  private readonly quatInv = new THREE.Quaternion();
   private mode: CameraMode = 'orbit';
   private cameraTarget: string | null = null;
   private selection: string | null = null;
@@ -648,6 +676,10 @@ export class LabRenderer implements LabRendererApi {
       uSkyTime: { value: 0 },
       uCloudDrift: { value: new THREE.Vector2() },
       uCloudOctaves: { value: 5 },
+      uCloudSteps: { value: 0 },
+      uCloudDeck: { value: new THREE.Vector2(1.2, 1.55) },
+      uCloudMapTex: { value: this.cloudMap.target.texture },
+      uCloudMap: { value: this.cloudMap.origin },
       uWhitecap: { value: 0 },
       uWindDir: { value: new THREE.Vector2(1, 0) },
       uRain: { value: 0 },
@@ -688,6 +720,10 @@ export class LabRenderer implements LabRendererApi {
           uSkyTime: u.uSkyTime!,
           uCloudDrift: u.uCloudDrift!,
           uCloudOctaves: u.uCloudOctaves!,
+          uCloudSteps: u.uCloudSteps!,
+          uCloudDeck: u.uCloudDeck!,
+          uCloudMapTex: u.uCloudMapTex!,
+          uCloudMap: u.uCloudMap!,
           uFogDensity: u.uFogDensity!,
         },
         vertexShader: SKY_VERT,
@@ -752,6 +788,7 @@ export class LabRenderer implements LabRendererApi {
       this.post.restore();
       this.gpuTimer.reset();
       this.skyEnv.invalidate();
+      this.cloudMap.invalidate();
       this.clearShadowFallback();
       opts.onContextRestored?.();
     };
@@ -919,6 +956,7 @@ export class LabRenderer implements LabRendererApi {
   private applyQualityUniforms(): void {
     const b = BUDGET[this.quality];
     this.ocean.uniforms.uCloudOctaves!.value = b.octaves;
+    this.ocean.uniforms.uCloudSteps!.value = b.cloudSteps;
     this.ocean.uniforms.uDetailCascades!.value = b.detail;
     this.ocean.setFoamCascades(b.foam);
   }
@@ -974,6 +1012,8 @@ export class LabRenderer implements LabRendererApi {
       this.windThree.set(0, 0, 0);
     }
     u.uCloud!.value = cloud;
+    const deck = cloudDeck(cloud);
+    (u.uCloudDeck!.value as THREE.Vector2).set(deck.baseKm, deck.topKm);
     u.uFlash!.value = flash;
     u.uRain!.value = rain;
     u.uWind!.value = wind;
@@ -1548,12 +1588,22 @@ export class LabRenderer implements LabRendererApi {
     this.applyUnderwater();
     // The prepass stage also carries the sky environment refresh (cube camera and PMREM).
     this.gpuTimer.begin('prepass');
+    if ((this.ocean.uniforms.uCloudSteps!.value as number) > 0) {
+      const c = this.camera.position;
+      this.cloudMap.update(
+        this.renderer,
+        c.x * 1e-3,
+        c.z * 1e-3,
+        this.ocean.uniforms.uCloudDrift!.value as THREE.Vector2,
+      );
+    }
     this.updateEnvironment();
     this.updateShadows();
     // TAA: the prepass and the scene draw share this frame's sub-pixel jitter (the ocean samples
     // the prepass by fragment position). Riding in a plane, the aircraft moves with the camera,
     // which camera-only reprojection cannot follow: no TAA there.
     this.post.setTaaAllowed(this.mode !== 'plane');
+    this.updateSunShafts();
     this.post.beginJitter();
     this.drawPrepass();
     this.gpuTimer.end();
@@ -1567,6 +1617,7 @@ export class LabRenderer implements LabRendererApi {
     this.post.endJitter();
     this.stats.taa = this.post.taaRunning;
     this.stats.lens = this.post.lensRunning;
+    this.stats.shafts = this.post.shaftsRunning;
     this.gpuTimer.end();
     this.stats.gpuMs = this.gpuTimer.ms;
     this.stats.gpuPasses = this.gpuTimer.passes;
@@ -1588,6 +1639,30 @@ export class LabRenderer implements LabRendererApi {
       this.fpsFrames = 0;
       this.fpsElapsed = 0;
     }
+  }
+
+  /** Sun shafts: where the sun is on screen and how strongly its light streams this frame. */
+  private updateSunShafts(): void {
+    const u = this.ocean.uniforms;
+    const sunDir = u.uSunDir!.value as THREE.Vector3;
+    const screen = sunScreen(sunDir, this.camera, this.shaftScreen);
+    const p = this.shaftParams;
+    p.x = screen.x;
+    p.y = screen.y;
+    p.strength = shaftStrength({
+      sunY: sunDir.y,
+      cloud: u.uCloud!.value as number,
+      fogDensity: u.uFogDensity!.value as number,
+      night: this.lightState?.night ?? 0,
+      facing: screen.facing,
+      x: screen.x,
+      y: screen.y,
+    });
+    const tint = u.uSunTint?.value as THREE.Vector3 | undefined;
+    p.tint[0] = tint?.x ?? 1;
+    p.tint[1] = tint?.y ?? 1;
+    p.tint[2] = tint?.z ?? 1;
+    this.post.setSunShafts(p);
   }
 
   /**
@@ -1716,6 +1791,7 @@ export class LabRenderer implements LabRendererApi {
       dusk: ls?.dusk ?? 0,
       level: this.daylight,
       cloudDrift: u.uCloudDrift!.value as THREE.Vector2,
+      eye: this.camera.position,
     });
     this.scene.environment = this.skyEnv.texture;
     if (this.scene.environment) {
@@ -1882,17 +1958,34 @@ export class LabRenderer implements LabRendererApi {
       const sub = def.submarine !== null;
       const bowX = sub ? def.points.bridge.x + 1.5 : def.points.bow.x;
       const sternX = sub ? def.points.bridge.x - 1.5 : def.points.propeller.x;
+      const speed = Math.hypot(state.velocity.x - current.x, state.velocity.y - current.y);
+      // How high the sea has climbed the topsides: the hull's roll about its own axis.
+      const up = this.tmpV
+        .set(0, 1, 0)
+        .applyQuaternion(this.quatInv.copy(view.group.quaternion).invert());
+      const wet = view.wetting.state.step(
+        t,
+        this.hs,
+        Math.atan2(up.z, up.y),
+        p.y,
+        speed,
+        def.length,
+        def.beam,
+      );
+      view.wetting.handle.wet.set(wet.side, wet.bow);
       sources.push({
         id: state.id,
         length: sub ? 6 : def.length,
         beam: sub ? 1.2 : def.beam,
         bow: { x: p.x + (fx / norm) * bowX, y: -p.z + (fy / norm) * bowX },
         stern: { x: p.x + (fx / norm) * sternX, y: -p.z + (fy / norm) * sternX },
-        speed: Math.hypot(state.velocity.x - current.x, state.velocity.y - current.y),
+        speed,
+        // A submerged submarine has no collar or bow cushion.
+        contact: sub ? 0 : 1,
       });
     }
     this.traffic.appendWakeSources(sources, Math.max(0, 8 - sources.length));
-    this.wakes.update(t, sources, { x: current.x * t, y: current.y * t });
+    this.wakes.update(t, sources, { x: current.x * t, y: current.y * t }, this.hs);
     this.ocean.uniforms.uWakeCount!.value = this.wakes.count;
   }
 
@@ -1998,6 +2091,7 @@ export class LabRenderer implements LabRendererApi {
     this.ocean.dispose();
     this.prepass.dispose();
     this.skyEnv.dispose();
+    this.cloudMap.dispose();
     this.shadowFallback.dispose();
     this.oceanMesh.geometry.dispose();
     (this.oceanMesh.material as THREE.Material).dispose();
@@ -2028,6 +2122,13 @@ export class LabRenderer implements LabRendererApi {
       hullMat.normalMap = detailTextures().plate;
       hullMat.normalScale.set(0.35, 0.35);
     }
+    // The sea climbs the topsides: a wet band above the moving waterline (vessel/hullWetting.ts).
+    const wetHandle = applyHullWetting(
+      hullMat,
+      this.ocean.uniforms,
+      definition.points.propeller.x,
+      definition.points.bow.x,
+    );
     materials.push(hullMat);
     group.add(
       this.meshFromHull(
@@ -2220,6 +2321,7 @@ export class LabRenderer implements LabRendererApi {
       shownHealth: 1,
       smokeFrom,
       bounds: vesselBounds(definition),
+      wetting: { state: new HullWetState(), handle: wetHandle },
     };
     this.applyDuck(view);
     return view;

@@ -53,6 +53,30 @@
   the light tier (phones, software GPUs) has no MSAA either way. The settings are display
   preferences (`wave-lab:display`), resolved against the device and quality in
   `resolvePostSettings`, not part of the experiment.
+- **Sky and clouds.** The sky GLSL in `render/ocean/shaders.ts` is shared by the dome, the 64 px
+  sky-environment cube (drawn from the camera position) and the water's reflection. Clouds are a
+  world-anchored deck: `render/sky/cloudMap.ts` bakes the raw fractal coverage into a 1024² map
+  covering 72 km, redrawn only when the eye moves more than 9 km, and the cover threshold is applied
+  at sampling, so a weather change needs no redraw. The dome marches the deck (`cloudSteps` 0/4/6/8
+  for low/medium/high/ultra; 0 keeps the flat deck), so the Plane view can climb into or above
+  it. The water reflection and the underwater Snell window march from the water surface, not the
+  camera, and take a single cloud sample, and the water
+  darkens under the same map (cloud shadows). `render/sky/clouds.ts` holds the pure TypeScript
+  mirror (slab span, phase function, march weights) that the unit tests check.
+- **Sun shafts.** `render/post/SunShaftPass.ts` runs after the scene marker in `PostStack`: a
+  quarter-resolution mask of bright sky from the depth texture, a radial march toward the sun's
+  screen position, and an additive composite tinted by the sunlight. `post/sunShafts.ts` decides
+  the strength each frame (0 at night, with the sun behind the camera or well off screen, and under
+  full overcast; strongest in haze with broken cloud). The pass is enabled only when it would draw
+  (bloom on, since the mask keys on the HDR sun; not underwater; not on the light tier;
+  display setting `sunShafts` `auto|on|off`).
+- **Hull–water contact.** `render/vessel/hullWettingMaterial.ts` hooks each hull's material
+  (`onBeforeCompile`, its own program cache key) and evaluates the sea surface per vertex with the
+  same `OCEAN_DISPLACEMENT_GLSL` the ocean uses, so the darker, glossier wet band, drip streaks and
+  foam line follow the real waterline. `vessel/hullWetting.ts` steps the band's height envelope
+  (fast rise, slow fall) from heave, roll, speed and Hs. The foam collar, bow cushion and bow-wave
+  crest are terms in the existing wake shader, driven by `WakeSource.contact` (1 for surface hulls,
+  0 for a submerged submarine), so they add no draw calls.
 - **Underwater view.** The renderer has no CPU ocean height, so the main thread sends the camera
   position with each `advance`/`step` message (`cameraProbe`, only while the camera is low enough
   to matter) and the worker answers with `SimFrame.cameraSurface` (`OceanField.surface`: η and
